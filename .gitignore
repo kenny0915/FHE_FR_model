@@ -1,0 +1,54 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and runtime outputs
+*.log
+runs/
+logs/
+wandb/
+tensorboard/
+
+# Training outputs and model artifacts
+work_dirs/
+checkpoints/
+outputs/
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.npy
+*.npz
+
+# Local datasets and evaluation data
+faces_webface_112x112/
+ijb/
+IJB_release/
+datasets/
+data/
+*.rec
+*.idx
+*.bin
+*.lst
+
+# Large local archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
