@@ -5,6 +5,8 @@ import threading
 from typing import Iterable
 
 import numpy as np
+
+import mxnet as mx
 if not hasattr(np, 'PZERO'):
     np.PZERO = 0.0
 if not hasattr(np, 'NZERO'):
@@ -192,7 +194,7 @@ class MXFaceDataset(Dataset):
         label = header.label
         if not isinstance(label, numbers.Number):
             label = label[0]
-        label = torch.tensor(label, dtype=torch.long)
+        label = torch.tensor(int(label), dtype=torch.long)
         sample = mx.image.imdecode(img).asnumpy()
         if self.transform is not None:
             sample = self.transform(sample)

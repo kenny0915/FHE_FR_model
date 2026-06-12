@@ -280,13 +280,13 @@ class PoolFormer(nn.Module):
                  mlp_ratios=None, downsamples=None, 
                  pool_size=3, 
                  norm_layer=GroupNorm, act_layer=nn.GELU, 
-                 num_classes=1000,
-                 in_patch_size=7, in_stride=4, in_pad=2, 
+                 num_classes=512, # modify the num_classes for face recognition
+                 in_patch_size=3, in_stride=2, in_pad=1, # modify the patch embedding for face recognition
                  down_patch_size=3, down_stride=2, down_pad=1, 
                  drop_rate=0., drop_path_rate=0.,
                  use_layer_scale=True, layer_scale_init_value=1e-5, 
                  fork_feat=False,
-                 face_embedding=False,
+                 face_embedding=True,
                  fp16=False,
                  init_cfg=None, 
                  pretrained=None, 
@@ -345,11 +345,15 @@ class PoolFormer(nn.Module):
                 self.add_module(layer_name, layer)
         else:
             self.norm = norm_layer(embed_dims[-1])
+            # modify the head for face recognition, which is a conv layer followed by a linear layer
             if face_embedding:
                 self.head = nn.Sequential(
+                    nn.Conv2d(embed_dims[-1], embed_dims[-1], kernel_size=(7,7), stride=(1,1), padding=(0,0), groups=1),
+                    nn.BatchNorm2d(num_features=embed_dims[-1]),
+                    nn.Flatten(),
                     nn.Linear(embed_dims[-1], num_classes, bias=False),
-                    nn.BatchNorm1d(num_classes, eps=2e-5),
-                )
+                    nn.BatchNorm1d(num_classes))
+
             else:
                 # Classifier head
                 self.head = nn.Linear(
@@ -443,8 +447,10 @@ class PoolFormer(nn.Module):
             # otuput features of four stages for dense prediction
             return x
         x = self.norm(x)
+        if self.face_embedding:
+            return self.head(x.float() if self.fp16 else x)
         x = x.mean([-2, -1])
-        cls_out = self.head(x.float() if self.fp16 or self.face_embedding else x)
+        cls_out = self.head(x)
         # for image classification
         return cls_out
 

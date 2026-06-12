@@ -1,7 +1,7 @@
 ### iresnet50
 # train
-CUDA_VISIBLE_DEVICES=1 torchrun \
-    --master_port=29511 \
+CUDA_VISIBLE_DEVICES=0 torchrun \
+    --master_port=29500 \
     --nproc_per_node=1 \
     train_v2.py configs/casia_r50
 
@@ -17,13 +17,16 @@ CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
 
 ## poolformer_s36
 # train
-CUDA_VISIBLE_DEVICES=1 torchrun \
-    --master_port=29511 \
-    --nproc_per_node=1 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+    --nproc_per_node=4 \
     train_v2.py configs/casia_poolformer_s36
 
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+    --nproc_per_node=4 \
+    train_v2.py configs/ms1mv3_poolformer_s36
+
 # test
-CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
+CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
   --model-prefix work_dirs/casia_poolformer_s36/model.pt \
   --image-path ijb/IJBC \
   --result-dir work_dirs/casia_poolformer_s36/ijbc_result \
@@ -35,7 +38,7 @@ CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
 ## mbf
 # train
 CUDA_VISIBLE_DEVICES=0 torchrun \
-    --master_port=29511 \
+    --master_port=29500 \
     --nproc_per_node=1 \
     train_v2.py configs/casia_mbf
 

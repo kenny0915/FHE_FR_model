@@ -2,7 +2,86 @@ from .iresnet import iresnet18, iresnet34, iresnet50, iresnet100, iresnet200
 from .mobilefacenet import get_mbf
 
 
+def iresnet18_no_relu(pretrained=False, progress=True, **kwargs):
+    from .iresnet_no_relu import iresnet18 as _iresnet18_no_relu
+    return _iresnet18_no_relu(pretrained=pretrained, progress=progress, **kwargs)
+
+
+def iresnet34_no_relu(pretrained=False, progress=True, **kwargs):
+    from .iresnet_no_relu import iresnet34 as _iresnet34_no_relu
+    return _iresnet34_no_relu(pretrained=pretrained, progress=progress, **kwargs)
+
+
+def iresnet50_no_relu(pretrained=False, progress=True, **kwargs):
+    from .iresnet_no_relu import iresnet50 as _iresnet50_no_relu
+    return _iresnet50_no_relu(pretrained=pretrained, progress=progress, **kwargs)
+
+
+def iresnet100_no_relu(pretrained=False, progress=True, **kwargs):
+    from .iresnet_no_relu import iresnet100 as _iresnet100_no_relu
+    return _iresnet100_no_relu(pretrained=pretrained, progress=progress, **kwargs)
+
+
+def iresnet200_no_relu(pretrained=False, progress=True, **kwargs):
+    from .iresnet_no_relu import iresnet200 as _iresnet200_no_relu
+    return _iresnet200_no_relu(pretrained=pretrained, progress=progress, **kwargs)
+
+
+def get_mbf_no_relu(fp16=False, num_features=512, blocks=(1, 4, 6, 2), scale=2):
+    from .mobilefacenet_no_relu import get_mbf as _get_mbf_no_relu
+    return _get_mbf_no_relu(
+        fp16=fp16,
+        num_features=num_features,
+        blocks=blocks,
+        scale=scale,
+    )
+
+
+def get_mbf_large_no_relu(fp16=False, num_features=512, blocks=(2, 8, 12, 4), scale=4):
+    from .mobilefacenet_no_relu import get_mbf_large as _get_mbf_large_no_relu
+    return _get_mbf_large_no_relu(
+        fp16=fp16,
+        num_features=num_features,
+        blocks=blocks,
+        scale=scale,
+    )
+
+
 def get_model(name, **kwargs):
+    # no-ReLU / FHE-friendly CryptoFace polynomial variants
+    if name in ("r18_no_relu"):
+        return iresnet18_no_relu(False, **kwargs)
+    elif name in ("r34_no_relu"):
+        return iresnet34_no_relu(False, **kwargs)
+    elif name in ("r50_no_relu"):
+        return iresnet50_no_relu(False, **kwargs)
+    elif name in ("r100_no_relu"):
+        return iresnet100_no_relu(False, **kwargs)
+    elif name in ("r200_no_relu"):
+        return iresnet200_no_relu(False, **kwargs)
+    elif name in ("mbf_no_relu"):
+        fp16 = kwargs.get("fp16", False)
+        num_features = kwargs.get("num_features", 512)
+        blocks = kwargs.get("blocks", (1, 4, 6, 2))
+        scale = kwargs.get("scale", 2)
+        return get_mbf_no_relu(
+            fp16=fp16,
+            num_features=num_features,
+            blocks=blocks,
+            scale=scale,
+        )
+    elif name in ("mbf_large_no_relu"):
+        fp16 = kwargs.get("fp16", False)
+        num_features = kwargs.get("num_features", 512)
+        blocks = kwargs.get("blocks", (2, 8, 12, 4))
+        scale = kwargs.get("scale", 4)
+        return get_mbf_large_no_relu(
+            fp16=fp16,
+            num_features=num_features,
+            blocks=blocks,
+            scale=scale,
+        )
+
     # editable local copy of the default IResNet implementation
     if name == "custom_r18":
         from .iresnet_custom import iresnet18 as custom_iresnet18
@@ -136,4 +215,4 @@ def get_model(name, **kwargs):
             num_heads=8, drop_path_rate=0.1, norm_layer="ln", mask_ratio=0, using_checkpoint=True)
 
     else:
-        raise ValueError()
+        raise ValueError(f"Unknown model name: {name}")
