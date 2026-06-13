@@ -172,6 +172,10 @@ def main(args):
 
     loss_am = AverageMeter()
     amp = torch.cuda.amp.grad_scaler.GradScaler(growth_interval=100)
+    grad_clip = float(getattr(cfg, "gradient_clip", 5.0))
+    clipped_params = [
+        p for group in opt.param_groups for p in group["params"] if p.requires_grad
+    ]
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
@@ -186,14 +190,14 @@ def main(args):
                 amp.scale(loss).backward()
                 if global_step % cfg.gradient_acc == 0:
                     amp.unscale_(opt)
-                    torch.nn.utils.clip_grad_norm_(backbone.parameters(), 5)
+                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip)
                     amp.step(opt)
                     amp.update()
                     opt.zero_grad()
             else:
                 loss.backward()
                 if global_step % cfg.gradient_acc == 0:
-                    torch.nn.utils.clip_grad_norm_(backbone.parameters(), 5)
+                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip)
                     opt.step()
                     opt.zero_grad()
             lr_scheduler.step()

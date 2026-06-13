@@ -1,17 +1,19 @@
+"""IResNet variant with FHE-compatible polynomial activations.
+
+CryptoFace/AESPA replace ReLU/PReLU-style nonlinearities with low-degree
+polynomial activations. A deep residual network is very sensitive to the
+activation scale, so this implementation uses an AESPA-style basis-normalized
+quadratic instead of a fixed monic square:
+
+    y = a * BN((x^2 - 1) / sqrt(2)) + b * BN(x) + c
+
+At inference time the normalization statistics are constants and can be folded
+into the polynomial coefficients, so the operation remains compatible with CKKS
+FHE arithmetic. Initializing close to identity avoids the exploding gradients
+caused by starting every activation as x^2 + alpha*x + beta.
 """
-IResNet variant with FHE-compatible polynomial activations.
 
-CryptoFace replaces ReLU/PReLU-style nonlinearities with low-degree polynomial
-activation (HerPN).  This file keeps the original IResNet topology, but removes
-all PReLU modules and uses a quadratic, CryptoFace-style shifted HerPN:
-
-    y = x^2 + alpha * x + beta
-
-This form uses only additions and multiplications, so it is compatible with CKKS
-FHE inference.  The leading quadratic coefficient is fixed to 1, matching the
-CryptoFace shifted formulation where the original coefficient a of
-(a*x^2 + b*x + c) is folded into the following convolution weight.
-"""
+import math
 
 import torch
 from torch import nn
@@ -51,43 +53,63 @@ def conv1x1(in_planes, out_planes, stride=1):
 
 
 class CryptoFacePolyAct2d(nn.Module):
-    """Quadratic FHE-compatible activation used instead of ReLU/PReLU.
+    """Stable degree-2 FHE-compatible activation used instead of PReLU.
 
-    The CryptoFace paper uses low-degree polynomial activation (HerPN) and then
-    shifts the degree-2 polynomial
-
-        a*x^2 + b*x + c
-
-    into the monic form
-
-        x^2 + (b/a)*x + (c/a)
-
-    by folding the leading coefficient a into the following convolution.  This
-    module implements that monic form directly:
-
-        y = x^2 + alpha*x + beta
-
-    Parameters are stored per channel by default, matching nn.PReLU(num_channels)
-    behavior while remaining FHE-friendly.
+    AESPA's basis-wise normalization is important for trainability: raw
+    monomials such as x^2 have much larger variance and gradients than x. The
+    learnable coefficients are bounded with tanh so a late training spike cannot
+    turn the activation into an unbounded square-dominant map.
     """
 
     def __init__(
         self,
         num_channels: int,
-        init_alpha: float = 0.5,
-        init_beta: float = 0.0,
+        init_quadratic: float = 0.05,
+        init_linear: float = 1.0,
+        init_bias: float = 0.0,
+        max_quadratic: float = 0.25,
+        max_linear: float = 2.0,
+        max_bias: float = 2.0,
         per_channel: bool = True,
     ):
         super().__init__()
         if num_channels <= 0:
             raise ValueError('num_channels must be positive')
-        shape = (1, num_channels, 1, 1) if per_channel else (1, 1, 1, 1)
-        self.alpha = nn.Parameter(torch.full(shape, float(init_alpha)))
-        self.beta = nn.Parameter(torch.full(shape, float(init_beta)))
+        coeff_shape = (1, num_channels, 1, 1) if per_channel else (1, 1, 1, 1)
+
+        self.bn_linear = nn.BatchNorm2d(num_channels, eps=1e-05, affine=False)
+        self.bn_quadratic = nn.BatchNorm2d(num_channels, eps=1e-05, affine=False)
+        self.max_quadratic = float(max_quadratic)
+        self.max_linear = float(max_linear)
+        self.max_bias = float(max_bias)
+        self.quadratic = nn.Parameter(
+            self._inverse_bounded_value(init_quadratic, self.max_quadratic, coeff_shape)
+        )
+        self.linear = nn.Parameter(
+            self._inverse_bounded_value(init_linear, self.max_linear, coeff_shape)
+        )
+        self.bias = nn.Parameter(
+            self._inverse_bounded_value(init_bias, self.max_bias, coeff_shape)
+        )
+
+    @staticmethod
+    def _inverse_bounded_value(value, bound, shape):
+        if bound <= 0:
+            raise ValueError('coefficient bounds must be positive')
+        ratio = max(min(float(value) / float(bound), 0.999), -0.999)
+        return torch.full(shape, math.atanh(ratio))
+
+    def _bounded_coefficients(self, dtype, device):
+        quadratic = self.max_quadratic * torch.tanh(self.quadratic).to(dtype=dtype, device=device)
+        linear = self.max_linear * torch.tanh(self.linear).to(dtype=dtype, device=device)
+        bias = self.max_bias * torch.tanh(self.bias).to(dtype=dtype, device=device)
+        return quadratic, linear, bias
 
     def forward(self, x):
-        # Only addition and multiplication: FHE-compatible polynomial op.
-        return x * x + self.alpha.to(dtype=x.dtype, device=x.device) * x + self.beta.to(dtype=x.dtype, device=x.device)
+        h1 = self.bn_linear(x)
+        h2 = self.bn_quadratic((x * x - 1.0) * (1.0 / math.sqrt(2.0)))
+        quadratic, linear, bias = self._bounded_coefficients(x.dtype, x.device)
+        return quadratic * h2 + linear * h1 + bias
 
 
 class IBasicBlock(nn.Module):
@@ -212,8 +234,10 @@ class IResNet(nn.Module):
             if isinstance(m, nn.Conv2d):
                 nn.init.normal_(m.weight, 0, 0.1)
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+                if m.weight is not None:
+                    nn.init.constant_(m.weight, 1)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
 
         if zero_init_residual:
             for m in self.modules():
