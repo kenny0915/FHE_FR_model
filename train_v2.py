@@ -184,20 +184,24 @@ def main(args):
         for _, (img, local_labels) in enumerate(train_loader):
             global_step += 1
             local_embeddings = backbone(img)
+            if not torch.isfinite(local_embeddings).all():
+                raise FloatingPointError(f"Non-finite embeddings at global_step={global_step}")
             loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
+            if not torch.isfinite(loss):
+                raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
 
             if cfg.fp16:
                 amp.scale(loss).backward()
                 if global_step % cfg.gradient_acc == 0:
                     amp.unscale_(opt)
-                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip)
+                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
                     amp.step(opt)
                     amp.update()
                     opt.zero_grad()
             else:
                 loss.backward()
                 if global_step % cfg.gradient_acc == 0:
-                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip)
+                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
                     opt.step()
                     opt.zero_grad()
             lr_scheduler.step()

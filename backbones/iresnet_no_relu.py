@@ -64,11 +64,11 @@ class CryptoFacePolyAct2d(nn.Module):
     def __init__(
         self,
         num_channels: int,
-        init_quadratic: float = 0.05,
+        init_quadratic: float = 0.0,
         init_linear: float = 1.0,
         init_bias: float = 0.0,
-        max_quadratic: float = 0.25,
-        max_linear: float = 2.0,
+        max_quadratic: float = 0.10,
+        max_linear: float = 1.50,
         max_bias: float = 2.0,
         per_channel: bool = True,
     ):
@@ -133,7 +133,6 @@ class IBasicBlock(nn.Module):
             raise NotImplementedError('Dilation > 1 not supported in BasicBlock')
         self.bn1 = nn.BatchNorm2d(inplanes, eps=1e-05)
         self.conv1 = conv3x3(inplanes, planes)
-        self.bn2 = nn.BatchNorm2d(planes, eps=1e-05)
         self.polyact = act_layer(planes)
         self.conv2 = conv3x3(planes, planes, stride)
         self.bn3 = nn.BatchNorm2d(planes, eps=1e-05)
@@ -145,7 +144,6 @@ class IBasicBlock(nn.Module):
 
         out = self.bn1(x)
         out = self.conv1(out)
-        out = self.bn2(out)
         out = self.polyact(out)
         out = self.conv2(out)
         out = self.bn3(out)
@@ -197,7 +195,6 @@ class IResNet(nn.Module):
         self.base_width = width_per_group
 
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(self.inplanes, eps=1e-05)
         self.polyact = act_layer(self.inplanes)
 
         self.layer1 = self._make_layer(block, 64, layers[0], stride=2)
@@ -242,7 +239,7 @@ class IResNet(nn.Module):
         if zero_init_residual:
             for m in self.modules():
                 if isinstance(m, IBasicBlock):
-                    nn.init.constant_(m.bn2.weight, 0)
+                    nn.init.constant_(m.bn3.weight, 0)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         downsample = None
@@ -293,7 +290,6 @@ class IResNet(nn.Module):
         # FHE backend; PyTorch autocast itself is not part of FHE evaluation.
         with torch.cuda.amp.autocast(enabled=self.fp16):
             x = self.conv1(x)
-            x = self.bn1(x)
             x = self.polyact(x)
             x = self.layer1(x)
             x = self.layer2(x)

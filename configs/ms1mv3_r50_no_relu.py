@@ -16,7 +16,7 @@ config.momentum = 0.9
 config.weight_decay = 5e-4
 config.gradient_clip = 1.0
 config.batch_size = 128
-config.lr = 0.05
+config.lr = 0.01
 config.verbose = 2000
 config.dali = False
 
@@ -24,5 +24,5 @@ config.rec = "./ms1m-retinaface-t1"
 config.num_classes = 93431
 config.num_image = 5179510
 config.num_epoch = 20
-config.warmup_epoch = 1
+config.warmup_epoch = 2
 config.val_targets = ['lfw', 'cfp_fp', "agedb_30"]
