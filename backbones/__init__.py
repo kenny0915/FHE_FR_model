@@ -155,6 +155,36 @@ def get_model(name, **kwargs):
             fp16=fp16,
         )
 
+    elif name in (
+        "poolformer_no_ln_s12",
+        "poolformer_no_ln_s24",
+        "poolformer_no_ln_s36",
+        "poolformer_no_ln_m36",
+        "poolformer_no_ln_m48",
+    ):
+        from .poolformer_no_ln import (
+            poolformer_s12,
+            poolformer_s24,
+            poolformer_s36,
+            poolformer_m36,
+            poolformer_m48,
+        )
+        poolformer_factory = {
+            "poolformer_no_ln_s12": poolformer_s12,
+            "poolformer_no_ln_s24": poolformer_s24,
+            "poolformer_no_ln_s36": poolformer_s36,
+            "poolformer_no_ln_m36": poolformer_m36,
+            "poolformer_no_ln_m48": poolformer_m48,
+        }[name]
+        fp16 = kwargs.get("fp16", False)
+        num_features = kwargs.get("num_features", 512)
+        return poolformer_factory(
+            pretrained=False,
+            num_classes=num_features,
+            face_embedding=True,
+            fp16=fp16,
+        )
+
     elif name == "vit_t":
         num_features = kwargs.get("num_features", 512)
         from .vit import VisionTransformer
