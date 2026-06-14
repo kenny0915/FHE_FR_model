@@ -1,16 +1,15 @@
-"""IResNet variant with FHE-compatible polynomial activations.
+"""IResNet variant with AESPA-style HerPN activations.
 
-CryptoFace/AESPA replace ReLU/PReLU-style nonlinearities with low-degree
-polynomial activations. A deep residual network is very sensitive to the
-activation scale, so this implementation uses an AESPA-style basis-normalized
-quadratic instead of a fixed monic square:
+AESPA replaces BN+ReLU blocks with HerPN: a fixed low-degree Hermite
+approximation of ReLU with basis-wise normalization, followed by learnable
+affine scale and shift.  This file adapts the residual block to the AESPA
+ResNet pattern:
 
-    y = a * BN((x^2 - 1) / sqrt(2)) + b * BN(x) + c
+    conv -> HerPN -> conv -> BN -> residual add -> HerPN
 
-At inference time the normalization statistics are constants and can be folded
-into the polynomial coefficients, so the operation remains compatible with CKKS
-FHE arithmetic. Initializing close to identity avoids the exploding gradients
-caused by starting every activation as x^2 + alpha*x + beta.
+The HerPN operation uses additions and multiplications, so its inference-time
+polynomial can be evaluated by HE/FHE backends after normalization statistics
+are folded into constants.
 """
 
 import math
@@ -53,63 +52,36 @@ def conv1x1(in_planes, out_planes, stride=1):
 
 
 class CryptoFacePolyAct2d(nn.Module):
-    """Stable degree-2 FHE-compatible activation used instead of PReLU.
+    """Degree-2 AESPA HerPN block for 2D feature maps.
 
-    AESPA's basis-wise normalization is important for trainability: raw
-    monomials such as x^2 have much larger variance and gradients than x. The
-    learnable coefficients are bounded with tanh so a late training spike cannot
-    turn the activation into an unbounded square-dominant map.
+    HerPN computes fixed Hermite-basis coefficients for ReLU, normalizes each
+    non-constant basis separately, accumulates them, then applies trainable
+    per-channel affine parameters gamma and beta.  The constant h0 basis becomes
+    zero after basis-wise normalization, so beta provides the learnable offset.
     """
 
-    def __init__(
-        self,
-        num_channels: int,
-        init_quadratic: float = 0.0,
-        init_linear: float = 1.0,
-        init_bias: float = 0.0,
-        max_quadratic: float = 0.10,
-        max_linear: float = 1.50,
-        max_bias: float = 2.0,
-        per_channel: bool = True,
-    ):
+    def __init__(self, num_channels: int, eps: float = 1e-05):
         super().__init__()
         if num_channels <= 0:
             raise ValueError('num_channels must be positive')
-        coeff_shape = (1, num_channels, 1, 1) if per_channel else (1, 1, 1, 1)
 
-        self.bn_linear = nn.BatchNorm2d(num_channels, eps=1e-05, affine=False)
-        self.bn_quadratic = nn.BatchNorm2d(num_channels, eps=1e-05, affine=False)
-        self.max_quadratic = float(max_quadratic)
-        self.max_linear = float(max_linear)
-        self.max_bias = float(max_bias)
-        self.quadratic = nn.Parameter(
-            self._inverse_bounded_value(init_quadratic, self.max_quadratic, coeff_shape)
-        )
-        self.linear = nn.Parameter(
-            self._inverse_bounded_value(init_linear, self.max_linear, coeff_shape)
-        )
-        self.bias = nn.Parameter(
-            self._inverse_bounded_value(init_bias, self.max_bias, coeff_shape)
-        )
+        self.bn_h1 = nn.BatchNorm2d(num_channels, eps=eps, affine=False)
+        self.bn_h2 = nn.BatchNorm2d(num_channels, eps=eps, affine=False)
+        self.gamma = nn.Parameter(torch.ones(1, num_channels, 1, 1))
+        self.beta = nn.Parameter(torch.zeros(1, num_channels, 1, 1))
 
-    @staticmethod
-    def _inverse_bounded_value(value, bound, shape):
-        if bound <= 0:
-            raise ValueError('coefficient bounds must be positive')
-        ratio = max(min(float(value) / float(bound), 0.999), -0.999)
-        return torch.full(shape, math.atanh(ratio))
-
-    def _bounded_coefficients(self, dtype, device):
-        quadratic = self.max_quadratic * torch.tanh(self.quadratic).to(dtype=dtype, device=device)
-        linear = self.max_linear * torch.tanh(self.linear).to(dtype=dtype, device=device)
-        bias = self.max_bias * torch.tanh(self.bias).to(dtype=dtype, device=device)
-        return quadratic, linear, bias
+        self.register_buffer('coeff_h0', torch.tensor(1.0 / math.sqrt(2.0 * math.pi)))
+        self.register_buffer('coeff_h1', torch.tensor(0.5))
+        self.register_buffer('coeff_h2', torch.tensor(1.0 / math.sqrt(4.0 * math.pi)))
 
     def forward(self, x):
-        h1 = self.bn_linear(x)
-        h2 = self.bn_quadratic((x * x - 1.0) * (1.0 / math.sqrt(2.0)))
-        quadratic, linear, bias = self._bounded_coefficients(x.dtype, x.device)
-        return quadratic * h2 + linear * h1 + bias
+        h0 = torch.zeros_like(x)
+        h1 = self.bn_h1(x)
+        h2 = self.bn_h2((x * x - 1.0) * (1.0 / math.sqrt(2.0)))
+        out = self.coeff_h0.to(dtype=x.dtype, device=x.device) * h0
+        out = out + self.coeff_h1.to(dtype=x.dtype, device=x.device) * h1
+        out = out + self.coeff_h2.to(dtype=x.dtype, device=x.device) * h2
+        return self.gamma.to(dtype=x.dtype, device=x.device) * out + self.beta.to(dtype=x.dtype, device=x.device)
 
 
 class IBasicBlock(nn.Module):
@@ -131,27 +103,27 @@ class IBasicBlock(nn.Module):
             raise ValueError('BasicBlock only supports groups=1 and base_width=64')
         if dilation > 1:
             raise NotImplementedError('Dilation > 1 not supported in BasicBlock')
-        self.bn1 = nn.BatchNorm2d(inplanes, eps=1e-05)
         self.conv1 = conv3x3(inplanes, planes)
-        self.polyact = act_layer(planes)
+        self.herpn1 = act_layer(planes)
         self.conv2 = conv3x3(planes, planes, stride)
-        self.bn3 = nn.BatchNorm2d(planes, eps=1e-05)
+        self.bn2 = nn.BatchNorm2d(planes, eps=1e-05)
+        self.herpn2 = act_layer(planes)
         self.downsample = downsample
         self.stride = stride
 
     def forward_impl(self, x):
         identity = x
 
-        out = self.bn1(x)
-        out = self.conv1(out)
-        out = self.polyact(out)
+        out = self.conv1(x)
+        out = self.herpn1(out)
         out = self.conv2(out)
-        out = self.bn3(out)
+        # out = self.bn2(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
 
         out += identity
+        out = self.herpn2(out)
         return out
 
     def forward(self, x):
@@ -195,7 +167,7 @@ class IResNet(nn.Module):
         self.base_width = width_per_group
 
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
-        self.polyact = act_layer(self.inplanes)
+        self.herpn = act_layer(self.inplanes)
 
         self.layer1 = self._make_layer(block, 64, layers[0], stride=2)
         self.layer2 = self._make_layer(
@@ -239,7 +211,7 @@ class IResNet(nn.Module):
         if zero_init_residual:
             for m in self.modules():
                 if isinstance(m, IBasicBlock):
-                    nn.init.constant_(m.bn3.weight, 0)
+                    nn.init.constant_(m.bn2.weight, 0)
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
         downsample = None
@@ -290,7 +262,7 @@ class IResNet(nn.Module):
         # FHE backend; PyTorch autocast itself is not part of FHE evaluation.
         with torch.cuda.amp.autocast(enabled=self.fp16):
             x = self.conv1(x)
-            x = self.polyact(x)
+            x = self.herpn(x)
             x = self.layer1(x)
             x = self.layer2(x)
             x = self.layer3(x)
