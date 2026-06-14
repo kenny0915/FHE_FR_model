@@ -67,7 +67,7 @@ class CryptoFacePolyAct2d(nn.Module):
 
         self.bn_h1 = nn.BatchNorm2d(num_channels, eps=eps, affine=False)
         self.bn_h2 = nn.BatchNorm2d(num_channels, eps=eps, affine=False)
-        self.gamma = nn.Parameter(torch.ones(1, num_channels, 1, 1))
+        self.gamma = nn.Parameter(torch.full((1, num_channels, 1, 1), 0.5))
         self.beta = nn.Parameter(torch.zeros(1, num_channels, 1, 1))
 
         self.register_buffer('coeff_h0', torch.tensor(1.0 / math.sqrt(2.0 * math.pi)))
@@ -117,7 +117,7 @@ class IBasicBlock(nn.Module):
         out = self.conv1(x)
         out = self.herpn1(out)
         out = self.conv2(out)
-        # out = self.bn2(out)
+        out = self.bn2(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)

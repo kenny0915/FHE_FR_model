@@ -39,6 +39,18 @@ except KeyError:
     )
 
 
+def check_finite_gradients(module: torch.nn.Module, name: str, global_step: int):
+    for param_name, param in module.named_parameters():
+        if param.grad is not None and not torch.isfinite(param.grad).all():
+            grad = param.grad.detach()
+            finite = grad[torch.isfinite(grad)]
+            finite_max = finite.abs().max().item() if finite.numel() > 0 else float('nan')
+            raise FloatingPointError(
+                f"Non-finite gradient in {name}.{param_name} at global_step={global_step}; "
+                f"shape={tuple(grad.shape)}, finite_abs_max={finite_max}"
+            )
+
+
 def main(args):
 
     # get config
@@ -197,6 +209,8 @@ def main(args):
                 amp.scale(loss).backward()
                 if global_step % cfg.gradient_acc == 0:
                     amp.unscale_(opt)
+                    check_finite_gradients(backbone, "backbone", global_step)
+                    check_finite_gradients(module_partial_fc, "partial_fc", global_step)
                     total_norm = torch.nn.utils.clip_grad_norm_(
                         clipped_params, grad_clip, error_if_nonfinite=False
                     )
@@ -212,6 +226,8 @@ def main(args):
             else:
                 loss.backward()
                 if global_step % cfg.gradient_acc == 0:
+                    check_finite_gradients(backbone, "backbone", global_step)
+                    check_finite_gradients(module_partial_fc, "partial_fc", global_step)
                     torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
                     opt.step()
                     opt.zero_grad()
