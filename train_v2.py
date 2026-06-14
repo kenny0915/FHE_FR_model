@@ -171,7 +171,10 @@ def main(args):
     )
 
     loss_am = AverageMeter()
-    amp = torch.cuda.amp.grad_scaler.GradScaler(growth_interval=100)
+    amp = torch.cuda.amp.grad_scaler.GradScaler(
+        init_scale=float(getattr(cfg, "amp_init_scale", 65536.0)),
+        growth_interval=int(getattr(cfg, "amp_growth_interval", 100)),
+    )
     grad_clip = float(getattr(cfg, "gradient_clip", 5.0))
     clipped_params = [
         p for group in opt.param_groups for p in group["params"] if p.requires_grad
@@ -194,8 +197,16 @@ def main(args):
                 amp.scale(loss).backward()
                 if global_step % cfg.gradient_acc == 0:
                     amp.unscale_(opt)
-                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
-                    amp.step(opt)
+                    total_norm = torch.nn.utils.clip_grad_norm_(
+                        clipped_params, grad_clip, error_if_nonfinite=False
+                    )
+                    if torch.isfinite(total_norm):
+                        amp.step(opt)
+                    else:
+                        logging.warning(
+                            "Skipping optimizer step at global_step=%d due to non-finite grad norm: %s",
+                            global_step, total_norm.item()
+                        )
                     amp.update()
                     opt.zero_grad()
             else:
