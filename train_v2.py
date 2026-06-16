@@ -51,6 +51,12 @@ def check_finite_gradients(module: torch.nn.Module, name: str, global_step: int)
             )
 
 
+def set_prepbn_progress(module: torch.nn.Module, current_step: int, total_steps: int):
+    for submodule in module.modules():
+        if hasattr(submodule, "set_progress"):
+            submodule.set_progress(current_step, total_steps)
+
+
 def main(args):
 
     # get config
@@ -148,6 +154,12 @@ def main(args):
     cfg.total_batch_size = cfg.batch_size * world_size
     cfg.warmup_step = cfg.num_image // cfg.total_batch_size * cfg.warmup_epoch
     cfg.total_step = cfg.num_image // cfg.total_batch_size * cfg.num_epoch
+    steps_per_epoch = cfg.num_image // cfg.total_batch_size
+    prepbn_decay_epochs = getattr(cfg, "prepbn_decay_epochs", None)
+    if prepbn_decay_epochs is not None:
+        prepbn_decay_steps = int(steps_per_epoch * prepbn_decay_epochs)
+    else:
+        prepbn_decay_steps = int(getattr(cfg, "prepbn_decay_steps", cfg.total_step))
 
     lr_scheduler = PolynomialLRWarmup(
         optimizer=opt,
@@ -198,6 +210,7 @@ def main(args):
             train_loader.sampler.set_epoch(epoch)
         for _, (img, local_labels) in enumerate(train_loader):
             global_step += 1
+            set_prepbn_progress(backbone.module, global_step, prepbn_decay_steps)
             local_embeddings = backbone(img)
             if not torch.isfinite(local_embeddings).all():
                 raise FloatingPointError(f"Non-finite embeddings at global_step={global_step}")
@@ -209,8 +222,9 @@ def main(args):
                 amp.scale(loss).backward()
                 if global_step % cfg.gradient_acc == 0:
                     amp.unscale_(opt)
-                    check_finite_gradients(backbone, "backbone", global_step)
-                    check_finite_gradients(module_partial_fc, "partial_fc", global_step)
+                    if getattr(cfg, "check_finite_grads", False):
+                        check_finite_gradients(backbone, "backbone", global_step)
+                        check_finite_gradients(module_partial_fc, "partial_fc", global_step)
                     total_norm = torch.nn.utils.clip_grad_norm_(
                         clipped_params, grad_clip, error_if_nonfinite=False
                     )
@@ -271,6 +285,21 @@ def main(args):
                 
         if cfg.dali:
             train_loader.reset()
+
+    prepbn_bn_stat_epochs = int(getattr(cfg, "prepbn_bn_stat_epochs", 0))
+    if prepbn_bn_stat_epochs > 0:
+        if rank == 0:
+            logging.info("Refreshing PRepBN BatchNorm statistics for %d epoch(s)", prepbn_bn_stat_epochs)
+        backbone.train()
+        set_prepbn_progress(backbone.module, prepbn_decay_steps, prepbn_decay_steps)
+        with torch.no_grad():
+            for stat_epoch in range(prepbn_bn_stat_epochs):
+                if isinstance(train_loader, DataLoader):
+                    train_loader.sampler.set_epoch(cfg.num_epoch + stat_epoch)
+                for img, _ in train_loader:
+                    backbone(img)
+                if cfg.dali:
+                    train_loader.reset()
 
     if rank == 0:
         path_module = os.path.join(cfg.output, "model.pt")
