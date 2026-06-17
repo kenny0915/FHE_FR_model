@@ -107,19 +107,20 @@ class PatchEmbed(nn.Module):
         x = self.norm(x)
         return x
 
-
-class LayerNorm2d(nn.GroupNorm):
-    """LayerNorm-style normalization for 4D feature maps."""
-    def __init__(self, num_channels, eps=1e-5, **kwargs):
-        super().__init__(1, num_channels, eps=eps, **kwargs)
-
+class GroupNorm(nn.GroupNorm):
+    """
+    Group Normalization with 1 group.
+    Input: tensor in shape [B, C, H, W]
+    """
+    def __init__(self, num_channels, **kwargs):
+        super().__init__(1, num_channels, **kwargs)
 
 class RepBatchNorm2d(nn.Module):
     """Progressive re-parameterized BatchNorm for 4D PoolFormer features."""
     def __init__(self, num_channels, eps=1e-5, momentum=0.1, eta_init=1.0, **kwargs):
         super().__init__()
         self.bn = nn.BatchNorm2d(num_channels, eps=eps, momentum=momentum, **kwargs)
-        self.ln = LayerNorm2d(num_channels, eps=eps)
+        self.ln = GroupNorm(num_channels)
         self.eta = nn.Parameter(torch.full((1, num_channels, 1, 1), eta_init))
         self.register_buffer("gamma", torch.ones(1))
 

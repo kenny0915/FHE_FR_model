@@ -35,6 +35,15 @@ CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
   --target IJBC \
   --network poolformer_s36
 
+CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
+  --model-prefix work_dirs/ms1mv3_poolformer_s24_no_ln/model.pt \
+  --image-path ijb/IJBC \
+  --result-dir work_dirs/ms1mv3_poolformer_s24_no_ln/ijbc_result \
+  --batch-size 128 \
+  --job ms1mv3_poolformer_s24_no_ln \
+  --target IJBC \
+  --network poolformer_no_ln_s24
+
 ## mbf
 # train
 CUDA_VISIBLE_DEVICES=0 torchrun \
