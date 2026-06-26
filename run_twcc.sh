@@ -16,7 +16,7 @@ CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
   --target IJBC \
   --network r50
 
-# poolformer_s36
+# poolformer
 # train
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
     --nproc_per_node=4 \
@@ -25,6 +25,10 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
     --nproc_per_node=4 \
     train_v2.py configs/ms1mv3_poolformer_s36_speedup
+
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+    --nproc_per_node=4 \
+    train_v2.py configs/ms1mv3_poolformer_s24_no_ln_no_gelu
 
 # test
 CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \

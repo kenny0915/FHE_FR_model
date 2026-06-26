@@ -107,19 +107,20 @@ class PatchEmbed(nn.Module):
         x = self.norm(x)
         return x
 
-
-class LayerNorm2d(nn.GroupNorm):
-    """LayerNorm-style normalization for 4D feature maps."""
-    def __init__(self, num_channels, eps=1e-5, **kwargs):
-        super().__init__(1, num_channels, eps=eps, **kwargs)
-
+class GroupNorm(nn.GroupNorm):
+    """
+    Group Normalization with 1 group.
+    Input: tensor in shape [B, C, H, W]
+    """
+    def __init__(self, num_channels, **kwargs):
+        super().__init__(1, num_channels, **kwargs)
 
 class RepBatchNorm2d(nn.Module):
     """Progressive re-parameterized BatchNorm for 4D PoolFormer features."""
     def __init__(self, num_channels, eps=1e-5, momentum=0.1, eta_init=1.0, **kwargs):
         super().__init__()
         self.bn = nn.BatchNorm2d(num_channels, eps=eps, momentum=momentum, **kwargs)
-        self.ln = LayerNorm2d(num_channels, eps=eps)
+        self.ln = GroupNorm(num_channels)
         self.eta = nn.Parameter(torch.full((1, num_channels, 1, 1), eta_init))
         self.register_buffer("gamma", torch.ones(1))
 
@@ -142,6 +143,58 @@ class RepBatchNorm2d(nn.Module):
 BatchNorm2d = RepBatchNorm2d
 
 
+class THORPolynomialGELU(nn.Module):
+    """Plaintext equivalent of THOR's FHE GELU approximation.
+
+    The upstream THOR implementation evaluates two composed polynomials with
+    Paterson-Stockmeyer in the FHE domain. It reverses the Appendix C
+    coefficient lists before evaluation, scales the second polynomial by 0.5,
+    and expects the tanh-helper input to be scaled by 1/64. In plaintext form:
+
+        gelu(x) ~= x * (0.5 + 0.5 * tanh_poly(x / 64))
+
+    where tanh_poly is p2(p1(.)) using THOR's reversed coefficient order.
+    """
+
+    _P1_COEFFS = (
+        -1.06240033e-05, 1.64454894e-04, -5.83533517e-04, -3.80912692e-04,
+        2.24431193e-03, 8.92295204e-03, -1.05277477e-02, -1.91827040e-02,
+        -2.04634786e-01, 4.54014410e-01, -5.40759203e-01, 5.67745523e+00,
+        -1.36433727e+01, 1.82574621e+01, -8.48849601e+01, 1.28686741e+02,
+        3.66720281e+02, -1.01400159e+03, -1.26278856e+02, 2.21728878e+03,
+        -9.95421415e+02, -2.31059465e+03, 1.73583957e+03, 1.27394360e+03,
+        -1.27836230e+03, -3.66781716e+02, 4.79663919e+02, 4.94610178e+01,
+        -9.06754761e+01, -2.36515790e+00, 8.74311855e+00, 1.62838703e-02,
+    )
+    _P2_COEFFS = (
+        -1.70270667e+02, 6.81076279e+01, 1.79197364e+03, -6.81621043e+02,
+        -8.49256169e+03, 3.05629446e+03, 2.39579397e+04, -8.10435126e+03,
+        -4.48145152e+04, 1.41297616e+04, 5.86197512e+04, -1.70371505e+04,
+        -5.51326382e+04, 1.45532495e+04, 3.77866438e+04, -8.87673890e+03,
+        -1.89514802e+04, 3.84972853e+03, 6.94169727e+03, -1.16901058e+03,
+        -1.84658407e+03, 2.41693754e+02, 3.54452276e+02, -3.24499570e+01,
+        -4.91918227e+01, 2.58122977e+00, 5.78392852e+00, -9.45171527e-02,
+    )
+
+    def __init__(self, input_scale=64.0):
+        super().__init__()
+        self.input_scale = float(input_scale)
+        self.register_buffer("p1_coeffs", torch.tensor(tuple(reversed(self._P1_COEFFS))))
+        self.register_buffer("p2_coeffs", 0.5 * torch.tensor(tuple(reversed(self._P2_COEFFS))))
+
+    @staticmethod
+    def _polyval(x, coeffs):
+        y = coeffs[-1].to(dtype=x.dtype, device=x.device)
+        for coeff in coeffs[:-1].flip(0):
+            y = y * x + coeff.to(dtype=x.dtype, device=x.device)
+        return y
+
+    def forward(self, x):
+        scaled_x = x / self.input_scale
+        tanh_half = self._polyval(self._polyval(scaled_x, self.p1_coeffs), self.p2_coeffs)
+        return x * (0.5 + tanh_half)
+
+
 class Pooling(nn.Module):
     """
     Implementation of pooling for PoolFormer
@@ -162,7 +215,7 @@ class Mlp(nn.Module):
     Input: tensor with shape [B, C, H, W]
     """
     def __init__(self, in_features, hidden_features=None, 
-                 out_features=None, act_layer=nn.GELU, drop=0.):
+                 out_features=None, act_layer=THORPolynomialGELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -202,7 +255,7 @@ class PoolFormerBlock(nn.Module):
         refer to https://arxiv.org/abs/2103.17239
     """
     def __init__(self, dim, pool_size=3, mlp_ratio=4., 
-                 act_layer=nn.GELU, norm_layer=BatchNorm2d, 
+                 act_layer=THORPolynomialGELU, norm_layer=BatchNorm2d, 
                  drop=0., drop_path=0., 
                  use_layer_scale=True, layer_scale_init_value=1e-5):
 
@@ -241,7 +294,7 @@ class PoolFormerBlock(nn.Module):
 
 def basic_blocks(dim, index, layers, 
                  pool_size=3, mlp_ratio=4., 
-                 act_layer=nn.GELU, norm_layer=BatchNorm2d, 
+                 act_layer=THORPolynomialGELU, norm_layer=BatchNorm2d, 
                  drop_rate=.0, drop_path_rate=0., 
                  use_layer_scale=True, layer_scale_init_value=1e-5):
     """
@@ -284,7 +337,7 @@ class PoolFormer(nn.Module):
     def __init__(self, layers, embed_dims=None, 
                  mlp_ratios=None, downsamples=None, 
                  pool_size=3, 
-                 norm_layer=BatchNorm2d, act_layer=nn.GELU, 
+                 norm_layer=BatchNorm2d, act_layer=THORPolynomialGELU, 
                  num_classes=512, # modify the num_classes for face recognition
                  in_patch_size=3, in_stride=2, in_pad=1, # modify the patch embedding for face recognition
                  down_patch_size=3, down_stride=2, down_pad=1, 
