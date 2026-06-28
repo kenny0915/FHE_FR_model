@@ -514,6 +514,21 @@ def poolformer_s24(pretrained=False, **kwargs):
         model.load_state_dict(checkpoint)
     return model
 
+@register_model
+def poolformer_s24_mlp2(pretrained=False, **kwargs):
+    """
+    PoolFormer-S24 model with MLP ratios [2, 2, 2, 2].
+    """
+    layers = [4, 4, 12, 4]
+    embed_dims = [64, 128, 320, 512]
+    mlp_ratios = [2, 2, 2, 2]
+    downsamples = [True, True, True, True]
+    model = PoolFormer(
+        layers, embed_dims=embed_dims,
+        mlp_ratios=mlp_ratios, downsamples=downsamples,
+        **kwargs)
+    model.default_cfg = default_cfgs['poolformer_s']
+    return model
 
 @register_model
 def poolformer_s36(pretrained=False, **kwargs):

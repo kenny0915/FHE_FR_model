@@ -128,6 +128,7 @@ def get_model(name, **kwargs):
     elif name in (
         "poolformer_s12",
         "poolformer_s24",
+        "poolformer_s24_mlp2",
         "poolformer_s36",
         "poolformer_m36",
         "poolformer_m48",
@@ -135,6 +136,7 @@ def get_model(name, **kwargs):
         from .poolformer import (
             poolformer_s12,
             poolformer_s24,
+            poolformer_s24_mlp2,
             poolformer_s36,
             poolformer_m36,
             poolformer_m48,
@@ -142,6 +144,7 @@ def get_model(name, **kwargs):
         poolformer_factory = {
             "poolformer_s12": poolformer_s12,
             "poolformer_s24": poolformer_s24,
+            "poolformer_s24_mlp2": poolformer_s24_mlp2,
             "poolformer_s36": poolformer_s36,
             "poolformer_m36": poolformer_m36,
             "poolformer_m48": poolformer_m48,
@@ -195,6 +198,7 @@ def get_model(name, **kwargs):
         from .poolformer_no_ln_no_gelu import (
             poolformer_s12,
             poolformer_s24,
+            poolformer_s24_mlp2,
             poolformer_s36,
             poolformer_m36,
             poolformer_m48,

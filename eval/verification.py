@@ -274,6 +274,13 @@ def test(data_set, backbone, batch_size, nfolds=10):
             time0 = datetime.datetime.now()
             img = ((_data / 255) - 0.5) / 0.5
             net_out: torch.Tensor = backbone(img)
+            if not torch.isfinite(net_out).all():
+                finite = net_out[torch.isfinite(net_out)]
+                finite_max = finite.abs().max().item() if finite.numel() > 0 else float('nan')
+                raise FloatingPointError(
+                    f"Non-finite validation embedding at flip={i}, batch=({ba},{bb}), "
+                    f"finite_abs_max={finite_max}"
+                )
             _embeddings = net_out.detach().cpu().numpy()
             time_now = datetime.datetime.now()
             diff = time_now - time0
