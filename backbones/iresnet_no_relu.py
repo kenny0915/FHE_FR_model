@@ -103,19 +103,19 @@ class IBasicBlock(nn.Module):
             raise ValueError('BasicBlock only supports groups=1 and base_width=64')
         if dilation > 1:
             raise NotImplementedError('Dilation > 1 not supported in BasicBlock')
+        self.bn1 = nn.BatchNorm2d(inplanes, eps=1e-05)
         self.conv1 = conv3x3(inplanes, planes)
-        self.herpn1 = act_layer(planes)
+        self.herpn = act_layer(planes)
         self.conv2 = conv3x3(planes, planes, stride)
         self.bn2 = nn.BatchNorm2d(planes, eps=1e-05)
-        self.herpn2 = act_layer(planes)
         self.downsample = downsample
         self.stride = stride
 
     def forward_impl(self, x):
         identity = x
-
-        out = self.conv1(x)
-        out = self.herpn1(out)
+        out = self.bn1(x)
+        out = self.conv1(out)
+        out = self.herpn(out)
         out = self.conv2(out)
         out = self.bn2(out)
 
@@ -123,7 +123,6 @@ class IBasicBlock(nn.Module):
             identity = self.downsample(x)
 
         out += identity
-        out = self.herpn2(out)
         return out
 
     def forward(self, x):

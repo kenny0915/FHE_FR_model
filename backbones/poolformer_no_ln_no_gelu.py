@@ -143,17 +143,70 @@ class RepBatchNorm2d(nn.Module):
 BatchNorm2d = RepBatchNorm2d
 
 
-class THORPolynomialGELU(nn.Module):
-    """Plaintext equivalent of THOR's FHE GELU approximation.
+class _THORPolynomialGELUFunction(torch.autograd.Function):
+    @staticmethod
+    def _polyval(x, coeffs):
+        y = coeffs[-1].to(dtype=x.dtype, device=x.device)
+        for coeff in coeffs[:-1].flip(0):
+            y = y * x + coeff.to(dtype=x.dtype, device=x.device)
+        return y
 
-    The upstream THOR implementation evaluates two composed polynomials with
-    Paterson-Stockmeyer in the FHE domain. It reverses the Appendix C
-    coefficient lists before evaluation, scales the second polynomial by 0.5,
-    and expects the tanh-helper input to be scaled by 1/64. In plaintext form:
+    @staticmethod
+    def _polyder(coeffs):
+        if coeffs.numel() <= 1:
+            return coeffs.new_zeros(1)
+        powers = torch.arange(1, coeffs.numel(), device=coeffs.device, dtype=coeffs.dtype)
+        return coeffs[1:] * powers
+
+    @staticmethod
+    def forward(ctx, x, p1_coeffs, p2_coeffs, input_scale):
+        compute_x = x.float()
+        p1 = p1_coeffs.float()
+        p2 = p2_coeffs.float()
+        scale = float(input_scale)
+
+        scaled_x = compute_x / scale
+        p1_x = _THORPolynomialGELUFunction._polyval(scaled_x, p1)
+        tanh_half = _THORPolynomialGELUFunction._polyval(p1_x, p2)
+        out = compute_x * (0.5 + tanh_half)
+
+        ctx.save_for_backward(x, p1_coeffs, p2_coeffs)
+        ctx.input_scale = scale
+        return out.to(dtype=x.dtype)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, p1_coeffs, p2_coeffs = ctx.saved_tensors
+        compute_x = x.float()
+        p1 = p1_coeffs.float()
+        p2 = p2_coeffs.float()
+        scale = ctx.input_scale
+
+        scaled_x = compute_x / scale
+        p1_x = _THORPolynomialGELUFunction._polyval(scaled_x, p1)
+        tanh_half = _THORPolynomialGELUFunction._polyval(p1_x, p2)
+
+        p1_prime = _THORPolynomialGELUFunction._polyval(
+            scaled_x, _THORPolynomialGELUFunction._polyder(p1)
+        )
+        p2_prime = _THORPolynomialGELUFunction._polyval(
+            p1_x, _THORPolynomialGELUFunction._polyder(p2)
+        )
+        local_grad = 0.5 + tanh_half + compute_x * p2_prime * p1_prime / scale
+        grad_x = grad_output.float() * local_grad
+        return grad_x.to(dtype=x.dtype), None, None, None
+
+
+class THORPolynomialGELU(nn.Module):
+    """Train with native GELU, infer with THOR's polynomial GELU.
+
+    Training uses PyTorch's optimized GELU to keep runtime and memory practical.
+    Evaluation uses the plaintext equivalent of THOR's FHE approximation:
 
         gelu(x) ~= x * (0.5 + 0.5 * tanh_poly(x / 64))
 
-    where tanh_poly is p2(p1(.)) using THOR's reversed coefficient order.
+    where THOR reverses the Appendix C coefficient lists before evaluation and
+    scales the second polynomial by 0.5.
     """
 
     _P1_COEFFS = (
@@ -179,20 +232,16 @@ class THORPolynomialGELU(nn.Module):
     def __init__(self, input_scale=64.0):
         super().__init__()
         self.input_scale = float(input_scale)
+        self.train_act = nn.GELU()
         self.register_buffer("p1_coeffs", torch.tensor(tuple(reversed(self._P1_COEFFS))))
         self.register_buffer("p2_coeffs", 0.5 * torch.tensor(tuple(reversed(self._P2_COEFFS))))
 
-    @staticmethod
-    def _polyval(x, coeffs):
-        y = coeffs[-1].to(dtype=x.dtype, device=x.device)
-        for coeff in coeffs[:-1].flip(0):
-            y = y * x + coeff.to(dtype=x.dtype, device=x.device)
-        return y
-
     def forward(self, x):
-        scaled_x = x / self.input_scale
-        tanh_half = self._polyval(self._polyval(scaled_x, self.p1_coeffs), self.p2_coeffs)
-        return x * (0.5 + tanh_half)
+        if self.training:
+            return self.train_act(x)
+        return _THORPolynomialGELUFunction.apply(
+            x, self.p1_coeffs, self.p2_coeffs, self.input_scale
+        )
 
 
 class Pooling(nn.Module):

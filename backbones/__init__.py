@@ -49,17 +49,17 @@ def get_mbf_large_no_relu(fp16=False, num_features=512, blocks=(2, 8, 12, 4), sc
 
 def get_model(name, **kwargs):
     # no-ReLU / FHE-friendly CryptoFace polynomial variants
-    if name in ("r18_no_relu"):
+    if name in ("r18_no_relu",):
         return iresnet18_no_relu(False, **kwargs)
-    elif name in ("r34_no_relu"):
+    elif name in ("r34_no_relu",):
         return iresnet34_no_relu(False, **kwargs)
-    elif name in ("r50_no_relu"):
+    elif name in ("r50_no_relu",):
         return iresnet50_no_relu(False, **kwargs)
-    elif name in ("r100_no_relu"):
+    elif name in ("r100_no_relu",):
         return iresnet100_no_relu(False, **kwargs)
-    elif name in ("r200_no_relu"):
+    elif name in ("r200_no_relu",):
         return iresnet200_no_relu(False, **kwargs)
-    elif name in ("mbf_no_relu"):
+    elif name in ("mbf_no_relu",):
         fp16 = kwargs.get("fp16", False)
         num_features = kwargs.get("num_features", 512)
         blocks = kwargs.get("blocks", (1, 4, 6, 2))
@@ -70,7 +70,7 @@ def get_model(name, **kwargs):
             blocks=blocks,
             scale=scale,
         )
-    elif name in ("mbf_large_no_relu"):
+    elif name in ("mbf_large_no_relu",):
         fp16 = kwargs.get("fp16", False)
         num_features = kwargs.get("num_features", 512)
         blocks = kwargs.get("blocks", (2, 8, 12, 4))
