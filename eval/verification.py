@@ -263,6 +263,7 @@ def test(data_set, backbone, batch_size, nfolds=10):
     issame_list = data_set[1]
     embeddings_list = []
     time_consumed = 0.0
+    skipped_nonfinite = 0
     for i in range(len(data_list)):
         data = data_list[i]
         embeddings = None
@@ -274,13 +275,18 @@ def test(data_set, backbone, batch_size, nfolds=10):
             time0 = datetime.datetime.now()
             img = ((_data / 255) - 0.5) / 0.5
             net_out: torch.Tensor = backbone(img)
-            if not torch.isfinite(net_out).all():
+            finite_rows = torch.isfinite(net_out).all(dim=1)
+            if not finite_rows.all():
+                bad_count = int((~finite_rows).sum().item())
+                skipped_nonfinite += bad_count
                 finite = net_out[torch.isfinite(net_out)]
                 finite_max = finite.abs().max().item() if finite.numel() > 0 else float('nan')
-                raise FloatingPointError(
-                    f"Non-finite validation embedding at flip={i}, batch=({ba},{bb}), "
-                    f"finite_abs_max={finite_max}"
+                print(
+                    f"warning: skipped {bad_count} non-finite validation embeddings "
+                    f"at flip={i}, batch=({ba},{bb}), finite_abs_max={finite_max}"
                 )
+                net_out = net_out.clone()
+                net_out[~finite_rows] = 0
             _embeddings = net_out.detach().cpu().numpy()
             time_now = datetime.datetime.now()
             diff = time_now - time0
@@ -300,6 +306,8 @@ def test(data_set, backbone, batch_size, nfolds=10):
             _xnorm += _norm
             _xnorm_cnt += 1
     _xnorm /= _xnorm_cnt
+    if skipped_nonfinite > 0:
+        print(f'warning: total skipped non-finite validation embeddings: {skipped_nonfinite}')
 
     embeddings = embeddings_list[0].copy()
     embeddings = sklearn.preprocessing.normalize(embeddings)

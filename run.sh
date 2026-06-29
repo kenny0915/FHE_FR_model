@@ -1,12 +1,12 @@
 ### iresnet50
 # train
-CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+CUDA_VISIBLE_DEVICES=0,1 torchrun \
     --master_port=29500 \
-    --nproc_per_node=4 \
+    --nproc_per_node=2 \
     train_v2.py configs/ms1mv3_r50_no_relu
 
 # test
-CUDA_VISIBLE_DEVICES=1 python eval_ijbc_replace_non_linear.py \
+CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
   --model-prefix work_dirs/ms1mv3_r50/model.pt \
   --image-path ijb/IJBC \
   --result-dir work_dirs/ms1mv3_r50/ijbc_result \
@@ -19,7 +19,7 @@ CUDA_VISIBLE_DEVICES=1 python eval_ijbc_replace_non_linear.py \
 # train
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
     --nproc_per_node=4 \
-    train_v2.py configs/ms1mv3_poolformer_s24
+    train_v2.py configs/ms1mv3_poolformer_s24_mlp2
 
 # test
 CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
@@ -30,3 +30,8 @@ CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
   --job ms1mv3_poolformer_s24_mlp2 \
   --target IJBC \
   --network poolformer_no_ln_s24
+
+### patch cnn
+CUDA_VISIBLE_DEVICES=0,1 torchrun \
+ --nproc_per_node=1 \
+ train_v2.py configs/casia_patch_cnn

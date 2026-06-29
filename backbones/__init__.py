@@ -125,6 +125,10 @@ def get_model(name, **kwargs):
         num_features = kwargs.get("num_features", 512)
         return get_mbf_large(fp16=fp16, num_features=num_features)
 
+    elif name == "patch_cnn":
+        from .patch_cnn import patch_cnn
+        return patch_cnn(**kwargs)
+
     elif name in (
         "poolformer_s12",
         "poolformer_s24",

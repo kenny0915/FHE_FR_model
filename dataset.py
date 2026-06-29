@@ -6,7 +6,6 @@ from typing import Iterable
 
 import numpy as np
 
-import mxnet as mx
 if not hasattr(np, 'PZERO'):
     np.PZERO = 0.0
 if not hasattr(np, 'NZERO'):

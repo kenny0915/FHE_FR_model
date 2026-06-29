@@ -32,13 +32,13 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
 
 # test
 CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
-  --model-prefix work_dirs/ms1mv3_poolformer_s24/model.pt \
+  --model-prefix work_dirs/ms1mv3_poolformer_s24_mlp2/model.pt \
   --image-path ijb/IJBC \
-  --result-dir work_dirs/ms1mv3_poolformer_s24/ijbc_result \
+  --result-dir work_dirs/ms1mv3_poolformer_s24_mlp2/ijbc_result \
   --batch-size 128 \
-  --job ms1mv3_poolformer_s24 \
+  --job ms1mv3_poolformer_s24_mlp2 \
   --target IJBC \
-  --network poolformer_s24
+  --network poolformer_s24_mlp2
 
 CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
   --model-prefix work_dirs/ms1mv3_poolformer_s36/model.pt \
