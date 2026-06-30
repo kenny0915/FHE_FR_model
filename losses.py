@@ -24,7 +24,7 @@ class CombinedMarginLoss(torch.nn.Module):
         self.easy_margin = False
 
 
-    def forward(self, logits, labels):
+    def forward(self, logits, labels, norms=None):
         index_positive = torch.where(labels != -1)[0]
 
         if self.interclass_filtering_threshold > 0:
@@ -71,7 +71,7 @@ class ArcFace(torch.nn.Module):
         self.easy_margin = False
 
 
-    def forward(self, logits: torch.Tensor, labels: torch.Tensor):
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor, norms=None):
         index = torch.where(labels != -1)[0]
         target_logit = logits[index, labels[index].view(-1)]
 
@@ -91,10 +91,92 @@ class CosFace(torch.nn.Module):
         self.s = s
         self.m = m
 
-    def forward(self, logits: torch.Tensor, labels: torch.Tensor):
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor, norms=None):
         index = torch.where(labels != -1)[0]
         target_logit = logits[index, labels[index].view(-1)]
         final_target_logit = target_logit - self.m
         logits[index, labels[index].view(-1)] = final_target_logit
         logits = logits * self.s
         return logits
+
+class AdaFace(torch.nn.Module):
+    """AdaFace margin from https://github.com/mk-minchul/AdaFace.
+
+    This module is written to plug into PartialFC_V2: it receives cosine logits
+    from normalized embeddings/weights, labels in the local class partition, and
+    raw embedding norms gathered across all ranks.
+    """
+
+    def __init__(self, s=64.0, margin=0.4, h=0.333, t_alpha=1.0, eps=1e-3):
+        super(AdaFace, self).__init__()
+        self.s = s
+        self.margin = margin
+        self.h = h
+        self.t_alpha = t_alpha
+        self.eps = eps
+        self.register_buffer("batch_mean", torch.ones(1) * 20)
+        self.register_buffer("batch_std", torch.ones(1) * 100)
+
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor, norms: torch.Tensor):
+        if norms is None:
+            raise ValueError("AdaFace requires raw embedding norms from PartialFC_V2.")
+
+        index = torch.where(labels != -1)[0]
+        if index.numel() == 0:
+            return logits * self.s
+
+        safe_norms = torch.clip(norms, min=0.001, max=100).detach()
+        with torch.no_grad():
+            batch_mean = safe_norms.mean()
+            batch_std = safe_norms.std()
+            self.batch_mean.mul_(1 - self.t_alpha).add_(batch_mean * self.t_alpha)
+            self.batch_std.mul_(1 - self.t_alpha).add_(batch_std * self.t_alpha)
+
+        margin_scaler = (safe_norms - self.batch_mean) / (self.batch_std + self.eps)
+        margin_scaler = torch.clip(margin_scaler * self.h, -1, 1)
+
+        target_logit = logits[index, labels[index].view(-1)]
+        target_scaler = margin_scaler[index].view(-1)
+
+        # Angular component: low-quality samples receive a larger angular margin.
+        g_angular = -self.margin * target_scaler
+        theta = target_logit.clamp(-1 + self.eps, 1 - self.eps).acos()
+        theta = torch.clip(theta + g_angular, min=self.eps, max=math.pi - self.eps)
+        final_target_logit = theta.cos()
+
+        # Additive component from AdaFace.
+        g_additive = self.margin + (self.margin * target_scaler)
+        final_target_logit = final_target_logit - g_additive
+
+        logits[index, labels[index].view(-1)] = final_target_logit
+        logits = logits * self.s
+        return logits
+
+
+def build_margin_loss(cfg):
+    loss_name = getattr(cfg, "loss", "arcface").lower()
+    scale = float(getattr(cfg, "scale", 64.0))
+
+    if loss_name == "arcface":
+        return CombinedMarginLoss(
+            scale,
+            cfg.margin_list[0],
+            cfg.margin_list[1],
+            cfg.margin_list[2],
+            cfg.interclass_filtering_threshold,
+        )
+    if loss_name == "adaface":
+        return AdaFace(
+            s=scale,
+            margin=float(getattr(cfg, "adaface_margin", 0.4)),
+            h=float(getattr(cfg, "adaface_h", 0.333)),
+            t_alpha=float(getattr(cfg, "adaface_t_alpha", 1.0)),
+        )
+    if loss_name == "cosface":
+        return CosFace(
+            s=scale,
+            m=float(getattr(cfg, "cosface_margin", cfg.margin_list[2])),
+        )
+
+    raise ValueError(f"Unsupported loss '{loss_name}'. Use arcface, adaface, or cosface.")
+

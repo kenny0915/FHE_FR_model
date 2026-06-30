@@ -15,6 +15,24 @@ CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
   --target IJBC \
   --network r50
 
+CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
+  --model-prefix work_dirs/casia_r50_no_relu/model.pt \
+  --image-path ijb/IJBC \
+  --result-dir work_dirs/casia_r50_no_relu/ijbc_result \
+  --batch-size 256 \
+  --job casia_r50_no_relu \
+  --target IJBC \
+  --network r18_no_relu
+
+CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
+  --model-prefix work_dirs/ms1mv3_r50_no_relu/model.pt \
+  --image-path ijb/IJBC \
+  --result-dir work_dirs/ms1mv3_r50_no_relu/ijbc_result \
+  --batch-size 256 \
+  --job ms1mv3_r50_no_relu \
+  --target IJBC \
+  --network r50_no_relu
+
 ## poolformer_s36
 # train
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \

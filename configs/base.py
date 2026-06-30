@@ -7,7 +7,14 @@ from easydict import EasyDict as edict
 config = edict()
 
 # Margin Base Softmax
+# Set loss to "arcface" to use the original CombinedMarginLoss, or "adaface"
+# to use the quality-adaptive AdaFace margin.
+config.loss = "arcface"
+config.scale = 64.0
 config.margin_list = (1.0, 0.5, 0.0)
+config.adaface_margin = 0.4
+config.adaface_h = 0.333
+config.adaface_t_alpha = 1.0
 config.network = "r50"
 config.resume = False
 config.save_all_states = False

@@ -154,6 +154,8 @@ class PartialFC_V2(torch.nn.Module):
         else:
             weight = self.weight
 
+        norms = torch.norm(embeddings, 2, dim=1, keepdim=True)
+
         with torch.cuda.amp.autocast(self.fp16):
             norm_embeddings = normalize(embeddings)
             norm_weight_activated = normalize(weight)
@@ -162,7 +164,7 @@ class PartialFC_V2(torch.nn.Module):
             logits = logits.float()
         logits = logits.clamp(-1, 1)
 
-        logits = self.margin_softmax(logits, labels)
+        logits = self.margin_softmax(logits, labels, norms)
         loss = self.dist_cross_entropy(logits, labels)
         return loss
 

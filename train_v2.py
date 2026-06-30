@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from backbones import get_model
 from dataset import get_dataloader
-from losses import CombinedMarginLoss
+from losses import build_margin_loss
 from lr_scheduler import PolynomialLRWarmup
 from partial_fc_v2 import PartialFC_V2
 from torch import distributed
@@ -122,13 +122,7 @@ def main(args):
     # FIXME using gradient checkpoint if there are some unused parameters will cause error
     backbone._set_static_graph()
 
-    margin_loss = CombinedMarginLoss(
-        64,
-        cfg.margin_list[0],
-        cfg.margin_list[1],
-        cfg.margin_list[2],
-        cfg.interclass_filtering_threshold
-    )
+    margin_loss = build_margin_loss(cfg)
 
     if cfg.optimizer == "sgd":
         module_partial_fc = PartialFC_V2(
