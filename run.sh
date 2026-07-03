@@ -3,15 +3,15 @@
 CUDA_VISIBLE_DEVICES=0,1 torchrun \
     --master_port=29500 \
     --nproc_per_node=2 \
-    train_v2.py configs/ms1mv3_r50_no_relu
+    train_v2.py configs/casia_r50
 
 # test
 CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
-  --model-prefix work_dirs/ms1mv3_r50/model.pt \
+  --model-prefix work_dirs/casia_r50/model.pt \
   --image-path ijb/IJBC \
-  --result-dir work_dirs/ms1mv3_r50/ijbc_result \
+  --result-dir work_dirs/casia_r50/ijbc_result \
   --batch-size 256 \
-  --job ms1mv3_r50 \
+  --job casia_r50 \
   --target IJBC \
   --network r50
 

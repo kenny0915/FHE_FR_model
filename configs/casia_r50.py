@@ -28,3 +28,8 @@ config.warmup_epoch = 1
 config.val_targets = ['lfw', 'cfp_fp', "agedb_30"]
 
 config.save_all_state = True
+
+config.loss = "adaface"
+config.adaface_margin = 0.4
+config.adaface_h = 0.333
+config.adaface_t_alpha = 0.2
