@@ -1,7 +1,6 @@
 # coding: utf-8
 
 import os
-import csv
 import pickle
 
 import matplotlib
@@ -17,6 +16,11 @@ import numpy as np
 import torch
 from skimage import transform as trans
 from backbones import get_model, iresnet50
+from eval.activation_debug import ActivationDebugRecorder, write_activation_comparison_plot
+from eval.non_linear_replacement import (
+    replace_poolformer_gelu_with_thor,
+    replace_resnet_activations_with_poly,
+)
 from sklearn.metrics import roc_curve, auc
 
 try:
@@ -59,6 +63,8 @@ parser.add_argument('--activation-debug-batches', default=10, type=int,
                     help='number of forward_db batches to record when activation debugging is enabled; <=0 records all batches')
 parser.add_argument('--skip-activation-plot', action='store_true',
                     help='skip writing the PreciseReLU alpha=10 vs trained PReLU comparison plot')
+parser.add_argument('--relu-poly-input-scale', default=1.0, type=float,
+                    help='scale s for approximating ReLU(x) as s * poly(x / s); choose s to cover activation inputs')
 parser.add_argument('--max-images', default=0, type=int,
                     help='debug limiter: only evaluate the first N images when >0')
 args = parser.parse_args()
@@ -76,290 +82,6 @@ batch_size = args.batch_size
 activation_plot_written = False
 
 
-class _THORPolynomialGELUFunction(torch.autograd.Function):
-    @staticmethod
-    def _polyval(x, coeffs):
-        y = coeffs[-1].to(dtype=x.dtype, device=x.device)
-        for coeff in coeffs[:-1].flip(0):
-            y = y * x + coeff.to(dtype=x.dtype, device=x.device)
-        return y
-
-    @staticmethod
-    def forward(ctx, x, p1_coeffs, p2_coeffs, input_scale):
-        compute_x = x.float()
-        p1 = p1_coeffs.float()
-        p2 = p2_coeffs.float()
-        scaled_x = compute_x / float(input_scale)
-        p1_x = _THORPolynomialGELUFunction._polyval(scaled_x, p1)
-        tanh_half = _THORPolynomialGELUFunction._polyval(p1_x, p2)
-        return (compute_x * (0.5 + tanh_half)).to(dtype=x.dtype)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        raise RuntimeError("THORPolynomialGELU is intended for inference in this eval script.")
-
-
-class THORPolynomialGELU(torch.nn.Module):
-    _P1_COEFFS = (
-        -1.06240033e-05, 1.64454894e-04, -5.83533517e-04, -3.80912692e-04,
-        2.24431193e-03, 8.92295204e-03, -1.05277477e-02, -1.91827040e-02,
-        -2.04634786e-01, 4.54014410e-01, -5.40759203e-01, 5.67745523e+00,
-        -1.36433727e+01, 1.82574621e+01, -8.48849601e+01, 1.28686741e+02,
-        3.66720281e+02, -1.01400159e+03, -1.26278856e+02, 2.21728878e+03,
-        -9.95421415e+02, -2.31059465e+03, 1.73583957e+03, 1.27394360e+03,
-        -1.27836230e+03, -3.66781716e+02, 4.79663919e+02, 4.94610178e+01,
-        -9.06754761e+01, -2.36515790e+00, 8.74311855e+00, 1.62838703e-02,
-    )
-    _P2_COEFFS = (
-        -1.70270667e+02, 6.81076279e+01, 1.79197364e+03, -6.81621043e+02,
-        -8.49256169e+03, 3.05629446e+03, 2.39579397e+04, -8.10435126e+03,
-        -4.48145152e+04, 1.41297616e+04, 5.86197512e+04, -1.70371505e+04,
-        -5.51326382e+04, 1.45532495e+04, 3.77866438e+04, -8.87673890e+03,
-        -1.89514802e+04, 3.84972853e+03, 6.94169727e+03, -1.16901058e+03,
-        -1.84658407e+03, 2.41693754e+02, 3.54452276e+02, -3.24499570e+01,
-        -4.91918227e+01, 2.58122977e+00, 5.78392852e+00, -9.45171527e-02,
-    )
-
-    def __init__(self, input_scale=64.0):
-        super().__init__()
-        self.input_scale = float(input_scale)
-        self.register_buffer("p1_coeffs", torch.tensor(tuple(reversed(self._P1_COEFFS)), dtype=torch.float32))
-        self.register_buffer("p2_coeffs", 0.5 * torch.tensor(tuple(reversed(self._P2_COEFFS)), dtype=torch.float32))
-
-    def forward(self, x):
-        return _THORPolynomialGELUFunction.apply(
-            x, self.p1_coeffs, self.p2_coeffs, self.input_scale
-        )
-
-
-class PreciseReLUAlpha10(torch.nn.Module):
-    # Appendix A of "Precise Approximation of Convolutional Neural Networks":
-    # r_alpha(x) = 0.5 * (x + x * (p3 o p2 o p1)(x)), alpha = 10.
-    _P1_COEFFS = (
-        -1.68048812248597e-47, 1.08541842577442e1,
-        5.19213405604261e-46, -6.22833925211098e1,
-        -1.67358715007438e-45, 1.14369227820443e2,
-        1.15437076692363e-45, -6.28023496973074e1,
-    )
-    _P2_COEFFS = (
-        7.86253562483970e-39, 4.13976170985111,
-        -7.18241741649940e-38, -5.84997640211679,
-        5.17878634442782e-38, 2.94376255659280,
-        -9.33059743960049e-39, -4.54530437460152e-1,
-    )
-    _P3_COEFFS = (
-        3.75374153583292e-39, 3.29956739043733,
-        -1.04537140020889e-37, -7.84227260291355,
-        4.18647895984231e-37, 1.28907764115564e1,
-        -6.09510159540855e-37, -1.24917112584486e1,
-        4.05475441247124e-37, 6.94167991428074,
-        -1.26770087815848e-37, -2.04298067399942,
-        1.52452197400636e-38, 2.46407138926031e-1,
-    )
-
-    def __init__(self):
-        super().__init__()
-        self.register_buffer("p1_coeffs", torch.tensor(self._P1_COEFFS, dtype=torch.float32))
-        self.register_buffer("p2_coeffs", torch.tensor(self._P2_COEFFS, dtype=torch.float32))
-        self.register_buffer("p3_coeffs", torch.tensor(self._P3_COEFFS, dtype=torch.float32))
-
-    @staticmethod
-    def _polyval(x, coeffs):
-        y = coeffs[-1].to(dtype=x.dtype, device=x.device)
-        for coeff in coeffs[:-1].flip(0):
-            y = y * x + coeff.to(dtype=x.dtype, device=x.device)
-        return y
-
-    def forward(self, x):
-        compute_x = x.float()
-        p1_x = self._polyval(compute_x, self.p1_coeffs.float())
-        p2_x = self._polyval(p1_x, self.p2_coeffs.float())
-        p3_x = self._polyval(p2_x, self.p3_coeffs.float())
-        out = 0.5 * (compute_x + compute_x * p3_x)
-        return out.to(dtype=x.dtype)
-
-
-
-def collect_prelu_slopes(module):
-    slopes = []
-    for child in module.modules():
-        if isinstance(child, torch.nn.PReLU):
-            slopes.append(child.weight.detach().float().cpu().reshape(-1))
-    if not slopes:
-        return torch.tensor([0.25], dtype=torch.float32)
-    return torch.cat(slopes)
-
-
-def write_activation_comparison_plot(model, save_dir):
-    os.makedirs(save_dir, exist_ok=True)
-    slopes = collect_prelu_slopes(model)
-    slope_mean = float(slopes.mean())
-    slope_min = float(slopes.min())
-    slope_max = float(slopes.max())
-    x = torch.linspace(-2.0, 2.0, 4001)
-    precise = PreciseReLUAlpha10().eval()(x).detach().cpu().numpy()
-    x_np = x.numpy()
-    relu = np.maximum(x_np, 0.0)
-    prelu_mean = np.where(x_np >= 0.0, x_np, slope_mean * x_np)
-    prelu_min = np.where(x_np >= 0.0, x_np, slope_min * x_np)
-    prelu_max = np.where(x_np >= 0.0, x_np, slope_max * x_np)
-
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
-    for ax, xlim, title in (
-            (axes[0], (-1.0, 1.0), "Approximation range [-1, 1]"),
-            (axes[1], (-2.0, 2.0), "Outside range behavior [-2, 2]")):
-        ax.plot(x_np, precise, label="PreciseReLU alpha=10", linewidth=2.0)
-        ax.plot(x_np, relu, label="ReLU", linestyle="--", linewidth=1.4)
-        ax.plot(x_np, prelu_mean, label="trained PReLU mean slope", linewidth=1.4)
-        ax.fill_between(x_np, prelu_min, prelu_max, alpha=0.18, label="trained PReLU min/max slope")
-        ax.axvline(-1.0, color="gray", linestyle=":", linewidth=1.0)
-        ax.axvline(1.0, color="gray", linestyle=":", linewidth=1.0)
-        ax.set_xlim(*xlim)
-        ax.set_ylim(-0.75, 2.25)
-        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-        ax.set_title(title)
-        ax.set_xlabel("activation input")
-        ax.set_ylabel("activation output")
-    axes[0].legend(loc="upper left", fontsize=8)
-    fig.suptitle("IResNet50 activation replacement: PreciseReLU alpha=10 vs original trained PReLU")
-    fig.tight_layout()
-    out_path = os.path.join(save_dir, "precise_relu_alpha10_vs_prelu.png")
-    fig.savefig(out_path, dpi=160)
-    plt.close(fig)
-    print("Saved activation comparison plot to {}".format(out_path))
-    print("PReLU slope stats: min={:.6g}, mean={:.6g}, max={:.6g}, count={}".format(
-        slope_min, slope_mean, slope_max, slopes.numel()))
-
-
-class ActivationDebugRecorder:
-    _next_id = 0
-
-    def __init__(self, model, debug_dir, max_batches):
-        self.debug_dir = debug_dir
-        self.max_batches = int(max_batches)
-        self.batch_index = 0
-        self.handles = []
-        self.saved_nonfinite = set()
-        self.recorder_id = ActivationDebugRecorder._next_id
-        ActivationDebugRecorder._next_id += 1
-        os.makedirs(debug_dir, exist_ok=True)
-        self.csv_path = os.path.join(debug_dir, "activation_stats.csv")
-        write_header = not os.path.exists(self.csv_path)
-        self.csv_file = open(self.csv_path, "a", newline="")
-        self.fieldnames = [
-            "recorder_id", "batch", "module", "kind", "shape", "numel",
-            "finite", "nan", "posinf", "neginf", "finite_min", "finite_max",
-            "finite_mean", "finite_std", "finite_absmax",
-        ]
-        self.writer = csv.DictWriter(self.csv_file, fieldnames=self.fieldnames)
-        if write_header:
-            self.writer.writeheader()
-        for name, module in model.named_modules():
-            if isinstance(module, (PreciseReLUAlpha10, THORPolynomialGELU)):
-                self.handles.append(module.register_forward_hook(self._make_hook(name)))
-        print("Recording activation stats for {} modules into {}".format(
-            len(self.handles), self.csv_path))
-
-    def _enabled(self):
-        return self.max_batches <= 0 or self.batch_index < self.max_batches
-
-    def _make_hook(self, name):
-        def hook(module, inputs, output):
-            if not self._enabled() or not inputs:
-                return
-            self._write_stats(name, "input", inputs[0])
-            self._write_stats(name, "output", output)
-        return hook
-
-    def _write_stats(self, name, kind, tensor):
-        if not torch.is_tensor(tensor):
-            return
-        with torch.no_grad():
-            t = tensor.detach()
-            finite_mask = torch.isfinite(t)
-            finite_count = int(finite_mask.sum().item())
-            nan_count = int(torch.isnan(t).sum().item())
-            posinf_count = int(torch.isposinf(t).sum().item())
-            neginf_count = int(torch.isneginf(t).sum().item())
-            numel = int(t.numel())
-            if finite_count:
-                finite = t[finite_mask].float()
-                finite_min = float(finite.min().item())
-                finite_max = float(finite.max().item())
-                finite_mean = float(finite.mean().item())
-                finite_std = float(finite.std(unbiased=False).item())
-                finite_absmax = float(finite.abs().max().item())
-            else:
-                finite_min = finite_max = finite_mean = finite_std = finite_absmax = float("nan")
-            self.writer.writerow({
-                "recorder_id": self.recorder_id,
-                "batch": self.batch_index,
-                "module": name,
-                "kind": kind,
-                "shape": "x".join(str(v) for v in t.shape),
-                "numel": numel,
-                "finite": finite_count,
-                "nan": nan_count,
-                "posinf": posinf_count,
-                "neginf": neginf_count,
-                "finite_min": finite_min,
-                "finite_max": finite_max,
-                "finite_mean": finite_mean,
-                "finite_std": finite_std,
-                "finite_absmax": finite_absmax,
-            })
-            if finite_count != numel:
-                print("Non-finite {} detected at batch {}, module {}: nan={}, +inf={}, -inf={}".format(
-                    kind, self.batch_index, name, nan_count, posinf_count, neginf_count))
-                key = (name, kind)
-                if key not in self.saved_nonfinite:
-                    self.saved_nonfinite.add(key)
-                    sample = t[:min(8, t.shape[0])].detach().float().cpu().numpy() if t.ndim > 0 else t.detach().float().cpu().numpy()
-                    safe_name = name.replace(".", "_").replace("/", "_")
-                    out_path = os.path.join(
-                        self.debug_dir,
-                        "nonfinite_{}_{}_batch{}.npz".format(safe_name, kind, self.batch_index),
-                    )
-                    np.savez_compressed(out_path, values=sample)
-                    print("Saved first non-finite {} sample to {}".format(kind, out_path))
-            self.csv_file.flush()
-
-    def write_model_output_stats(self, tensor):
-        if self._enabled():
-            self._write_stats("model_output", "output", tensor)
-
-    def step(self):
-        self.batch_index += 1
-
-    def close(self):
-        for handle in self.handles:
-            handle.remove()
-        self.csv_file.close()
-
-def replace_resnet_activations_with_precise_relu(module):
-    replaced = 0
-    for name, child in module.named_children():
-        if isinstance(child, (torch.nn.PReLU)):
-            setattr(module, name, PreciseReLUAlpha10())
-            replaced += 1
-        else:
-            replaced += replace_resnet_activations_with_precise_relu(child)
-    return replaced
-
-
-def replace_poolformer_gelu_with_thor(module):
-    replaced = 0
-    for name, child in module.named_children():
-        if isinstance(child, THORPolynomialGELU):
-            continue
-        if isinstance(child, torch.nn.GELU):
-            setattr(module, name, THORPolynomialGELU())
-            replaced += 1
-        else:
-            replaced += replace_poolformer_gelu_with_thor(child)
-    return replaced
-
-
 class Embedding(object):
     def __init__(self, prefix, data_shape, batch_size=1):
         image_size = (112, 112)
@@ -374,13 +96,15 @@ class Embedding(object):
         global activation_plot_written
         save_path = os.path.join(result_dir, args.job)
         if network == "r50" and not args.skip_activation_plot and not activation_plot_written:
-            write_activation_comparison_plot(resnet, save_path)
+            write_activation_comparison_plot(resnet, save_path, input_scale=args.relu_poly_input_scale)
             activation_plot_written = True
         if network == "r50":
-            # replaced = replace_resnet_activations_with_precise_relu(resnet)
-            # print("Replaced {} ReLU/PReLU activations with precise ReLU alpha=10 for {} inference.".format(
-            #     replaced, network))
-            print("Skipping activation replacement for {} inference.".format(network))
+            replaced = replace_resnet_activations_with_poly(
+                resnet, input_scale=args.relu_poly_input_scale)
+            print("Replaced {} PReLU activations with slope-preserving precise polynomial PReLU "
+                  "for {} inference (input_scale={}).".format(
+                      replaced, network, args.relu_poly_input_scale))
+            # print("Skipping activation replacement for {} inference.".format(network))
         elif network.startswith("poolformer"):
             replaced = replace_poolformer_gelu_with_thor(resnet)
             print("Replaced {} GELU activations with THOR polynomial GELU for {} inference.".format(

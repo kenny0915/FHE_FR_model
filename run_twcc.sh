@@ -7,7 +7,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
     train_v2.py configs/ms1mv3_r50
 
 # test
-CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
+CUDA_VISIBLE_DEVICES=0 python eval_ijbc_replace_non_linear.py \
   --model-prefix work_dirs/ms1mv3_r50/model.pt \
   --image-path ijb/IJBC \
   --result-dir work_dirs/ms1mv3_r50/ijbc_result \

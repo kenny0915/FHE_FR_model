@@ -51,6 +51,31 @@ def conv1x1(in_planes, out_planes, stride=1):
         bias=False,
     )
 
+'''
+class CryptoFacePolyAct2d(nn.Module):
+    def __init__(self, num_channels: int, eps: float = 1e-05, quadratic_input_clip: float = 8.0):
+        super().__init__()
+        if num_channels <= 0:
+            raise ValueError('num_channels must be positive')
+        self.quadratic_input_clip = float(quadratic_input_clip)
+        self.bn_h1 = nn.BatchNorm2d(num_channels, eps=eps, affine=False, track_running_stats=False)
+        self.bn_h2 = nn.BatchNorm2d(num_channels, eps=eps, affine=False, track_running_stats=False)
+        self.gamma = nn.Parameter(torch.full((1, num_channels, 1, 1), 0.5))
+        self.beta = nn.Parameter(torch.zeros(1, num_channels, 1, 1))
+        self.register_buffer('coeff_h0', torch.tensor(1.0 / math.sqrt(2.0 * math.pi)))
+        self.register_buffer('coeff_h1', torch.tensor(0.5))
+        self.register_buffer('coeff_h2', torch.tensor(1.0 / math.sqrt(4.0 * math.pi)))
+    def forward(self, x):
+        h0 = torch.zeros_like(x)
+        h1 = self.bn_h1(x)
+        x_quadratic = x.float().clamp(-self.quadratic_input_clip, self.quadratic_input_clip)
+        h2_basis = (x_quadratic * x_quadratic - 1.0) * (1.0 / math.sqrt(2.0))
+        h2 = self.bn_h2(h2_basis.to(dtype=x.dtype))
+        out = self.coeff_h0.to(dtype=x.dtype, device=x.device) * h0
+        out = out + self.coeff_h1.to(dtype=x.dtype, device=x.device) * h1
+        out = out + self.coeff_h2.to(dtype=x.dtype, device=x.device) * h2
+        return self.gamma.to(dtype=x.dtype, device=x.device) * out + self.beta.to(dtype=x.dtype, device=x.device)
+'''
 
 class CryptoFacePolyAct2d(nn.Module):
     """Degree-2 AESPA HerPN block for 2D feature maps.
