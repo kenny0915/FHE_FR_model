@@ -1,9 +1,9 @@
 ### iresnet50
 # train
-CUDA_VISIBLE_DEVICES=0,1 torchrun \
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
     --master_port=29500 \
-    --nproc_per_node=2 \
-    train_v2.py configs/casia_r50
+    --nproc_per_node=4 \
+    train_v2.py configs/ms1mv3_r50_no_relu
 
 # test
 CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \

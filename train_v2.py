@@ -1,10 +1,13 @@
 import argparse
 import logging
+import math
 import os
 from datetime import datetime
 
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from backbones import get_model
 from dataset import get_dataloader
 from losses import build_margin_loss
@@ -56,6 +59,32 @@ def set_prepbn_progress(module: torch.nn.Module, current_step: int, total_steps:
         if hasattr(submodule, "set_progress"):
             submodule.set_progress(current_step, total_steps)
 
+
+
+class CryptoFaceArcFaceHead(nn.Module):
+    def __init__(self, embedding_dim: int, num_classes: int, s: float = 64.0, m: float = 0.5):
+        super().__init__()
+        self.kernel = nn.Parameter(torch.empty(embedding_dim, num_classes))
+        self.kernel.data.uniform_(-1, 1).renorm_(2, 1, 1e-5).mul_(1e5)
+        self.s = s
+        self.m = m
+        self.eps = 1e-4
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor):
+        embeddings = embeddings / torch.norm(embeddings, 2, 1, True)
+        kernel = self.kernel / torch.norm(self.kernel, 2, 0, True)
+        cosine = (embeddings @ kernel).clamp(-1 + self.eps, 1 - self.eps)
+
+        m_hot = torch.zeros(labels.size(0), cosine.size(1), device=cosine.device, dtype=cosine.dtype)
+        m_hot.scatter_(1, labels.reshape(-1, 1), self.m)
+
+        theta = cosine.acos()
+        theta_m = torch.clip(theta + m_hot, min=self.eps, max=math.pi - self.eps)
+        return theta_m.cos() * self.s
+
+
+def is_cryptoface_patch_training(cfg):
+    return cfg.network == "patch_cnn" and getattr(cfg, "patch_cnn_training", "") == "cryptoface"
 
 def main(args):
 
@@ -110,8 +139,18 @@ def main(args):
         cfg.num_workers
     )
 
-    backbone = get_model(
-        cfg.network, dropout=0.0, fp16=cfg.fp16, num_features=cfg.embedding_size).cuda()
+    model_kwargs = {
+        "dropout": 0.0,
+        "fp16": cfg.fp16,
+        "num_features": cfg.embedding_size,
+    }
+    if cfg.network == "patch_cnn":
+        model_kwargs.update(
+            input_size=getattr(cfg, "input_size", 112),
+            patch_size=getattr(cfg, "patch_size", 28),
+        )
+
+    backbone = get_model(cfg.network, **model_kwargs).cuda()
 
     backbone = torch.nn.parallel.DistributedDataParallel(
         module=backbone, broadcast_buffers=False, device_ids=[local_rank], bucket_cap_mb=16,
@@ -122,9 +161,29 @@ def main(args):
     # FIXME using gradient checkpoint if there are some unused parameters will cause error
     backbone._set_static_graph()
 
+    cryptoface_patch_training = is_cryptoface_patch_training(cfg)
+    if cryptoface_patch_training and world_size != 1:
+        raise ValueError("patch_cnn_training='cryptoface' matches the CryptoFace single-GPU training loop; use one process.")
+
     margin_loss = build_margin_loss(cfg)
 
-    if cfg.optimizer == "sgd":
+    if cryptoface_patch_training:
+        module_partial_fc = CryptoFaceArcFaceHead(
+            cfg.embedding_size,
+            cfg.num_classes,
+            s=float(getattr(cfg, "scale", 64.0)),
+            m=float(getattr(cfg, "cryptoface_arcface_margin", cfg.margin_list[1])),
+        ).cuda()
+        criterion = nn.CrossEntropyLoss()
+        opt = torch.optim.SGD(
+            params=[
+                {"params": [module_partial_fc.kernel], "weight_decay": cfg.weight_decay},
+                {"params": backbone.parameters()},
+            ],
+            lr=cfg.lr,
+            momentum=cfg.momentum,
+        )
+    elif cfg.optimizer == "sgd":
         module_partial_fc = PartialFC_V2(
             margin_loss, cfg.embedding_size, cfg.num_classes,
             cfg.sample_rate, False)
@@ -155,10 +214,19 @@ def main(args):
     else:
         prepbn_decay_steps = int(getattr(cfg, "prepbn_decay_steps", cfg.total_step))
 
-    lr_scheduler = PolynomialLRWarmup(
-        optimizer=opt,
-        warmup_iters=cfg.warmup_step,
-        total_iters=cfg.total_step)
+    lr_scheduler_name = getattr(cfg, "lr_scheduler", "polynomial")
+    lr_scheduler_step_per_epoch = cryptoface_patch_training and lr_scheduler_name == "multistep"
+    if lr_scheduler_step_per_epoch:
+        lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            opt,
+            milestones=list(getattr(cfg, "lr_milestones", [12, 20, 24])),
+            gamma=float(getattr(cfg, "lr_gamma", 0.1)),
+        )
+    else:
+        lr_scheduler = PolynomialLRWarmup(
+            optimizer=opt,
+            warmup_iters=cfg.warmup_step,
+            total_iters=cfg.total_step)
 
     start_epoch = 0
     global_step = 0
@@ -205,10 +273,21 @@ def main(args):
         for _, (img, local_labels) in enumerate(train_loader):
             global_step += 1
             set_prepbn_progress(backbone.module, global_step, prepbn_decay_steps)
-            local_embeddings = backbone(img)
+            backbone_output = backbone(img)
+            if cryptoface_patch_training:
+                local_embeddings, patch_pred, patch_target = backbone_output
+            else:
+                local_embeddings = backbone_output
             if not torch.isfinite(local_embeddings).all():
                 raise FloatingPointError(f"Non-finite embeddings at global_step={global_step}")
-            loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
+            if cryptoface_patch_training:
+                local_labels = local_labels.squeeze().long()
+                logits = module_partial_fc(local_embeddings, local_labels)
+                loss: torch.Tensor = criterion(logits, local_labels)
+                loss_jigsaw = F.cross_entropy(patch_pred, patch_target)
+                loss = loss + float(getattr(cfg, "patch_cnn_jigsaw_weight", 0.005)) * loss_jigsaw
+            else:
+                loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
 
@@ -219,10 +298,14 @@ def main(args):
                     if getattr(cfg, "check_finite_grads", False):
                         check_finite_gradients(backbone, "backbone", global_step)
                         check_finite_gradients(module_partial_fc, "partial_fc", global_step)
-                    total_norm = torch.nn.utils.clip_grad_norm_(
-                        clipped_params, grad_clip, error_if_nonfinite=False
-                    )
-                    if torch.isfinite(total_norm):
+                    if getattr(cfg, "gradient_clip_type", "norm") == "value":
+                        torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
+                        total_norm = torch.tensor(0.0, device=local_embeddings.device)
+                    else:
+                        total_norm = torch.nn.utils.clip_grad_norm_(
+                            clipped_params, grad_clip, error_if_nonfinite=False
+                        )
+                    if getattr(cfg, "gradient_clip_type", "norm") == "value" or torch.isfinite(total_norm):
                         amp.step(opt)
                     else:
                         logging.warning(
@@ -236,10 +319,14 @@ def main(args):
                 if global_step % cfg.gradient_acc == 0:
                     check_finite_gradients(backbone, "backbone", global_step)
                     check_finite_gradients(module_partial_fc, "partial_fc", global_step)
-                    torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
+                    if getattr(cfg, "gradient_clip_type", "norm") == "value":
+                        torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
+                    else:
+                        torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
                     opt.step()
                     opt.zero_grad()
-            lr_scheduler.step()
+            if not lr_scheduler_step_per_epoch:
+                lr_scheduler.step()
 
             with torch.no_grad():
                 if wandb_logger:
@@ -255,6 +342,9 @@ def main(args):
 
                 if global_step % cfg.verbose == 0 and global_step > 0:
                     callback_verification(global_step, backbone)
+
+        if lr_scheduler_step_per_epoch:
+            lr_scheduler.step()
 
         if cfg.save_all_states:
             checkpoint = {

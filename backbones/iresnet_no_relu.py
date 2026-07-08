@@ -78,14 +78,7 @@ class CryptoFacePolyAct2d(nn.Module):
 '''
 
 class CryptoFacePolyAct2d(nn.Module):
-    """Degree-2 AESPA HerPN block for 2D feature maps.
-
-    HerPN computes fixed Hermite-basis coefficients for ReLU, normalizes each
-    non-constant basis separately, accumulates them, then applies trainable
-    per-channel affine parameters gamma and beta.  For deep R50 training, the
-    quadratic basis input is clipped before squaring, and basis normalization
-    uses batch statistics during validation instead of fragile running stats.
-    """
+    """Degree-2 AESPA HerPN block for 2D feature maps."""
 
     def __init__(self, planes):
         super(CryptoFacePolyAct2d, self).__init__()

@@ -63,7 +63,7 @@ parser.add_argument('--activation-debug-batches', default=10, type=int,
                     help='number of forward_db batches to record when activation debugging is enabled; <=0 records all batches')
 parser.add_argument('--skip-activation-plot', action='store_true',
                     help='skip writing the PreciseReLU alpha=10 vs trained PReLU comparison plot')
-parser.add_argument('--relu-poly-input-scale', default=1.0, type=float,
+parser.add_argument('--relu-poly-input-scale', default=8.0, type=float,
                     help='scale s for approximating ReLU(x) as s * poly(x / s); choose s to cover activation inputs')
 parser.add_argument('--max-images', default=0, type=int,
                     help='debug limiter: only evaluate the first N images when >0')
