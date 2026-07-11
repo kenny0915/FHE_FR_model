@@ -40,6 +40,7 @@ ijb/
 IJB_release/
 datasets/
 data/
+tinyface/
 *.rec
 *.idx
 *.bin
