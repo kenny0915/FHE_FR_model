@@ -209,6 +209,34 @@ def read_image_feature(path):
 # In[ ]:
 
 
+def replace_nonfinite(name, values):
+    nonfinite_mask = ~np.isfinite(values)
+    nonfinite_count = int(np.count_nonzero(nonfinite_mask))
+    if nonfinite_count == 0:
+        return values
+
+    if values.ndim == 1:
+        bad_rows = np.where(nonfinite_mask)[0]
+    else:
+        bad_rows = np.where(np.any(nonfinite_mask, axis=1))[0]
+    print('Warning: {} contains {} non-finite values across {} rows. '
+          'Replacing them with 0. First bad rows: {}'.format(
+              name, nonfinite_count, len(bad_rows), bad_rows[:10].tolist()))
+    return np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def safe_l2_normalize(name, features, eps=1e-12):
+    features = replace_nonfinite(name, features)
+    norms = np.sqrt(np.sum(features ** 2, axis=1, keepdims=True))
+    bad_norm_rows = np.where((norms[:, 0] <= eps) | ~np.isfinite(norms[:, 0]))[0]
+    if len(bad_norm_rows) > 0:
+        print('Warning: {} has {} zero/non-finite norm rows. '
+              'Leaving those rows as zero. First rows: {}'.format(
+                  name, len(bad_norm_rows), bad_norm_rows[:10].tolist()))
+        norms[bad_norm_rows] = 1.0
+    return features / norms
+
+
 def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
     batch_size = args.batch_size
     data_shape = (3, 112, 112)
@@ -240,25 +268,28 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
             batch += 1
         faceness_scores.append(name_lmk_score[-1])
 
-    batch_data = np.empty((2 * rare_size, 3, 112, 112))
-    embedding = Embedding(model_path, data_shape, rare_size)
-    for img_index, each_line in enumerate(files[len(files) - rare_size:]):
-        name_lmk_score = each_line.strip().split(' ')
-        img_name = os.path.join(img_path, name_lmk_score[0])
-        img = cv2.imread(img_name)
-        lmk = np.array([float(x) for x in name_lmk_score[1:-1]],
-                       dtype=np.float32)
-        lmk = lmk.reshape((5, 2))
-        input_blob = embedding.get(img, lmk)
-        batch_data[2 * img_index][:] = input_blob[0]
-        batch_data[2 * img_index + 1][:] = input_blob[1]
-        if (img_index + 1) % rare_size == 0:
-            print('batch', batch)
-            img_feats[len(files) -
-                      rare_size:][:] = embedding.forward_db(batch_data)
-            batch += 1
-        faceness_scores.append(name_lmk_score[-1])
+    if rare_size > 0:
+        batch_data = np.empty((2 * rare_size, 3, 112, 112))
+        embedding = Embedding(model_path, data_shape, rare_size)
+        for img_index, each_line in enumerate(files[len(files) - rare_size:]):
+            name_lmk_score = each_line.strip().split(' ')
+            img_name = os.path.join(img_path, name_lmk_score[0])
+            img = cv2.imread(img_name)
+            lmk = np.array([float(x) for x in name_lmk_score[1:-1]],
+                           dtype=np.float32)
+            lmk = lmk.reshape((5, 2))
+            input_blob = embedding.get(img, lmk)
+            batch_data[2 * img_index][:] = input_blob[0]
+            batch_data[2 * img_index + 1][:] = input_blob[1]
+            if (img_index + 1) % rare_size == 0:
+                print('batch', batch)
+                img_feats[len(files) -
+                          rare_size:][:] = embedding.forward_db(batch_data)
+                batch += 1
+            faceness_scores.append(name_lmk_score[-1])
     faceness_scores = np.array(faceness_scores).astype(np.float32)
+    img_feats = replace_nonfinite('img_feats', img_feats)
+    faceness_scores = replace_nonfinite('faceness_scores', faceness_scores)
     # img_feats = np.ones( (len(files), 1024), dtype=np.float32) * 0.01
     # faceness_scores = np.ones( (len(files), ), dtype=np.float32 )
     return img_feats, faceness_scores
@@ -274,6 +305,8 @@ def image2template_feature(img_feats=None, templates=None, medias=None):
     # 3. compute template feature.
     # ==========================================================
     unique_templates = np.unique(templates)
+    img_feats = replace_nonfinite('img_feats before template aggregation',
+                                  img_feats)
     template_feats = np.zeros((len(unique_templates), img_feats.shape[1]))
 
     for count_template, uqt in enumerate(unique_templates):
@@ -299,6 +332,7 @@ def image2template_feature(img_feats=None, templates=None, medias=None):
             print('Finish Calculating {} template features.'.format(
                 count_template))
     # template_norm_feats = template_feats / np.sqrt(np.sum(template_feats ** 2, -1, keepdims=True))
+    template_feats = replace_nonfinite('template_feats', template_feats)
     template_norm_feats = sklearn.preprocessing.normalize(template_feats)
     # print(template_norm_feats.shape)
     return template_norm_feats, unique_templates
@@ -461,14 +495,16 @@ if use_norm_score:
     img_input_feats = img_input_feats
 else:
     # normalise features to remove norm information
-    img_input_feats = img_input_feats / np.sqrt(
-        np.sum(img_input_feats ** 2, -1, keepdims=True))
+    img_input_feats = safe_l2_normalize('img_input_feats', img_input_feats)
 
 if use_detector_score:
     print(img_input_feats.shape, faceness_scores.shape)
     img_input_feats = img_input_feats * faceness_scores[:, np.newaxis]
 else:
     img_input_feats = img_input_feats
+
+img_input_feats = replace_nonfinite('img_input_feats before template aggregation',
+                                    img_input_feats)
 
 template_norm_feats, unique_templates = image2template_feature(
     img_input_feats, templates, medias)
@@ -545,6 +581,4 @@ plt.title('ROC on IJB')
 plt.legend(loc="lower right")
 fig.savefig(os.path.join(save_path, '%s.pdf' % target.lower()))
 print(tpr_fpr_table)
-
-
 

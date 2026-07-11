@@ -1,17 +1,3 @@
-"""IResNet variant with AESPA-style HerPN activations.
-
-AESPA replaces BN+ReLU blocks with HerPN: a fixed low-degree Hermite
-approximation of ReLU with basis-wise normalization, followed by learnable
-affine scale and shift.  This file adapts the residual block to the AESPA
-ResNet pattern:
-
-    conv -> HerPN -> conv -> BN -> residual add -> HerPN
-
-The HerPN operation uses additions and multiplications, so its inference-time
-polynomial can be evaluated by HE/FHE backends after normalization statistics
-are folded into constants.
-"""
-
 import math
 
 import numpy as np
@@ -51,51 +37,35 @@ def conv1x1(in_planes, out_planes, stride=1):
         bias=False,
     )
 
-'''
-class CryptoFacePolyAct2d(nn.Module):
-    def __init__(self, num_channels: int, eps: float = 1e-05, quadratic_input_clip: float = 8.0):
-        super().__init__()
-        if num_channels <= 0:
-            raise ValueError('num_channels must be positive')
-        self.quadratic_input_clip = float(quadratic_input_clip)
-        self.bn_h1 = nn.BatchNorm2d(num_channels, eps=eps, affine=False, track_running_stats=False)
-        self.bn_h2 = nn.BatchNorm2d(num_channels, eps=eps, affine=False, track_running_stats=False)
-        self.gamma = nn.Parameter(torch.full((1, num_channels, 1, 1), 0.5))
-        self.beta = nn.Parameter(torch.zeros(1, num_channels, 1, 1))
-        self.register_buffer('coeff_h0', torch.tensor(1.0 / math.sqrt(2.0 * math.pi)))
-        self.register_buffer('coeff_h1', torch.tensor(0.5))
-        self.register_buffer('coeff_h2', torch.tensor(1.0 / math.sqrt(4.0 * math.pi)))
-    def forward(self, x):
-        h0 = torch.zeros_like(x)
-        h1 = self.bn_h1(x)
-        x_quadratic = x.float().clamp(-self.quadratic_input_clip, self.quadratic_input_clip)
-        h2_basis = (x_quadratic * x_quadratic - 1.0) * (1.0 / math.sqrt(2.0))
-        h2 = self.bn_h2(h2_basis.to(dtype=x.dtype))
-        out = self.coeff_h0.to(dtype=x.dtype, device=x.device) * h0
-        out = out + self.coeff_h1.to(dtype=x.dtype, device=x.device) * h1
-        out = out + self.coeff_h2.to(dtype=x.dtype, device=x.device) * h2
-        return self.gamma.to(dtype=x.dtype, device=x.device) * out + self.beta.to(dtype=x.dtype, device=x.device)
-'''
-
 class CryptoFacePolyAct2d(nn.Module):
     """Degree-2 AESPA HerPN block for 2D feature maps."""
 
     def __init__(self, planes):
         super(CryptoFacePolyAct2d, self).__init__()
-        self.bn0 = nn.BatchNorm2d(planes, affine=False)
-        self.bn1 = nn.BatchNorm2d(planes, affine=False)
-        self.bn2 = nn.BatchNorm2d(planes, affine=False)
-        self.weight = nn.Parameter(torch.ones(planes, 1, 1))
+        self.bn1 = nn.BatchNorm2d(planes, affine=False, eps=1e-4)
+        self.bn2 = nn.BatchNorm2d(planes, affine=False, eps=1e-4)
+        self.weight = nn.Parameter(torch.full((planes, 1, 1), 0.1))
         self.bias = nn.Parameter(torch.zeros(planes, 1, 1))
 
     def forward(self, x):
-        x0 = self.bn0(torch.ones_like(x))
+        x0 = torch.ones_like(x)
         x1 = self.bn1(x)
         x2 = self.bn2((torch.square(x) - 1) / math.sqrt(2))
         out = torch.divide(x0, math.sqrt(2 * math.pi)) + torch.divide(x1, 2) + torch.divide(x2, np.sqrt(4 * math.pi))
         out = self.weight * out + self.bias
         return out
-
+    
+class LearnableQuadraticAct2d(nn.Module):
+    def __init__(self, planes, init_a=0.0, init_b=1.0, init_c=0.0):
+        super().__init__()
+        shape = (planes, 1, 1)
+        self.bn = nn.BatchNorm2d(planes, affine=False)
+        self.a = nn.Parameter(torch.full(shape, float(init_a)))
+        self.b = nn.Parameter(torch.full(shape, float(init_b)))
+        self.c = nn.Parameter(torch.full(shape, float(init_c)))
+    def forward(self, x):
+        x_in = self.bn(x)
+        return self.a * x_in.square() + self.b * x_in + self.c
 
 class IBasicBlock(nn.Module):
     expansion = 1

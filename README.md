@@ -96,6 +96,27 @@ Argument notes:
 - `--network`: backbone name. This must match the architecture used during training.
 - `--job`: label used in result filenames and logs.
 
+## TinyFace Evaluation
+
+The uploaded TinyFace tree can be evaluated with `eval_tinyface.py`. The script reads
+`tinyface/Testing_Set/*_img_ID_pairs.mat`, extracts features for `Gallery_Match`,
+`Probe`, and `Gallery_Distractor`, writes MATLAB-compatible feature files, and reports
+TinyFace mAP/CMC metrics in Python.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python eval_tinyface.py \
+  --model-prefix work_dirs/casia_r50/model.pt \
+  --data-dir tinyface \
+  --result-dir work_dirs/casia_r50/tinyface_result \
+  --batch-size 256 \
+  --job casia_r50 \
+  --network r50
+```
+
+Outputs are written under `work_dirs/.../tinyface_result/<job>/`, including
+`features/gallery.mat`, `features/probe.mat`, `features/distractor.mat`,
+`tinyface_metrics.json`, `tinyface_ap.npy`, and `tinyface_first_ranks.npy`.
+
 ## Useful Documentation
 
 Additional setup and data preparation notes are available in:
