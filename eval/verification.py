@@ -25,6 +25,7 @@
 
 
 import datetime
+import logging
 import os
 import pickle
 
@@ -257,13 +258,16 @@ def load_bin(path, image_size):
     return data_list, issame_list
 
 @torch.no_grad()
-def test(data_set, backbone, batch_size, nfolds=10):
+def test(data_set, backbone, batch_size, nfolds=10, fail_on_nonfinite=False,
+         max_embedding_abs=None):
     print('testing verification..')
     data_list = data_set[0]
     issame_list = data_set[1]
     embeddings_list = []
     time_consumed = 0.0
     skipped_nonfinite = 0
+    largest_abs = 0.0
+    largest_abs_location = None
     for i in range(len(data_list)):
         data = data_list[i]
         embeddings = None
@@ -278,6 +282,11 @@ def test(data_set, backbone, batch_size, nfolds=10):
             finite_rows = torch.isfinite(net_out).all(dim=1)
             if not finite_rows.all():
                 bad_count = int((~finite_rows).sum().item())
+                if fail_on_nonfinite:
+                    raise FloatingPointError(
+                        f'Non-finite validation embeddings at flip={i}, '
+                        f'batch=({ba},{bb}), bad_rows={bad_count}'
+                    )
                 skipped_nonfinite += bad_count
                 finite = net_out[torch.isfinite(net_out)]
                 finite_max = finite.abs().max().item() if finite.numel() > 0 else float('nan')
@@ -287,6 +296,17 @@ def test(data_set, backbone, batch_size, nfolds=10):
                 )
                 net_out = net_out.clone()
                 net_out[~finite_rows] = 0
+            batch_abs = net_out.detach().float().abs().amax(dim=1)
+            batch_largest_abs, batch_largest_row = batch_abs.max(dim=0)
+            if batch_largest_abs.item() > largest_abs:
+                largest_abs = batch_largest_abs.item()
+                largest_abs_location = (i, ba + int(batch_largest_row.item()))
+            if max_embedding_abs is not None and largest_abs > max_embedding_abs:
+                raise FloatingPointError(
+                    f'Validation embedding range exceeded {max_embedding_abs:g}: '
+                    f'abs_max={largest_abs:g}, flip={largest_abs_location[0]}, '
+                    f'row={largest_abs_location[1]}'
+                )
             _embeddings = net_out.detach().cpu().numpy()
             time_now = datetime.datetime.now()
             diff = time_now - time0
@@ -306,6 +326,12 @@ def test(data_set, backbone, batch_size, nfolds=10):
             _xnorm += _norm
             _xnorm_cnt += 1
     _xnorm /= _xnorm_cnt
+    range_message = (
+        f'embedding_abs_max={largest_abs:g}, '
+        f'location={largest_abs_location}'
+    )
+    print(range_message)
+    logging.info(range_message)
     if skipped_nonfinite > 0:
         print(f'warning: total skipped non-finite validation embeddings: {skipped_nonfinite}')
 

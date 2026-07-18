@@ -60,6 +60,46 @@ def set_prepbn_progress(module: torch.nn.Module, current_step: int, total_steps:
             submodule.set_progress(current_step, total_steps)
 
 
+def cheby_progress_at_epoch(epoch_value, stage_epochs, transition_epochs):
+    if not stage_epochs:
+        return 5.0
+    transition_epochs = float(transition_epochs)
+    if transition_epochs <= 0:
+        raise ValueError("cheby_transition_epochs must be positive")
+    starts = tuple(float(value) for value in stage_epochs)
+    if len(starts) != 5:
+        raise ValueError("cheby_stage_epochs must contain stem/layer1/layer2/layer3/layer4 starts")
+    if any(right < left + transition_epochs for left, right in zip(starts, starts[1:])):
+        raise ValueError("Cheby stage transitions must be ordered and non-overlapping")
+    return sum(min(max((float(epoch_value) - start) / transition_epochs, 0.0), 1.0)
+               for start in starts)
+
+
+@torch.no_grad()
+def recalibrate_cheby_batchnorm(backbone, train_loader, num_batches, global_step):
+    module = backbone.module
+    if num_batches <= 0 or not hasattr(module, "begin_batchnorm_recalibration"):
+        return
+    state = module.begin_batchnorm_recalibration(reset=True)
+    completed = 0
+    try:
+        for batch in train_loader:
+            img = batch[0]
+            embeddings = backbone(img)
+            if not torch.isfinite(embeddings).all():
+                raise FloatingPointError(
+                    "Non-finite embeddings during Cheby BatchNorm recalibration "
+                    f"at global_step={global_step}, calibration_batch={completed}"
+                )
+            completed += 1
+            if completed >= num_batches:
+                break
+    finally:
+        module.end_batchnorm_recalibration(state)
+    if completed == 0:
+        raise RuntimeError("Cheby BatchNorm recalibration received no batches")
+
+
 
 class CryptoFaceArcFaceHead(nn.Module):
     def __init__(self, embedding_dim: int, num_classes: int, s: float = 64.0, m: float = 0.5):
@@ -149,11 +189,35 @@ def main(args):
             input_size=getattr(cfg, "input_size", 112),
             patch_size=getattr(cfg, "patch_size", 28),
         )
+    if cfg.network.startswith("r") and cfg.network.endswith("_no_relu"):
+        default_cheby_progress = (
+            0.0 if getattr(cfg, "cheby_stage_epochs", ()) else 5.0)
+        model_kwargs.update(
+            cheby_scales=getattr(cfg, "cheby_scales", None),
+            cheby_range_limit=float(getattr(cfg, "cheby_range_limit", 6.0)),
+            cheby_progress=float(getattr(
+                cfg, "cheby_initial_progress", default_cheby_progress)),
+        )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
+    backbone_init = getattr(cfg, "backbone_init", "")
+    if backbone_init and not cfg.resume:
+        init_checkpoint = torch.load(backbone_init, map_location="cpu")
+        if "state_dict_backbone" in init_checkpoint:
+            init_checkpoint = init_checkpoint["state_dict_backbone"]
+        backbone.load_state_dict(init_checkpoint, strict=True)
+        if hasattr(backbone, "set_cheby_progress"):
+            backbone.set_cheby_progress(
+                float(getattr(cfg, "cheby_initial_progress", 0.0)))
+        logging.info("Initialized backbone from %s", backbone_init)
+        del init_checkpoint
+    if getattr(cfg, "sync_bn", False):
+        backbone = torch.nn.SyncBatchNorm.convert_sync_batchnorm(backbone)
 
     backbone = torch.nn.parallel.DistributedDataParallel(
-        module=backbone, broadcast_buffers=False, device_ids=[local_rank], bucket_cap_mb=16,
+        module=backbone,
+        broadcast_buffers=bool(getattr(cfg, "broadcast_buffers", True)),
+        device_ids=[local_rank], bucket_cap_mb=16,
         find_unused_parameters=True)
     backbone.register_comm_hook(None, fp16_compress_hook)
 
@@ -246,7 +310,10 @@ def main(args):
 
     callback_verification = CallBackVerification(
         val_targets=cfg.val_targets, rec_prefix=cfg.rec, 
-        summary_writer=summary_writer, wandb_logger = wandb_logger
+        summary_writer=summary_writer, wandb_logger=wandb_logger,
+        fail_on_nonfinite=getattr(cfg, "fail_on_nonfinite_val", False),
+        max_embedding_abs=getattr(cfg, "max_validation_embedding_abs", None),
+        batch_size=getattr(cfg, "validation_batch_size", 10),
     )
     callback_logging = CallBackLogging(
         frequent=cfg.frequent,
@@ -266,13 +333,55 @@ def main(args):
         p for group in opt.param_groups for p in group["params"] if p.requires_grad
     ]
 
+    cheby_stage_epochs = tuple(getattr(cfg, "cheby_stage_epochs", ()))
+    cheby_transition_epochs = float(getattr(cfg, "cheby_transition_epochs", 1.0))
+    cheby_range_loss_weight = float(getattr(cfg, "cheby_range_loss_weight", 0.0))
+    cheby_bn_recalibration_batches = int(
+        getattr(cfg, "cheby_bn_recalibration_batches", 0))
+    cheby_enabled = hasattr(backbone.module, "set_cheby_progress")
+    if cheby_enabled and cheby_stage_epochs:
+        final_progress = cheby_progress_at_epoch(
+            cfg.num_epoch, cheby_stage_epochs, cheby_transition_epochs)
+        if getattr(cfg, "cheby_require_full_conversion", True) and final_progress < 5.0:
+            raise ValueError(
+                "Cheby schedule does not finish all five stages before training ends: "
+                f"final_progress={final_progress:.3f}"
+            )
+    completed_cheby_stages = int(math.floor(float(
+        backbone.module.cheby_progress.item()) + 1e-6)) if cheby_enabled else 0
+    max_steps_per_epoch = int(getattr(cfg, "max_steps_per_epoch", 0))
+    scheduled_steps_per_epoch = (
+        max_steps_per_epoch if max_steps_per_epoch > 0 else steps_per_epoch)
+
     for epoch in range(start_epoch, cfg.num_epoch):
 
         if isinstance(train_loader, DataLoader):
             train_loader.sampler.set_epoch(epoch)
-        for _, (img, local_labels) in enumerate(train_loader):
+        if cheby_enabled and cheby_stage_epochs:
+            epoch_cheby_progress = cheby_progress_at_epoch(
+                epoch, cheby_stage_epochs, cheby_transition_epochs)
+            backbone.module.set_cheby_progress(epoch_cheby_progress)
+            newly_completed = int(math.floor(epoch_cheby_progress + 1e-6))
+            if newly_completed > completed_cheby_stages:
+                if rank == 0:
+                    logging.info(
+                        "Cheby stage %d/5 completed; recalibrating BatchNorm with %d batches",
+                        newly_completed, cheby_bn_recalibration_batches)
+                recalibrate_cheby_batchnorm(
+                    backbone, train_loader, cheby_bn_recalibration_batches, global_step)
+                if cfg.dali:
+                    train_loader.reset()
+                completed_cheby_stages = newly_completed
+        for step_in_epoch, (img, local_labels) in enumerate(train_loader):
+            if max_steps_per_epoch > 0 and step_in_epoch >= max_steps_per_epoch:
+                break
             global_step += 1
             set_prepbn_progress(backbone.module, global_step, prepbn_decay_steps)
+            if cheby_enabled and cheby_stage_epochs:
+                fractional_epoch = epoch + step_in_epoch / max(
+                    scheduled_steps_per_epoch, 1)
+                backbone.module.set_cheby_progress(cheby_progress_at_epoch(
+                    fractional_epoch, cheby_stage_epochs, cheby_transition_epochs))
             backbone_output = backbone(img)
             if cryptoface_patch_training:
                 local_embeddings, patch_pred, patch_target = backbone_output
@@ -288,6 +397,14 @@ def main(args):
                 loss = loss + float(getattr(cfg, "patch_cnn_jigsaw_weight", 0.005)) * loss_jigsaw
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
+            range_penalty = local_embeddings.new_zeros(())
+            if cheby_enabled and cheby_range_loss_weight > 0:
+                range_penalty = backbone.module.cheby_range_penalty()
+                if not torch.isfinite(range_penalty):
+                    raise FloatingPointError(
+                        f"Non-finite Cheby range penalty at global_step={global_step}"
+                    )
+                loss = loss + cheby_range_loss_weight * range_penalty
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
 
@@ -333,14 +450,38 @@ def main(args):
                     wandb_logger.log({
                         'Loss/Step Loss': loss.item(),
                         'Loss/Train Loss': loss_am.avg,
+                        'Loss/Cheby Range Penalty': range_penalty.item(),
+                        'Process/Cheby Progress': (
+                            float(backbone.module.cheby_progress.item())
+                            if cheby_enabled else 0.0),
                         'Process/Step': global_step,
                         'Process/Epoch': epoch
                     })
+
+                if (summary_writer is not None and cheby_enabled and
+                        global_step % cfg.frequent == 0):
+                    range_summary = backbone.module.cheby_range_summary()
+                    summary_writer.add_scalar(
+                        'Loss/Cheby Range Penalty', range_penalty.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Process/Cheby Progress',
+                        float(backbone.module.cheby_progress.item()), global_step)
+                    summary_writer.add_scalar(
+                        'Cheby/Input Abs Max',
+                        float(range_summary['input_absmax'].item()), global_step)
+                    summary_writer.add_scalar(
+                        'Cheby/Outside Range Fraction',
+                        float(range_summary['outside_fraction'].item()), global_step)
                     
                 loss_am.update(loss.item(), 1)
                 callback_logging(global_step, loss_am, epoch, cfg.fp16, lr_scheduler.get_last_lr()[0], amp)
 
                 if global_step % cfg.verbose == 0 and global_step > 0:
+                    if rank == 0 and getattr(cfg, "save_validation_snapshots", False):
+                        torch.save(
+                            backbone.module.state_dict(),
+                            os.path.join(cfg.output, "model_validation.pt"),
+                        )
                     callback_verification(global_step, backbone)
 
         if lr_scheduler_step_per_epoch:

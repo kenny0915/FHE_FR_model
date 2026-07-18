@@ -53,6 +53,11 @@ parser.add_argument('--network', default='iresnet50', type=str, help='')
 parser.add_argument('--job', default='insightface', type=str, help='job name')
 parser.add_argument('--target', default='IJBC', type=str, help='target, set to IJBC or IJBB')
 parser.add_argument(
+    '--fail-on-nonfinite',
+    action='store_true',
+    help='abort immediately if an image produces a non-finite embedding',
+)
+parser.add_argument(
     '--layer3-herpn-bn2-eps',
     default=None,
     type=float,
@@ -112,6 +117,7 @@ class Embedding(object):
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()
+        self.nonfinite_rows = 0
         src = np.array([
             [30.2946, 51.6963],
             [65.5318, 51.5014],
@@ -156,6 +162,14 @@ class Embedding(object):
         imgs = torch.Tensor(batch_data).cuda()
         imgs.div_(255).sub_(0.5).div_(0.5)
         feat = self.model(imgs)
+        finite_rows = torch.isfinite(feat).all(dim=1)
+        bad_rows = int((~finite_rows).sum().item())
+        self.nonfinite_rows += bad_rows
+        if bad_rows and args.fail_on_nonfinite:
+            raise FloatingPointError(
+                f'Non-finite embeddings detected for {bad_rows} augmented images; '
+                f'total so far: {self.nonfinite_rows}'
+            )
         feat = feat.reshape([self.batch_size, 2 * feat.shape[1]])
         return feat.cpu().numpy()
 
@@ -243,6 +257,7 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
 
     batch_data = np.empty((2 * batch_size, 3, 112, 112))
     embedding = Embedding(model_path, data_shape, batch_size)
+    nonfinite_rows = 0
     for img_index, each_line in enumerate(files[:len(files) - rare_size]):
         name_lmk_score = each_line.strip().split(' ')
         img_name = os.path.join(img_path, name_lmk_score[0])
@@ -260,6 +275,7 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
                                          batch_size][:] = embedding.forward_db(batch_data)
             batch += 1
         faceness_scores.append(name_lmk_score[-1])
+    nonfinite_rows += embedding.nonfinite_rows
 
     if rare_size > 0:
         batch_data = np.empty((2 * rare_size, 3, 112, 112))
@@ -280,6 +296,8 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
                           rare_size:][:] = embedding.forward_db(batch_data)
                 batch += 1
             faceness_scores.append(name_lmk_score[-1])
+        nonfinite_rows += embedding.nonfinite_rows
+    print('Non-finite augmented embedding rows: {}'.format(nonfinite_rows))
     faceness_scores = np.array(faceness_scores).astype(np.float32)
     img_feats = replace_nonfinite('img_feats', img_feats)
     faceness_scores = replace_nonfinite('faceness_scores', faceness_scores)

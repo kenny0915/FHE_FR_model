@@ -60,48 +60,34 @@ class THORPolynomialGELU(torch.nn.Module):
 
 
 class ChebyReLU(torch.nn.Module):
-    # Chebyshev-series ReLU approximation.  The coefficients below are for
-    # ReLU on [-8, 8], evaluated as sum_k c[k] * T_k(x / 8).
-    _BASE_INPUT_SCALE = 8.0
-    _COEFFS = (
-        2.543127175018449, 4.0, 1.70437780204034,
-        1.332267629550188e-17, -0.3463200070300677,
-        -5.508773534534857e-17, 0.1524120582428881,
-        1.953992523340275e-16, -0.08789765011016817,
-        1.101341240428155e-15, 0.0587128815294474,
-        -3.197442310920452e-16, -0.04315677513473855,
-        -2.908784324517911e-16, 0.03400319644994088,
-        1.331266357714207e-16, -0.02828606013001417,
-        -4.840572387365683e-16, 0.02461226294320633,
-        -2.224886941348814e-15, -0.02226746374879984,
-        1.691979889528739e-15, 0.02086831710746249,
-        1.045830089196897e-15, -0.02021270055138155,
-    )
+    _NORMALIZED_POWER_COEFFS = (1.05146222424, -0.581234022404)
 
     def __init__(self, input_scale=8.0):
         super().__init__()
         if input_scale <= 0:
-            raise ValueError("input_scale must be positive")
-        self.input_scale = float(input_scale)
-        self.register_buffer("coeffs", torch.tensor(self._COEFFS, dtype=torch.float32))
-
-    @staticmethod
-    def _chebval(x, coeffs):
-        if coeffs.numel() == 1:
-            return coeffs[0].to(dtype=x.dtype, device=x.device) + torch.zeros_like(x)
-        b_kplus1 = torch.zeros_like(x)
-        b_kplus2 = torch.zeros_like(x)
-        for coeff in coeffs[1:].flip(0):
-            b_k = 2.0 * x * b_kplus1 - b_kplus2 + coeff.to(dtype=x.dtype, device=x.device)
-            b_kplus2 = b_kplus1
-            b_kplus1 = b_k
-        return x * b_kplus1 - b_kplus2 + coeffs[0].to(dtype=x.dtype, device=x.device)
+            raise ValueError('input_scale must be positive')
+        self.register_buffer(
+            'input_scale', torch.tensor(float(input_scale), dtype=torch.float32))
+        self.register_buffer(
+            'normalized_power_coeffs',
+            torch.tensor(self._NORMALIZED_POWER_COEFFS, dtype=torch.float32))
 
     def forward(self, x):
-        compute_x = x.float()
-        scaled_x = compute_x / self.input_scale
-        coeff_scale = self.input_scale / self._BASE_INPUT_SCALE
-        out = coeff_scale * self._chebval(scaled_x, self.coeffs.float())
+        compute_dtype = (
+            torch.float32
+            if x.dtype in (torch.float16, torch.bfloat16)
+            else x.dtype
+        )
+        compute_x = x.to(dtype=compute_dtype)
+        scale = self.input_scale.to(device=x.device, dtype=compute_dtype)
+        coefficients = self.normalized_power_coeffs.to(
+            device=x.device, dtype=compute_dtype)
+
+        z = compute_x / scale
+        z_squared = z * z
+        z_fourth = z_squared * z_squared
+        even_part = coefficients[0] * z_squared + coefficients[1] * z_fourth
+        out = 0.5 * compute_x + scale * even_part
         return out.to(dtype=x.dtype)
 
 

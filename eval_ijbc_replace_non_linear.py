@@ -95,16 +95,15 @@ class Embedding(object):
         resnet.load_state_dict(weight)
         global activation_plot_written
         save_path = os.path.join(result_dir, args.job)
-        if network == "r50" and not args.skip_activation_plot and not activation_plot_written:
-            write_activation_comparison_plot(resnet, save_path, input_scale=args.relu_poly_input_scale)
-            activation_plot_written = True
+        #if network == "r50" and not args.skip_activation_plot and not activation_plot_written:
+        #    write_activation_comparison_plot(resnet, save_path, input_scale=args.relu_poly_input_scale)
+        #    activation_plot_written = True
         if network == "r50":
             replaced = replace_resnet_activations_with_poly(
                 resnet, input_scale=args.relu_poly_input_scale)
             print("Replaced {} PReLU activations with slope-preserving precise polynomial PReLU "
                   "for {} inference (input_scale={}).".format(
                       replaced, network, args.relu_poly_input_scale))
-            # print("Skipping activation replacement for {} inference.".format(network))
         elif network.startswith("poolformer"):
             replaced = replace_poolformer_gelu_with_thor(resnet)
             print("Replaced {} GELU activations with THOR polynomial GELU for {} inference.".format(

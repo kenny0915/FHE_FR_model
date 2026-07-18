@@ -13,23 +13,30 @@ from torch import distributed
 
 class CallBackVerification(object):
     
-    def __init__(self, val_targets, rec_prefix, summary_writer=None, image_size=(112, 112), wandb_logger=None):
+    def __init__(self, val_targets, rec_prefix, summary_writer=None, image_size=(112, 112),
+                 wandb_logger=None, fail_on_nonfinite=False,
+                 max_embedding_abs=None, batch_size=10):
         self.rank: int = distributed.get_rank()
         self.highest_acc: float = 0.0
         self.highest_acc_list: List[float] = [0.0] * len(val_targets)
         self.ver_list: List[object] = []
         self.ver_name_list: List[str] = []
-        if self.rank is 0:
+        if self.rank == 0:
             self.init_dataset(val_targets=val_targets, data_dir=rec_prefix, image_size=image_size)
 
         self.summary_writer = summary_writer
         self.wandb_logger = wandb_logger
+        self.fail_on_nonfinite = bool(fail_on_nonfinite)
+        self.max_embedding_abs = max_embedding_abs
+        self.batch_size = int(batch_size)
 
     def ver_test(self, backbone: torch.nn.Module, global_step: int):
         results = []
         for i in range(len(self.ver_list)):
             acc1, std1, acc2, std2, xnorm, embeddings_list = verification.test(
-                self.ver_list[i], backbone, 10, 10)
+                self.ver_list[i], backbone, self.batch_size, 10,
+                fail_on_nonfinite=self.fail_on_nonfinite,
+                max_embedding_abs=self.max_embedding_abs)
             logging.info('[%s][%d]XNorm: %f' % (self.ver_name_list[i], global_step, xnorm))
             logging.info('[%s][%d]Accuracy-Flip: %1.5f+-%1.5f' % (self.ver_name_list[i], global_step, acc2, std2))
 
@@ -59,7 +66,7 @@ class CallBackVerification(object):
                 self.ver_name_list.append(name)
 
     def __call__(self, num_update, backbone: torch.nn.Module):
-        if self.rank is 0 and num_update > 0:
+        if self.rank == 0 and num_update > 0:
             backbone.eval()
             self.ver_test(backbone, num_update)
             backbone.train()
