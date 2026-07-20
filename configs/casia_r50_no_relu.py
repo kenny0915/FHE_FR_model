@@ -8,7 +8,7 @@ config = edict()
 config.margin_list = (1.0, 0.5, 0.0)
 config.network = "r50_no_relu"
 config.resume = False
-config.output = "work_dirs/casia_r50_no_relu_stable_v8"
+config.output = "work_dirs/casia_r50_herpn"
 config.embedding_size = 512
 config.sample_rate = 1.0
 config.fp16 = False
@@ -24,23 +24,18 @@ config.fail_on_nonfinite_val = True
 config.max_validation_embedding_abs = 1e6
 config.save_validation_snapshots = True
 config.validation_batch_size = 128
-# Progressive polynomial training. Progress 0 uses PReLU; progress 5 is
-# polynomial-only. Each tuple entry starts stem/layer1/layer2/layer3/layer4.
-config.cheby_initial_progress = 0.0
+# Progressive normalized degree-2 HerPN training. Each tuple entry starts
+# stem/layer1/layer2/layer3/layer4; progress 5 is polynomial-only.
+config.herpn_initial_progress = 0.0
 config.backbone_init = "work_dirs/casia_r50/model.pt"
-config.cheby_scales = {
-    "stem": 8.0,
-    "layer1": 8.0,
-    "layer2": 7.0,
-    "layer3": 6.5,
-    "layer4": 6.5,
-}
-config.cheby_range_limit = 6.0
-config.cheby_range_loss_weight = 0.01
-config.cheby_stage_epochs = (2, 6, 10, 14, 18)
-config.cheby_transition_epochs = 2.0
-config.cheby_bn_recalibration_batches = 100
-config.cheby_require_full_conversion = True
+config.herpn_bn_eps = 1e-4
+config.herpn_range_limit = 6.0
+config.herpn_range_loss_weight = 0.1
+config.herpn_distill_loss_weight = 0.1
+config.herpn_stage_epochs = (2, 6, 10, 14, 18)
+config.herpn_transition_epochs = 2.0
+config.herpn_bn_recalibration_batches = 100
+config.herpn_require_full_conversion = True
 # config.lr_steps = [20, 28, 32]
 config.verbose = 2000
 config.dali = False

@@ -3,7 +3,7 @@ from easydict import EasyDict as edict
 
 config = edict()
 config.network = "r50_no_relu"
-config.output = "work_dirs/casia_r50_no_relu_stable_v8_smoke"
+config.output = "work_dirs/casia_r50_herpn_smoke"
 config.rec = "./faces_webface_112x112/"
 config.num_classes = 10572
 config.num_image = 25600

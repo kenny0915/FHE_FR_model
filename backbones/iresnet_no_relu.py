@@ -1,25 +1,20 @@
+import math
+
 import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
 __all__ = [
     'iresnet18', 'iresnet34', 'iresnet50', 'iresnet100', 'iresnet200',
-    'ChebyReLU', 'ProgressiveChebyActivation',
+    'HerPN', 'FoldedHerPN', 'ProgressiveHerPNActivation',
 ]
 using_ckpt = False
 
-_CHEBY_STAGE_NAMES = ('stem', 'layer1', 'layer2', 'layer3', 'layer4')
-_DEFAULT_CHEBY_SCALES = {
-    'stem': 8.0,
-    'layer1': 8.0,
-    'layer2': 7.0,
-    'layer3': 6.5,
-    'layer4': 6.5,
-}
+_HERPN_STAGE_NAMES = ('stem', 'layer1', 'layer2', 'layer3', 'layer4')
 
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
-    """3x3 convolution with padding"""
+    """3x3 convolution with padding."""
     return nn.Conv2d(in_planes,
                      out_planes,
                      kernel_size=3,
@@ -31,7 +26,7 @@ def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
 
 
 def conv1x1(in_planes, out_planes, stride=1):
-    """1x1 convolution"""
+    """1x1 convolution."""
     return nn.Conv2d(in_planes,
                      out_planes,
                      kernel_size=1,
@@ -39,18 +34,21 @@ def conv1x1(in_planes, out_planes, stride=1):
                      bias=False)
 
 
-class ChebyReLU(nn.Module):
-    _NORMALIZED_POWER_COEFFS = (1.05146222424, -0.581234022404)
+class HerPN(nn.Module):
+    """CryptoFace's normalized degree-2 Hermite polynomial activation.
 
-    def __init__(self, input_scale=8.0):
+    The three non-affine BatchNorms normalize the Hermite bases during
+    training. Once their running statistics are calibrated, this module is
+    exactly a channel-wise quadratic A*x^2 + B*x + C at inference time.
+    """
+
+    def __init__(self, channels, eps=1e-5):
         super().__init__()
-        if input_scale <= 0:
-            raise ValueError('input_scale must be positive')
-        self.register_buffer(
-            'input_scale', torch.tensor(float(input_scale), dtype=torch.float32))
-        self.register_buffer(
-            'normalized_power_coeffs',
-            torch.tensor(self._NORMALIZED_POWER_COEFFS, dtype=torch.float32))
+        self.bn0 = nn.BatchNorm2d(channels, eps=eps, affine=False)
+        self.bn1 = nn.BatchNorm2d(channels, eps=eps, affine=False)
+        self.bn2 = nn.BatchNorm2d(channels, eps=eps, affine=False)
+        self.weight = nn.Parameter(torch.ones(channels, 1, 1))
+        self.bias = nn.Parameter(torch.zeros(channels, 1, 1))
 
     def forward(self, x):
         compute_dtype = (
@@ -59,39 +57,88 @@ class ChebyReLU(nn.Module):
             else x.dtype
         )
         compute_x = x.to(dtype=compute_dtype)
-        scale = self.input_scale.to(device=x.device, dtype=compute_dtype)
-        coefficients = self.normalized_power_coeffs.to(
-            device=x.device, dtype=compute_dtype)
-
-        z = compute_x / scale
-        z_squared = z * z
-        z_fourth = z_squared * z_squared
-        even_part = coefficients[0] * z_squared + coefficients[1] * z_fourth
-        out = 0.5 * compute_x + scale * even_part
+        x0 = self.bn0(torch.ones_like(compute_x))
+        x1 = self.bn1(compute_x)
+        x2 = self.bn2((compute_x.square() - 1.0) / math.sqrt(2.0))
+        basis = (
+            x0 / math.sqrt(2.0 * math.pi)
+            + x1 / 2.0
+            + x2 / math.sqrt(4.0 * math.pi)
+        )
+        out = self.weight.to(dtype=compute_dtype) * basis
+        out = out + self.bias.to(dtype=compute_dtype)
         return out.to(dtype=x.dtype)
 
+    @torch.no_grad()
+    def folded_coefficients(self):
+        """Return coefficients for the exactly equivalent eval polynomial."""
+        if self.training or self.bn0.training or self.bn1.training or self.bn2.training:
+            raise RuntimeError('HerPN must be in eval mode before it can be folded')
 
-class ProgressiveChebyActivation(nn.Module):
-    """Training-only PReLU-to-Cheby transition with range regularization.
+        mean0, var0 = self.bn0.running_mean, self.bn0.running_var
+        mean1, var1 = self.bn1.running_mean, self.bn1.running_var
+        mean2, var2 = self.bn2.running_mean, self.bn2.running_var
+        weight = self.weight.squeeze(-1).squeeze(-1)
+        bias = self.bias.squeeze(-1).squeeze(-1)
+        eps0, eps1, eps2 = self.bn0.eps, self.bn1.eps, self.bn2.eps
 
-    At blend=0 this is a trainable PReLU, and at blend=1 its eval-time
-    forward is exactly ChebyReLU. Intermediate blends make it possible to
-    convert one IResNet stage at a time without abruptly changing every
-    activation distribution.
-    """
+        coefficient2 = weight / torch.sqrt(8.0 * math.pi * (var2 + eps2))
+        coefficient1 = weight / (2.0 * torch.sqrt(var1 + eps1))
+        coefficient0 = bias + weight * (
+            (1.0 - mean0) / torch.sqrt(2.0 * math.pi * (var0 + eps0))
+            - mean1 / (2.0 * torch.sqrt(var1 + eps1))
+            - (1.0 + math.sqrt(2.0) * mean2)
+            / torch.sqrt(8.0 * math.pi * (var2 + eps2))
+        )
+        return tuple(
+            coefficient.unsqueeze(-1).unsqueeze(-1)
+            for coefficient in (coefficient2, coefficient1, coefficient0)
+        )
 
-    def __init__(self, channels, input_scale, range_limit=6.0,
+
+class FoldedHerPN(nn.Module):
+    """Inference-only quadratic produced by folding a calibrated HerPN."""
+
+    def __init__(self, coefficient2, coefficient1, coefficient0):
+        super().__init__()
+        self.register_buffer('coefficient2', coefficient2.detach().clone())
+        self.register_buffer('coefficient1', coefficient1.detach().clone())
+        self.register_buffer('coefficient0', coefficient0.detach().clone())
+
+    @classmethod
+    def from_herpn(cls, herpn):
+        return cls(*herpn.folded_coefficients())
+
+    def forward(self, x):
+        compute_dtype = (
+            torch.float32
+            if x.dtype in (torch.float16, torch.bfloat16)
+            else x.dtype
+        )
+        compute_x = x.to(dtype=compute_dtype)
+        coefficient2 = self.coefficient2.to(dtype=compute_dtype)
+        coefficient1 = self.coefficient1.to(dtype=compute_dtype)
+        coefficient0 = self.coefficient0.to(dtype=compute_dtype)
+        out = coefficient2 * compute_x.square() + coefficient1 * compute_x
+        return (out + coefficient0).to(dtype=x.dtype)
+
+
+class ProgressiveHerPNActivation(nn.Module):
+    """PReLU-compatible wrapper for a staged PReLU-to-HerPN conversion."""
+
+    def __init__(self, channels, range_limit=6.0, bn_eps=1e-4,
                  stage_index=0, blend=1.0):
         super().__init__()
         if range_limit <= 0:
             raise ValueError('range_limit must be positive')
         self.prelu = nn.PReLU(channels)
-        self.cheby = ChebyReLU(input_scale=input_scale)
+        self.herpn = HerPN(channels, eps=bn_eps)
         self.stage_index = int(stage_index)
         self.register_buffer('blend', torch.tensor(float(blend), dtype=torch.float32))
         self.register_buffer(
             'range_limit', torch.tensor(float(range_limit), dtype=torch.float32))
         self._last_range_penalty = None
+        self._last_distillation_loss = None
         self._last_input_absmax = None
         self._last_outside_fraction = None
         self._blend = 0.0
@@ -107,38 +154,36 @@ class ProgressiveChebyActivation(nn.Module):
     def range_penalty(self):
         return self._last_range_penalty
 
+    def distillation_loss(self):
+        return self._last_distillation_loss
+
     def range_stats(self):
         return {
             'absmax': self._last_input_absmax,
             'outside_fraction': self._last_outside_fraction,
-            'scale': self.cheby.input_scale.detach(),
             'blend': self.blend.detach(),
         }
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        # Accept both the old direct-Cheby checkpoints (input_scale/coeffs)
-        # and ordinary IResNet PReLU checkpoints (weight).
-        legacy_to_new = {
-            prefix + 'weight': prefix + 'prelu.weight',
-            prefix + 'input_scale': prefix + 'cheby.input_scale',
-            prefix + 'normalized_power_coeffs': prefix + 'cheby.normalized_power_coeffs',
-        }
-        for old_key, new_key in legacy_to_new.items():
-            if old_key in state_dict and new_key not in state_dict:
-                state_dict[new_key] = state_dict.pop(old_key)
+        # An ordinary IResNet checkpoint stores e.g. layer1.0.prelu.weight.
+        # Preserve strict loading by moving it into this wrapper's PReLU.
+        old_key = prefix + 'weight'
+        new_key = prefix + 'prelu.weight'
+        if old_key in state_dict and new_key not in state_dict:
+            state_dict[new_key] = state_dict.pop(old_key)
 
-        defaults = {
-            prefix + 'prelu.weight': self.prelu.weight.detach(),
-            prefix + 'cheby.input_scale': self.cheby.input_scale.detach(),
-            prefix + 'cheby.normalized_power_coeffs':
-                self.cheby.normalized_power_coeffs.detach(),
-            prefix + 'blend': self.blend.detach(),
-            prefix + 'range_limit': self.range_limit.detach(),
-        }
-        for key, value in defaults.items():
-            if key not in state_dict:
-                state_dict[key] = value
+        # A PReLU checkpoint naturally has no HerPN state. Initialize all new
+        # state only in that case. If any HerPN key exists, strict=True still
+        # reports a partially written/corrupt HerPN checkpoint.
+        has_herpn_state = any(
+            key.startswith(prefix + 'herpn.') for key in state_dict)
+        if not has_herpn_state:
+            for local_key, value in self.state_dict().items():
+                full_key = prefix + local_key
+                if full_key not in state_dict:
+                    state_dict[full_key] = value.detach()
+
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
@@ -149,48 +194,44 @@ class ProgressiveChebyActivation(nn.Module):
             compute_x = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
             limit = self.range_limit.to(device=x.device, dtype=compute_x.dtype)
             excess = torch.relu(compute_x.abs() - limit)
-            # This loss is consumed by train_v2.py and is absent from the
-            # final inference graph.
-            self._last_range_penalty = (excess * excess).mean()
+            mean_tail = excess.square().mean()
+            sample_tail = excess.flatten(1).amax(dim=1).square().mean()
+            self._last_range_penalty = mean_tail + 0.1 * sample_tail
             self._last_input_absmax = compute_x.detach().abs().amax()
             self._last_outside_fraction = (excess.detach() > 0).float().mean()
         else:
             self._last_range_penalty = None
+            self._last_distillation_loss = None
 
         blend = self._blend
-        if blend <= 0.0:
+        if not self.training and blend <= 0.0:
             return self.prelu(x)
 
-        cheby_out = self.cheby(x)
+        # Evaluate both branches in training even at the endpoints. This warms
+        # every HerPN BN before conversion and keeps DDP's graph stationary.
+        prelu_out = self.prelu(x)
+        herpn_out = self.herpn(x)
+        if self.training:
+            target = prelu_out.detach().float()
+            self._last_distillation_loss = (
+                (1.0 - blend) * (herpn_out.float() - target).square().mean()
+            )
+
+        if blend <= 0.0:
+            return prelu_out + herpn_out * 0.0
         if blend >= 1.0:
-            if self.training:
-                # Keep the PReLU parameter in DDP's graph while its
-                # contribution is zero. In eval mode the path is polynomial-only.
-                return cheby_out + self.prelu(x) * 0.0
-            return cheby_out
-        return (1.0 - blend) * self.prelu(x) + blend * cheby_out
+            return herpn_out + prelu_out * 0.0 if self.training else herpn_out
+        return (1.0 - blend) * prelu_out + blend * herpn_out
 
-
-def _normalize_cheby_scales(scales):
-    if scales is None:
-        return dict(_DEFAULT_CHEBY_SCALES)
-    if isinstance(scales, (int, float)):
-        values = {name: float(scales) for name in _CHEBY_STAGE_NAMES}
-    elif isinstance(scales, dict):
-        values = dict(_DEFAULT_CHEBY_SCALES)
-        values.update({name: float(value) for name, value in scales.items()})
-    else:
-        if len(scales) != len(_CHEBY_STAGE_NAMES):
-            raise ValueError('cheby_scales must have {} values'.format(
-                len(_CHEBY_STAGE_NAMES)))
-        values = dict(zip(_CHEBY_STAGE_NAMES, map(float, scales)))
-    if any(value <= 0 for value in values.values()):
-        raise ValueError('all Cheby input scales must be positive')
-    return values
+    def folded(self):
+        if self._blend < 1.0:
+            raise RuntimeError('Only a fully converted HerPN activation can be folded')
+        return FoldedHerPN.from_herpn(self.herpn)
 
 
 class IBasicBlock(nn.Module):
     expansion = 1
+
     def __init__(self, inplanes, planes, stride=1, downsample=None,
                  groups=1, base_width=64, dilation=1,
                  activation_factory=None):
@@ -199,14 +240,16 @@ class IBasicBlock(nn.Module):
             raise ValueError('BasicBlock only supports groups=1 and base_width=64')
         if dilation > 1:
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
-        self.bn1 = nn.BatchNorm2d(inplanes, eps=1e-05,)
+        self.bn1 = nn.BatchNorm2d(inplanes, eps=1e-5)
         self.conv1 = conv3x3(inplanes, planes)
-        self.bn2 = nn.BatchNorm2d(planes, eps=1e-05,)
+        self.bn2 = nn.BatchNorm2d(planes, eps=1e-5)
         if activation_factory is None:
-            activation_factory = lambda channels: ChebyReLU(input_scale=8.0)
+            activation_factory = HerPN
+        # Keep the original attribute name so the IResNet topology and old
+        # PReLU checkpoint locations do not change.
         self.prelu = activation_factory(planes)
         self.conv2 = conv3x3(planes, planes, stride)
-        self.bn3 = nn.BatchNorm2d(planes, eps=1e-05,)
+        self.bn3 = nn.BatchNorm2d(planes, eps=1e-5)
         self.downsample = downsample
         self.stride = stride
 
@@ -226,87 +269,79 @@ class IBasicBlock(nn.Module):
     def forward(self, x):
         if self.training and using_ckpt:
             return checkpoint(self.forward_impl, x)
-        else:
-            return self.forward_impl(x)
+        return self.forward_impl(x)
 
 
 class IResNet(nn.Module):
     fc_scale = 7 * 7
+
     def __init__(self,
                  block, layers, dropout=0, num_features=512, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 fp16=False, cheby_scales=None, cheby_range_limit=6.0,
-                 cheby_progress=5.0):
+                 fp16=False, herpn_range_limit=6.0, herpn_bn_eps=1e-4,
+                 herpn_progress=5.0):
         super(IResNet, self).__init__()
         self.extra_gflops = 0.0
         self.fp16 = fp16
         self.inplanes = 64
         self.dilation = 1
-        self.cheby_scales = _normalize_cheby_scales(cheby_scales)
-        self.cheby_range_limit = float(cheby_range_limit)
+        self.herpn_range_limit = float(herpn_range_limit)
+        self.herpn_bn_eps = float(herpn_bn_eps)
         self.register_buffer(
-            'cheby_progress', torch.tensor(float(cheby_progress), dtype=torch.float32),
+            'herpn_progress', torch.tensor(float(herpn_progress), dtype=torch.float32),
             persistent=False)
         if replace_stride_with_dilation is None:
             replace_stride_with_dilation = [False, False, False]
         if len(replace_stride_with_dilation) != 3:
             raise ValueError("replace_stride_with_dilation should be None "
-                             "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
+                             "or a 3-element tuple, got {}".format(
+                                 replace_stride_with_dilation))
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(self.inplanes, eps=1e-05)
+        self.conv1 = nn.Conv2d(
+            3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(self.inplanes, eps=1e-5)
         self.prelu = self._make_activation(self.inplanes, 'stem')
-        self.layer1 = self._make_layer(block, 64, layers[0], stride=2,
-                                       stage_name='layer1')
-        self.layer2 = self._make_layer(block,
-                                       128,
-                                       layers[1],
-                                       stride=2,
-                                       dilate=replace_stride_with_dilation[0],
-                                       stage_name='layer2')
-        self.layer3 = self._make_layer(block,
-                                       256,
-                                       layers[2],
-                                       stride=2,
-                                       dilate=replace_stride_with_dilation[1],
-                                       stage_name='layer3')
-        self.layer4 = self._make_layer(block,
-                                       512,
-                                       layers[3],
-                                       stride=2,
-                                       dilate=replace_stride_with_dilation[2],
-                                       stage_name='layer4')
-        self.bn2 = nn.BatchNorm2d(512 * block.expansion, eps=1e-05,)
+        self.layer1 = self._make_layer(
+            block, 64, layers[0], stride=2, stage_name='layer1')
+        self.layer2 = self._make_layer(
+            block, 128, layers[1], stride=2,
+            dilate=replace_stride_with_dilation[0], stage_name='layer2')
+        self.layer3 = self._make_layer(
+            block, 256, layers[2], stride=2,
+            dilate=replace_stride_with_dilation[1], stage_name='layer3')
+        self.layer4 = self._make_layer(
+            block, 512, layers[3], stride=2,
+            dilate=replace_stride_with_dilation[2], stage_name='layer4')
+        self.bn2 = nn.BatchNorm2d(512 * block.expansion, eps=1e-5)
         self.dropout = nn.Dropout(p=dropout, inplace=True)
         self.fc = nn.Linear(512 * block.expansion * self.fc_scale, num_features)
-        self.features = nn.BatchNorm1d(num_features, eps=1e-05)
+        self.features = nn.BatchNorm1d(num_features, eps=1e-5)
         nn.init.constant_(self.features.weight, 1.0)
         self.features.weight.requires_grad = False
 
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.normal_(m.weight, 0, 0.1)
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+        for module in self.modules():
+            if isinstance(module, nn.Conv2d):
+                nn.init.normal_(module.weight, 0, 0.1)
+            elif isinstance(module, (nn.BatchNorm2d, nn.GroupNorm)):
+                if module.weight is not None:
+                    nn.init.constant_(module.weight, 1)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
 
         if zero_init_residual:
-            for m in self.modules():
-                if isinstance(m, IBasicBlock):
-                    nn.init.constant_(m.bn2.weight, 0)
+            for module in self.modules():
+                if isinstance(module, IBasicBlock):
+                    nn.init.constant_(module.bn2.weight, 0)
 
-        self.set_cheby_progress(cheby_progress)
+        self.set_herpn_progress(herpn_progress)
 
-    def _make_activation(self, channels, stage_name, activation_name=None):
-        stage_index = _CHEBY_STAGE_NAMES.index(stage_name)
-        input_scale = self.cheby_scales.get(
-            activation_name, self.cheby_scales[stage_name])
-        return ProgressiveChebyActivation(
+    def _make_activation(self, channels, stage_name):
+        return ProgressiveHerPNActivation(
             channels=channels,
-            input_scale=input_scale,
-            range_limit=self.cheby_range_limit,
-            stage_index=stage_index,
+            range_limit=self.herpn_range_limit,
+            bn_eps=self.herpn_bn_eps,
+            stage_index=_HERPN_STAGE_NAMES.index(stage_name),
             blend=0.0,
         )
 
@@ -320,20 +355,19 @@ class IResNet(nn.Module):
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
                 conv1x1(self.inplanes, planes * block.expansion, stride),
-                nn.BatchNorm2d(planes * block.expansion, eps=1e-05, ),
+                nn.BatchNorm2d(planes * block.expansion, eps=1e-5),
             )
         layers = []
         activation_factory = lambda channels: self._make_activation(
-            channels, stage_name, '{}.0.prelu'.format(stage_name))
+            channels, stage_name)
         layers.append(
             block(self.inplanes, planes, stride, downsample, self.groups,
                   self.base_width, previous_dilation,
                   activation_factory=activation_factory))
         self.inplanes = planes * block.expansion
-        for block_index in range(1, blocks):
-            activation_factory = lambda channels, index=block_index: self._make_activation(
-                channels, stage_name,
-                '{}.{}.prelu'.format(stage_name, index))
+        for _ in range(1, blocks):
+            activation_factory = lambda channels: self._make_activation(
+                channels, stage_name)
             layers.append(
                 block(self.inplanes,
                       planes,
@@ -341,21 +375,21 @@ class IResNet(nn.Module):
                       base_width=self.base_width,
                       dilation=self.dilation,
                       activation_factory=activation_factory))
-
         return nn.Sequential(*layers)
 
     def progressive_activations(self):
         return [module for module in self.modules()
-                if isinstance(module, ProgressiveChebyActivation)]
+                if isinstance(module, ProgressiveHerPNActivation)]
 
-    def set_cheby_progress(self, progress):
-        """Set conversion progress: 0=PReLU, 5=all five stages Cheby."""
-        progress = min(max(float(progress), 0.0), float(len(_CHEBY_STAGE_NAMES)))
-        self.cheby_progress.fill_(progress)
+    def set_herpn_progress(self, progress):
+        """Set conversion progress: 0=PReLU, 5=all five stages HerPN."""
+        progress = min(max(float(progress), 0.0), float(len(_HERPN_STAGE_NAMES)))
+        self.herpn_progress.fill_(progress)
         for activation in self.progressive_activations():
-            activation.set_blend(min(max(progress - activation.stage_index, 0.0), 1.0))
+            activation.set_blend(
+                min(max(progress - activation.stage_index, 0.0), 1.0))
 
-    def cheby_range_penalty(self):
+    def herpn_range_penalty(self):
         penalties = [activation.range_penalty()
                      for activation in self.progressive_activations()]
         penalties = [penalty for penalty in penalties if penalty is not None]
@@ -363,15 +397,23 @@ class IResNet(nn.Module):
             return next(self.parameters()).new_zeros(())
         return torch.stack(penalties).mean()
 
-    def cheby_range_stats(self):
+    def herpn_distillation_loss(self):
+        losses = [activation.distillation_loss()
+                  for activation in self.progressive_activations()]
+        losses = [loss for loss in losses if loss is not None]
+        if not losses:
+            return next(self.parameters()).new_zeros(())
+        return torch.stack(losses).mean()
+
+    def herpn_range_stats(self):
         stats = {}
         for name, module in self.named_modules():
-            if isinstance(module, ProgressiveChebyActivation):
+            if isinstance(module, ProgressiveHerPNActivation):
                 stats[name] = module.range_stats()
         return stats
 
-    def cheby_range_summary(self):
-        stats = list(self.cheby_range_stats().values())
+    def herpn_range_summary(self):
+        stats = list(self.herpn_range_stats().values())
         absmax = [item['absmax'] for item in stats if item['absmax'] is not None]
         outside = [item['outside_fraction'] for item in stats
                    if item['outside_fraction'] is not None]
@@ -405,6 +447,24 @@ class IResNet(nn.Module):
         for module, was_training, momentum in state['batchnorm']:
             module.momentum = momentum
             module.train(was_training)
+
+    @torch.no_grad()
+    def fold_herpn_for_inference(self):
+        """Replace fully converted wrappers by their exact Ax^2+Bx+C form."""
+        if self.training:
+            raise RuntimeError('Call eval() before folding HerPN activations')
+        if float(self.herpn_progress.item()) < float(len(_HERPN_STAGE_NAMES)):
+            raise RuntimeError('All five stages must be converted before folding')
+
+        def replace(module):
+            for name, child in list(module.named_children()):
+                if isinstance(child, ProgressiveHerPNActivation):
+                    setattr(module, name, child.folded())
+                else:
+                    replace(child)
+
+        replace(self)
+        return self
 
     def forward(self, x):
         with torch.cuda.amp.autocast(self.fp16):

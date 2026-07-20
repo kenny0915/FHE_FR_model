@@ -15,13 +15,13 @@ from backbones import get_model
 
 
 TARGET_BN_EPS_LAYERS = {
-    'layer3.7.herpn.bn2',
-    'layer3.8.herpn.bn2',
-    'layer3.9.herpn.bn2',
-    'layer3.10.herpn.bn2',
-    'layer3.11.herpn.bn2',
-    'layer3.12.herpn.bn2',
-    'layer3.13.herpn.bn2',
+    'layer3.7.prelu.herpn.bn2',
+    'layer3.8.prelu.herpn.bn2',
+    'layer3.9.prelu.herpn.bn2',
+    'layer3.10.prelu.herpn.bn2',
+    'layer3.11.prelu.herpn.bn2',
+    'layer3.12.prelu.herpn.bn2',
+    'layer3.13.prelu.herpn.bn2',
 }
 
 

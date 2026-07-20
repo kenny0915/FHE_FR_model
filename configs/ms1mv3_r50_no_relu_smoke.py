@@ -4,7 +4,7 @@ from configs.ms1mv3_r50_no_relu import config as training_config
 
 
 config = deepcopy(training_config)
-config.output = "work_dirs/ms1mv3_r50_no_relu_progressive_smoke"
+config.output = "work_dirs/ms1mv3_r50_herpn_smoke"
 config.resume = False
 config.sync_bn = False
 config.broadcast_buffers = True
@@ -19,6 +19,6 @@ config.val_targets = []
 config.save_all_states = False
 
 # Exercise every transition and every post-stage BN recalibration quickly.
-config.cheby_stage_epochs = (0, 1, 2, 3, 4)
-config.cheby_transition_epochs = 1.0
-config.cheby_bn_recalibration_batches = 1
+config.herpn_stage_epochs = (0, 1, 2, 3, 4)
+config.herpn_transition_epochs = 1.0
+config.herpn_bn_recalibration_batches = 1

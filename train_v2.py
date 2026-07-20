@@ -60,23 +60,23 @@ def set_prepbn_progress(module: torch.nn.Module, current_step: int, total_steps:
             submodule.set_progress(current_step, total_steps)
 
 
-def cheby_progress_at_epoch(epoch_value, stage_epochs, transition_epochs):
+def herpn_progress_at_epoch(epoch_value, stage_epochs, transition_epochs):
     if not stage_epochs:
         return 5.0
     transition_epochs = float(transition_epochs)
     if transition_epochs <= 0:
-        raise ValueError("cheby_transition_epochs must be positive")
+        raise ValueError("herpn_transition_epochs must be positive")
     starts = tuple(float(value) for value in stage_epochs)
     if len(starts) != 5:
-        raise ValueError("cheby_stage_epochs must contain stem/layer1/layer2/layer3/layer4 starts")
+        raise ValueError("herpn_stage_epochs must contain stem/layer1/layer2/layer3/layer4 starts")
     if any(right < left + transition_epochs for left, right in zip(starts, starts[1:])):
-        raise ValueError("Cheby stage transitions must be ordered and non-overlapping")
+        raise ValueError("HerPN stage transitions must be ordered and non-overlapping")
     return sum(min(max((float(epoch_value) - start) / transition_epochs, 0.0), 1.0)
                for start in starts)
 
 
 @torch.no_grad()
-def recalibrate_cheby_batchnorm(backbone, train_loader, num_batches, global_step):
+def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step):
     module = backbone.module
     if num_batches <= 0 or not hasattr(module, "begin_batchnorm_recalibration"):
         return
@@ -88,7 +88,7 @@ def recalibrate_cheby_batchnorm(backbone, train_loader, num_batches, global_step
             embeddings = backbone(img)
             if not torch.isfinite(embeddings).all():
                 raise FloatingPointError(
-                    "Non-finite embeddings during Cheby BatchNorm recalibration "
+                    "Non-finite embeddings during HerPN BatchNorm recalibration "
                     f"at global_step={global_step}, calibration_batch={completed}"
                 )
             completed += 1
@@ -97,7 +97,7 @@ def recalibrate_cheby_batchnorm(backbone, train_loader, num_batches, global_step
     finally:
         module.end_batchnorm_recalibration(state)
     if completed == 0:
-        raise RuntimeError("Cheby BatchNorm recalibration received no batches")
+        raise RuntimeError("HerPN BatchNorm recalibration received no batches")
 
 
 
@@ -190,13 +190,13 @@ def main(args):
             patch_size=getattr(cfg, "patch_size", 28),
         )
     if cfg.network.startswith("r") and cfg.network.endswith("_no_relu"):
-        default_cheby_progress = (
-            0.0 if getattr(cfg, "cheby_stage_epochs", ()) else 5.0)
+        default_herpn_progress = (
+            0.0 if getattr(cfg, "herpn_stage_epochs", ()) else 5.0)
         model_kwargs.update(
-            cheby_scales=getattr(cfg, "cheby_scales", None),
-            cheby_range_limit=float(getattr(cfg, "cheby_range_limit", 6.0)),
-            cheby_progress=float(getattr(
-                cfg, "cheby_initial_progress", default_cheby_progress)),
+            herpn_range_limit=float(getattr(cfg, "herpn_range_limit", 6.0)),
+            herpn_bn_eps=float(getattr(cfg, "herpn_bn_eps", 1e-4)),
+            herpn_progress=float(getattr(
+                cfg, "herpn_initial_progress", default_herpn_progress)),
         )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
@@ -206,9 +206,9 @@ def main(args):
         if "state_dict_backbone" in init_checkpoint:
             init_checkpoint = init_checkpoint["state_dict_backbone"]
         backbone.load_state_dict(init_checkpoint, strict=True)
-        if hasattr(backbone, "set_cheby_progress"):
-            backbone.set_cheby_progress(
-                float(getattr(cfg, "cheby_initial_progress", 0.0)))
+        if hasattr(backbone, "set_herpn_progress"):
+            backbone.set_herpn_progress(
+                float(getattr(cfg, "herpn_initial_progress", 0.0)))
         logging.info("Initialized backbone from %s", backbone_init)
         del init_checkpoint
     if getattr(cfg, "sync_bn", False):
@@ -333,22 +333,23 @@ def main(args):
         p for group in opt.param_groups for p in group["params"] if p.requires_grad
     ]
 
-    cheby_stage_epochs = tuple(getattr(cfg, "cheby_stage_epochs", ()))
-    cheby_transition_epochs = float(getattr(cfg, "cheby_transition_epochs", 1.0))
-    cheby_range_loss_weight = float(getattr(cfg, "cheby_range_loss_weight", 0.0))
-    cheby_bn_recalibration_batches = int(
-        getattr(cfg, "cheby_bn_recalibration_batches", 0))
-    cheby_enabled = hasattr(backbone.module, "set_cheby_progress")
-    if cheby_enabled and cheby_stage_epochs:
-        final_progress = cheby_progress_at_epoch(
-            cfg.num_epoch, cheby_stage_epochs, cheby_transition_epochs)
-        if getattr(cfg, "cheby_require_full_conversion", True) and final_progress < 5.0:
+    herpn_stage_epochs = tuple(getattr(cfg, "herpn_stage_epochs", ()))
+    herpn_transition_epochs = float(getattr(cfg, "herpn_transition_epochs", 1.0))
+    herpn_range_loss_weight = float(getattr(cfg, "herpn_range_loss_weight", 0.0))
+    herpn_distill_loss_weight = float(getattr(cfg, "herpn_distill_loss_weight", 0.0))
+    herpn_bn_recalibration_batches = int(
+        getattr(cfg, "herpn_bn_recalibration_batches", 0))
+    herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
+    if herpn_enabled and herpn_stage_epochs:
+        final_progress = herpn_progress_at_epoch(
+            cfg.num_epoch, herpn_stage_epochs, herpn_transition_epochs)
+        if getattr(cfg, "herpn_require_full_conversion", True) and final_progress < 5.0:
             raise ValueError(
-                "Cheby schedule does not finish all five stages before training ends: "
+                "HerPN schedule does not finish all five stages before training ends: "
                 f"final_progress={final_progress:.3f}"
             )
-    completed_cheby_stages = int(math.floor(float(
-        backbone.module.cheby_progress.item()) + 1e-6)) if cheby_enabled else 0
+    completed_herpn_stages = int(math.floor(float(
+        backbone.module.herpn_progress.item()) + 1e-6)) if herpn_enabled else 0
     max_steps_per_epoch = int(getattr(cfg, "max_steps_per_epoch", 0))
     scheduled_steps_per_epoch = (
         max_steps_per_epoch if max_steps_per_epoch > 0 else steps_per_epoch)
@@ -357,31 +358,31 @@ def main(args):
 
         if isinstance(train_loader, DataLoader):
             train_loader.sampler.set_epoch(epoch)
-        if cheby_enabled and cheby_stage_epochs:
-            epoch_cheby_progress = cheby_progress_at_epoch(
-                epoch, cheby_stage_epochs, cheby_transition_epochs)
-            backbone.module.set_cheby_progress(epoch_cheby_progress)
-            newly_completed = int(math.floor(epoch_cheby_progress + 1e-6))
-            if newly_completed > completed_cheby_stages:
+        if herpn_enabled and herpn_stage_epochs:
+            epoch_herpn_progress = herpn_progress_at_epoch(
+                epoch, herpn_stage_epochs, herpn_transition_epochs)
+            backbone.module.set_herpn_progress(epoch_herpn_progress)
+            newly_completed = int(math.floor(epoch_herpn_progress + 1e-6))
+            if newly_completed > completed_herpn_stages:
                 if rank == 0:
                     logging.info(
-                        "Cheby stage %d/5 completed; recalibrating BatchNorm with %d batches",
-                        newly_completed, cheby_bn_recalibration_batches)
-                recalibrate_cheby_batchnorm(
-                    backbone, train_loader, cheby_bn_recalibration_batches, global_step)
+                        "HerPN stage %d/5 completed; recalibrating BatchNorm with %d batches",
+                        newly_completed, herpn_bn_recalibration_batches)
+                recalibrate_herpn_batchnorm(
+                    backbone, train_loader, herpn_bn_recalibration_batches, global_step)
                 if cfg.dali:
                     train_loader.reset()
-                completed_cheby_stages = newly_completed
+                completed_herpn_stages = newly_completed
         for step_in_epoch, (img, local_labels) in enumerate(train_loader):
             if max_steps_per_epoch > 0 and step_in_epoch >= max_steps_per_epoch:
                 break
             global_step += 1
             set_prepbn_progress(backbone.module, global_step, prepbn_decay_steps)
-            if cheby_enabled and cheby_stage_epochs:
+            if herpn_enabled and herpn_stage_epochs:
                 fractional_epoch = epoch + step_in_epoch / max(
                     scheduled_steps_per_epoch, 1)
-                backbone.module.set_cheby_progress(cheby_progress_at_epoch(
-                    fractional_epoch, cheby_stage_epochs, cheby_transition_epochs))
+                backbone.module.set_herpn_progress(herpn_progress_at_epoch(
+                    fractional_epoch, herpn_stage_epochs, herpn_transition_epochs))
             backbone_output = backbone(img)
             if cryptoface_patch_training:
                 local_embeddings, patch_pred, patch_target = backbone_output
@@ -398,13 +399,21 @@ def main(args):
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
             range_penalty = local_embeddings.new_zeros(())
-            if cheby_enabled and cheby_range_loss_weight > 0:
-                range_penalty = backbone.module.cheby_range_penalty()
+            distillation_loss = local_embeddings.new_zeros(())
+            if herpn_enabled and herpn_range_loss_weight > 0:
+                range_penalty = backbone.module.herpn_range_penalty()
                 if not torch.isfinite(range_penalty):
                     raise FloatingPointError(
-                        f"Non-finite Cheby range penalty at global_step={global_step}"
+                        f"Non-finite HerPN range penalty at global_step={global_step}"
                     )
-                loss = loss + cheby_range_loss_weight * range_penalty
+                loss = loss + herpn_range_loss_weight * range_penalty
+            if herpn_enabled and herpn_distill_loss_weight > 0:
+                distillation_loss = backbone.module.herpn_distillation_loss()
+                if not torch.isfinite(distillation_loss):
+                    raise FloatingPointError(
+                        f"Non-finite HerPN distillation loss at global_step={global_step}"
+                    )
+                loss = loss + herpn_distill_loss_weight * distillation_loss
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
 
@@ -450,27 +459,30 @@ def main(args):
                     wandb_logger.log({
                         'Loss/Step Loss': loss.item(),
                         'Loss/Train Loss': loss_am.avg,
-                        'Loss/Cheby Range Penalty': range_penalty.item(),
-                        'Process/Cheby Progress': (
-                            float(backbone.module.cheby_progress.item())
-                            if cheby_enabled else 0.0),
+                        'Loss/HerPN Range Penalty': range_penalty.item(),
+                        'Loss/HerPN Distillation': distillation_loss.item(),
+                        'Process/HerPN Progress': (
+                            float(backbone.module.herpn_progress.item())
+                            if herpn_enabled else 0.0),
                         'Process/Step': global_step,
                         'Process/Epoch': epoch
                     })
 
-                if (summary_writer is not None and cheby_enabled and
+                if (summary_writer is not None and herpn_enabled and
                         global_step % cfg.frequent == 0):
-                    range_summary = backbone.module.cheby_range_summary()
+                    range_summary = backbone.module.herpn_range_summary()
                     summary_writer.add_scalar(
-                        'Loss/Cheby Range Penalty', range_penalty.item(), global_step)
+                        'Loss/HerPN Range Penalty', range_penalty.item(), global_step)
                     summary_writer.add_scalar(
-                        'Process/Cheby Progress',
-                        float(backbone.module.cheby_progress.item()), global_step)
+                        'Loss/HerPN Distillation', distillation_loss.item(), global_step)
                     summary_writer.add_scalar(
-                        'Cheby/Input Abs Max',
+                        'Process/HerPN Progress',
+                        float(backbone.module.herpn_progress.item()), global_step)
+                    summary_writer.add_scalar(
+                        'HerPN/Input Abs Max',
                         float(range_summary['input_absmax'].item()), global_step)
                     summary_writer.add_scalar(
-                        'Cheby/Outside Range Fraction',
+                        'HerPN/Outside Range Fraction',
                         float(range_summary['outside_fraction'].item()), global_step)
                     
                 loss_am.update(loss.item(), 1)
