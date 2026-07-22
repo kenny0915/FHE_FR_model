@@ -261,6 +261,13 @@ def load_bin(path, image_size):
 def test(data_set, backbone, batch_size, nfolds=10, fail_on_nonfinite=False,
          max_embedding_abs=None):
     print('testing verification..')
+    # Validation .bin files are deliberately kept in host memory.  Move each
+    # batch to the device that owns the evaluated backbone instead of relying
+    # on a process-wide default tensor type/device.
+    try:
+        backbone_device = next(backbone.parameters()).device
+    except StopIteration:
+        backbone_device = next(backbone.buffers()).device
     data_list = data_set[0]
     issame_list = data_set[1]
     embeddings_list = []
@@ -277,7 +284,8 @@ def test(data_set, backbone, batch_size, nfolds=10, fail_on_nonfinite=False,
             count = bb - ba
             _data = data[bb - batch_size: bb]
             time0 = datetime.datetime.now()
-            img = ((_data / 255) - 0.5) / 0.5
+            img = _data.to(device=backbone_device, non_blocking=True)
+            img = ((img / 255) - 0.5) / 0.5
             net_out: torch.Tensor = backbone(img)
             finite_rows = torch.isfinite(net_out).all(dim=1)
             if not finite_rows.all():
