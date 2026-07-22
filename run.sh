@@ -24,11 +24,11 @@ CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
   --network r18_no_relu
 
 CUDA_VISIBLE_DEVICES=1 python eval_ijbc.py \
-  --model-prefix work_dirs/ms1mv3_r50_herpn/model.pt \
+  --model-prefix work_dirs/ms1mv3_r50_herpn_blockwise/model.pt \
   --image-path ijb/IJBC \
-  --result-dir work_dirs/ms1mv3_r50_herpn/ijbc_result \
+  --result-dir work_dirs/ms1mv3_r50_herpn_blockwise/ijbc_result \
   --batch-size 256 \
-  --job ms1mv3_r50_herpn \
+  --job ms1mv3_r50_herpn_blockwise \
   --target IJBC \
   --network r50_no_relu
 

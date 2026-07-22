@@ -254,6 +254,10 @@ def get_model(name, **kwargs):
             num_classes=num_features,
             face_embedding=True,
             fp16=fp16,
+            gate_range_limit=kwargs.get("gate_range_limit", 6.0),
+            gate_stats_sample_size=kwargs.get("gate_stats_sample_size", 16384),
+            gate_compute_fp32=kwargs.get("gate_compute_fp32", True),
+            gate_fail_on_nonfinite=kwargs.get("gate_fail_on_nonfinite", True),
         )
 
     elif name == "vit_t":

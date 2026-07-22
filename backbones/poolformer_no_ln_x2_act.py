@@ -34,10 +34,125 @@ trunc_normal_ = base.trunc_normal_
 
 
 class SimpleGate(nn.Module):
-    """Split channels into two halves and multiply them elementwise."""
+    """NAFNet SimpleGate with opt-in range and gradient instrumentation.
+
+    This is a bilinear gate ``x1 * x2``, not the scalar activation ``x**2``.
+    Statistics are captured only when explicitly enabled so normal training has
+    no quantile/reduction overhead. The multiplication can be evaluated in
+    float32 under AMP to avoid an avoidable fp16 overflow during training.
+    """
+    def __init__(self, range_limit=6.0, sample_size=16384,
+                 compute_fp32=True, fail_on_nonfinite=True):
+        super().__init__()
+        if range_limit <= 0:
+            raise ValueError("SimpleGate range_limit must be positive")
+        if sample_size <= 0:
+            raise ValueError("SimpleGate sample_size must be positive")
+        self.range_limit = float(range_limit)
+        self.sample_size = int(sample_size)
+        self.compute_fp32 = bool(compute_fp32)
+        self.fail_on_nonfinite = bool(fail_on_nonfinite)
+        self.instrumentation_enabled = False
+        self.gradient_scale = 1.0
+        self._last_stats = None
+
+    def set_instrumentation(self, enabled=True, gradient_scale=1.0):
+        self.instrumentation_enabled = bool(enabled)
+        self.gradient_scale = max(float(gradient_scale), 1.0)
+        if not enabled:
+            self._last_stats = None
+
+    def range_stats(self):
+        return self._last_stats
+
+    def _sample(self, tensor):
+        flat = tensor.detach().flatten()
+        if flat.numel() <= self.sample_size:
+            return flat
+        stride = (flat.numel() + self.sample_size - 1) // self.sample_size
+        return flat[::stride][:self.sample_size]
+
+    @staticmethod
+    def _rms(tensor):
+        return tensor.square().mean().sqrt()
+
+    @staticmethod
+    def _absmax(tensor):
+        detached = tensor.detach()
+        return torch.maximum(detached.amin().abs(), detached.amax().abs()).float()
+
+    def _capture_forward_stats(self, x1, x2, product):
+        with torch.no_grad():
+            # Sample before converting to float32. Converting the complete
+            # stage-1 activation at batch size 256 would retain hundreds of MB
+            # merely for instrumentation.
+            sample1 = self._sample(x1).float()
+            sample2 = self._sample(x2).float()
+            sample_product = self._sample(product).float()
+            finite = (
+                torch.isfinite(sample1).all()
+                & torch.isfinite(sample2).all()
+                & torch.isfinite(sample_product).all()
+            )
+            if self.fail_on_nonfinite and not bool(finite.item()):
+                raise FloatingPointError("Non-finite value in SimpleGate operands or output")
+
+            mean1 = sample1.mean()
+            mean2 = sample2.mean()
+            centered1 = sample1 - mean1
+            centered2 = sample2 - mean2
+            correlation = (centered1 * centered2).mean() / (
+                self._rms(centered1) * self._rms(centered2) + 1e-12)
+            limit = self.range_limit
+            self._last_stats = {
+                # Maxima are exact full-tensor reductions; percentile, RMS,
+                # correlation, and outside fractions use the bounded sample.
+                "operand1_absmax": self._absmax(x1),
+                "operand2_absmax": self._absmax(x2),
+                "product_absmax": self._absmax(product),
+                "operand1_rms": self._rms(sample1),
+                "operand2_rms": self._rms(sample2),
+                "product_rms": self._rms(sample_product),
+                "operand1_p999": torch.quantile(sample1.abs(), 0.999),
+                "operand2_p999": torch.quantile(sample2.abs(), 0.999),
+                "product_p999": torch.quantile(sample_product.abs(), 0.999),
+                "operand1_outside_fraction": (sample1.abs() > limit).float().mean(),
+                "operand2_outside_fraction": (sample2.abs() > limit).float().mean(),
+                "product_outside_fraction": (
+                    (sample_product.abs() > limit).float().mean()),
+                "operand_correlation": correlation,
+                "finite": finite.float(),
+            }
+
+    def _capture_gradient_stats(self, grad):
+        with torch.no_grad():
+            sample = self._sample(grad).float() / self.gradient_scale
+            finite = torch.isfinite(sample).all()
+            if self.fail_on_nonfinite and not bool(finite.item()):
+                raise FloatingPointError("Non-finite SimpleGate output gradient")
+            if self._last_stats is not None:
+                self._last_stats.update({
+                    "gradient_absmax": sample.abs().amax(),
+                    "gradient_rms": self._rms(sample),
+                    "gradient_finite": finite.float(),
+                })
+        return grad
+
     def forward(self, x):
+        if x.shape[1] % 2 != 0:
+            raise ValueError(
+                f"SimpleGate needs an even channel count, got {x.shape[1]}")
         x1, x2 = x.chunk(2, dim=1)
-        return x1 * x2
+        if self.compute_fp32 and x.dtype in (torch.float16, torch.bfloat16):
+            product = (x1.float() * x2.float()).to(dtype=x.dtype)
+        else:
+            product = x1 * x2
+
+        if self.instrumentation_enabled:
+            self._capture_forward_stats(x1, x2, product)
+            if product.requires_grad:
+                product.register_hook(self._capture_gradient_stats)
+        return product
 
 
 class Mlp(nn.Module):
@@ -46,12 +161,22 @@ class Mlp(nn.Module):
     Input: tensor with shape [B, C, H, W]
     """
     def __init__(self, in_features, hidden_features=None,
-                 out_features=None, act_layer=SimpleGate, drop=0.):
+                 out_features=None, act_layer=SimpleGate, drop=0.,
+                 gate_range_limit=6.0, gate_stats_sample_size=16384,
+                 gate_compute_fp32=True, gate_fail_on_nonfinite=True):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         self.fc1 = nn.Conv2d(in_features, hidden_features * 2, 1)
-        self.act = act_layer()
+        if act_layer is SimpleGate:
+            self.act = act_layer(
+                range_limit=gate_range_limit,
+                sample_size=gate_stats_sample_size,
+                compute_fp32=gate_compute_fp32,
+                fail_on_nonfinite=gate_fail_on_nonfinite,
+            )
+        else:
+            self.act = act_layer()
         self.fc2 = nn.Conv2d(hidden_features, out_features, 1)
         self.drop = nn.Dropout(drop)
         self.apply(self._init_weights)
@@ -88,7 +213,9 @@ class PoolFormerBlock(nn.Module):
     def __init__(self, dim, pool_size=3, mlp_ratio=4.,
                  act_layer=SimpleGate, norm_layer=BatchNorm2d,
                  drop=0., drop_path=0.,
-                 use_layer_scale=True, layer_scale_init_value=1e-5):
+                 use_layer_scale=True, layer_scale_init_value=1e-5,
+                 gate_range_limit=6.0, gate_stats_sample_size=16384,
+                 gate_compute_fp32=True, gate_fail_on_nonfinite=True):
 
         super().__init__()
 
@@ -97,7 +224,11 @@ class PoolFormerBlock(nn.Module):
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
-                       act_layer=act_layer, drop=drop)
+                       act_layer=act_layer, drop=drop,
+                       gate_range_limit=gate_range_limit,
+                       gate_stats_sample_size=gate_stats_sample_size,
+                       gate_compute_fp32=gate_compute_fp32,
+                       gate_fail_on_nonfinite=gate_fail_on_nonfinite)
 
         # The following two techniques are useful to train deep PoolFormers.
         self.drop_path = DropPath(drop_path) if drop_path > 0. \
@@ -127,7 +258,9 @@ def basic_blocks(dim, index, layers,
                  pool_size=3, mlp_ratio=4.,
                  act_layer=SimpleGate, norm_layer=BatchNorm2d,
                  drop_rate=.0, drop_path_rate=0.,
-                 use_layer_scale=True, layer_scale_init_value=1e-5):
+                 use_layer_scale=True, layer_scale_init_value=1e-5,
+                 gate_range_limit=6.0, gate_stats_sample_size=16384,
+                 gate_compute_fp32=True, gate_fail_on_nonfinite=True):
     """
     generate PoolFormer blocks for a stage
     return: PoolFormer blocks
@@ -142,6 +275,10 @@ def basic_blocks(dim, index, layers,
             drop=drop_rate, drop_path=block_dpr,
             use_layer_scale=use_layer_scale,
             layer_scale_init_value=layer_scale_init_value,
+            gate_range_limit=gate_range_limit,
+            gate_stats_sample_size=gate_stats_sample_size,
+            gate_compute_fp32=gate_compute_fp32,
+            gate_fail_on_nonfinite=gate_fail_on_nonfinite,
             ))
     blocks = nn.Sequential(*blocks)
 
@@ -174,6 +311,10 @@ class PoolFormer(nn.Module):
                  down_patch_size=3, down_stride=2, down_pad=1,
                  drop_rate=0., drop_path_rate=0.,
                  use_layer_scale=True, layer_scale_init_value=1e-5,
+                 gate_range_limit=6.0,
+                 gate_stats_sample_size=16384,
+                 gate_compute_fp32=True,
+                 gate_fail_on_nonfinite=True,
                  fork_feat=False,
                  face_embedding=True,
                  fp16=False,
@@ -202,7 +343,11 @@ class PoolFormer(nn.Module):
                                  drop_rate=drop_rate,
                                  drop_path_rate=drop_path_rate,
                                  use_layer_scale=use_layer_scale,
-                                 layer_scale_init_value=layer_scale_init_value)
+                                 layer_scale_init_value=layer_scale_init_value,
+                                 gate_range_limit=gate_range_limit,
+                                 gate_stats_sample_size=gate_stats_sample_size,
+                                 gate_compute_fp32=gate_compute_fp32,
+                                 gate_fail_on_nonfinite=gate_fail_on_nonfinite)
             network.append(stage)
             if i >= len(layers) - 1:
                 break
@@ -335,6 +480,35 @@ class PoolFormer(nn.Module):
         # for image classification
         return cls_out
 
+    def simple_gates(self):
+        return {
+            name: module for name, module in self.named_modules()
+            if isinstance(module, SimpleGate)
+        }
+
+    def set_simple_gate_instrumentation(self, enabled=True, gradient_scale=1.0):
+        for gate in self.simple_gates().values():
+            gate.set_instrumentation(enabled, gradient_scale=gradient_scale)
+
+    def simple_gate_range_stats(self):
+        modules = dict(self.named_modules())
+        stats = {}
+        for name, gate in self.simple_gates().items():
+            gate_stats = gate.range_stats()
+            if gate_stats is None:
+                continue
+            layer_stats = dict(gate_stats)
+            block_name = name.rsplit(".mlp.act", 1)[0]
+            block = modules.get(block_name)
+            if block is not None and getattr(block, "use_layer_scale", False):
+                scale = block.layer_scale_2.detach().float()
+                layer_stats.update({
+                    "residual_scale_absmax": scale.abs().amax(),
+                    "residual_scale_rms": scale.square().mean().sqrt(),
+                })
+            stats[name] = layer_stats
+        return stats
+
 
 def _load_pretrained_if_requested(model, pretrained, model_name):
     if pretrained:
@@ -386,12 +560,17 @@ def poolformer_s24(pretrained=False, **kwargs):
 @register_model
 def poolformer_s24_mlp2(pretrained=False, **kwargs):
     """
-    PoolFormer-S24 model with MLP ratios [2, 2, 2, 2].
+    FHE-oriented PoolFormer-S24 with NAFNet SimpleGate and MLP ratio 2.
+
+    Zero-initialized LayerScale is the PoolFormer equivalent of the paper's
+    skip-init: every residual branch starts as an identity mapping and learns
+    its contribution before large gate products can perturb the main path.
     """
     layers = [4, 4, 12, 4]
     embed_dims = [64, 128, 320, 512]
     mlp_ratios = [2, 2, 2, 2]
     downsamples = [True, True, True, True]
+    kwargs.setdefault("layer_scale_init_value", 0.0)
     model = PoolFormer(
         layers, embed_dims=embed_dims,
         mlp_ratios=mlp_ratios, downsamples=downsamples,
@@ -464,7 +643,7 @@ if base.has_mmseg and base.has_mmdet:
     """
     @base.seg_BACKBONES.register_module()
     @base.det_BACKBONES.register_module()
-    class poolformer_s12_feat(PoolFormer):
+    class simple_gate_poolformer_s12_feat(PoolFormer):
         """
         PoolFormer-S12 model, Params: 12M
         """
@@ -481,7 +660,7 @@ if base.has_mmseg and base.has_mmdet:
 
     @base.seg_BACKBONES.register_module()
     @base.det_BACKBONES.register_module()
-    class poolformer_s24_feat(PoolFormer):
+    class simple_gate_poolformer_s24_feat(PoolFormer):
         """
         PoolFormer-S24 model, Params: 21M
         """
@@ -498,7 +677,7 @@ if base.has_mmseg and base.has_mmdet:
 
     @base.seg_BACKBONES.register_module()
     @base.det_BACKBONES.register_module()
-    class poolformer_s36_feat(PoolFormer):
+    class simple_gate_poolformer_s36_feat(PoolFormer):
         """
         PoolFormer-S36 model, Params: 31M
         """
@@ -516,7 +695,7 @@ if base.has_mmseg and base.has_mmdet:
 
     @base.seg_BACKBONES.register_module()
     @base.det_BACKBONES.register_module()
-    class poolformer_m36_feat(PoolFormer):
+    class simple_gate_poolformer_m36_feat(PoolFormer):
         """
         PoolFormer-S36 model, Params: 56M
         """
@@ -534,7 +713,7 @@ if base.has_mmseg and base.has_mmdet:
 
     @base.seg_BACKBONES.register_module()
     @base.det_BACKBONES.register_module()
-    class poolformer_m48_feat(PoolFormer):
+    class simple_gate_poolformer_m48_feat(PoolFormer):
         """
         PoolFormer-M48 model, Params: 73M
         """

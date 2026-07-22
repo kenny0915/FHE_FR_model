@@ -42,11 +42,12 @@ class HerPN(nn.Module):
     exactly a channel-wise quadratic A*x^2 + B*x + C at inference time.
     """
 
-    def __init__(self, channels, eps=1e-5):
+    def __init__(self, channels, eps=1e-5, quadratic_eps=None):
         super().__init__()
+        quadratic_eps = eps if quadratic_eps is None else float(quadratic_eps)
         self.bn0 = nn.BatchNorm2d(channels, eps=eps, affine=False)
         self.bn1 = nn.BatchNorm2d(channels, eps=eps, affine=False)
-        self.bn2 = nn.BatchNorm2d(channels, eps=eps, affine=False)
+        self.bn2 = nn.BatchNorm2d(channels, eps=quadratic_eps, affine=False)
         self.weight = nn.Parameter(torch.ones(channels, 1, 1))
         self.bias = nn.Parameter(torch.zeros(channels, 1, 1))
 
@@ -126,22 +127,37 @@ class FoldedHerPN(nn.Module):
 class ProgressiveHerPNActivation(nn.Module):
     """PReLU-compatible wrapper for a staged PReLU-to-HerPN conversion."""
 
-    def __init__(self, channels, range_limit=6.0, bn_eps=1e-4,
-                 stage_index=0, blend=1.0):
+    def __init__(self, channels, range_limit=6.0, output_limit=8.0,
+                 bn_eps=1e-4, quadratic_bn_eps=1e-3,
+                 distillation_floor=0.1, stage_index=0,
+                 activation_name='', blend=1.0):
         super().__init__()
-        if range_limit <= 0:
-            raise ValueError('range_limit must be positive')
+        if range_limit <= 0 or output_limit <= 0:
+            raise ValueError('range_limit and output_limit must be positive')
+        if not 0.0 <= distillation_floor <= 1.0:
+            raise ValueError('distillation_floor must be in [0, 1]')
         self.prelu = nn.PReLU(channels)
-        self.herpn = HerPN(channels, eps=bn_eps)
+        self.herpn = HerPN(
+            channels, eps=bn_eps, quadratic_eps=quadratic_bn_eps)
         self.stage_index = int(stage_index)
+        self.activation_name = str(activation_name)
         self.register_buffer('blend', torch.tensor(float(blend), dtype=torch.float32))
         self.register_buffer(
             'range_limit', torch.tensor(float(range_limit), dtype=torch.float32))
+        self.register_buffer(
+            'output_limit', torch.tensor(float(output_limit), dtype=torch.float32))
+        self.register_buffer(
+            'distillation_floor',
+            torch.tensor(float(distillation_floor), dtype=torch.float32))
         self._last_range_penalty = None
+        self._last_output_penalty = None
         self._last_distillation_loss = None
         self._last_input_absmax = None
+        self._last_output_absmax = None
         self._last_outside_fraction = None
+        self._last_output_outside_fraction = None
         self._blend = 0.0
+        self._distillation_floor = float(distillation_floor)
         self.set_blend(blend)
 
     def set_blend(self, blend):
@@ -157,10 +173,23 @@ class ProgressiveHerPNActivation(nn.Module):
     def distillation_loss(self):
         return self._last_distillation_loss
 
+    def output_penalty(self):
+        return self._last_output_penalty
+
     def range_stats(self):
+        with torch.no_grad():
+            bn2_var_min = self.herpn.bn2.running_var.amin()
+            coefficient2 = self.herpn.weight.squeeze(-1).squeeze(-1) / torch.sqrt(
+                8.0 * math.pi * (
+                    self.herpn.bn2.running_var + self.herpn.bn2.eps))
         return {
             'absmax': self._last_input_absmax,
+            'output_absmax': self._last_output_absmax,
             'outside_fraction': self._last_outside_fraction,
+            'output_outside_fraction': self._last_output_outside_fraction,
+            'herpn_weight_absmax': self.herpn.weight.detach().abs().amax(),
+            'bn2_running_var_min': bn2_var_min.detach(),
+            'coefficient2_absmax': coefficient2.detach().abs().amax(),
             'blend': self.blend.detach(),
         }
 
@@ -183,11 +212,19 @@ class ProgressiveHerPNActivation(nn.Module):
                 full_key = prefix + local_key
                 if full_key not in state_dict:
                     state_dict[full_key] = value.detach()
+        else:
+            # These controls were added after the first HerPN checkpoint
+            # format and do not invalidate otherwise complete HerPN state.
+            for local_key in ('output_limit', 'distillation_floor'):
+                full_key = prefix + local_key
+                if full_key not in state_dict:
+                    state_dict[full_key] = getattr(self, local_key).detach()
 
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
         self._blend = float(self.blend.item())
+        self._distillation_floor = float(self.distillation_floor.item())
 
     def forward(self, x):
         if self.training:
@@ -201,6 +238,7 @@ class ProgressiveHerPNActivation(nn.Module):
             self._last_outside_fraction = (excess.detach() > 0).float().mean()
         else:
             self._last_range_penalty = None
+            self._last_output_penalty = None
             self._last_distillation_loss = None
 
         blend = self._blend
@@ -212,9 +250,22 @@ class ProgressiveHerPNActivation(nn.Module):
         prelu_out = self.prelu(x)
         herpn_out = self.herpn(x)
         if self.training:
+            output_limit = self.output_limit.to(
+                device=x.device, dtype=herpn_out.float().dtype)
+            output_excess = torch.relu(herpn_out.float().abs() - output_limit)
+            output_mean_tail = output_excess.square().mean()
+            output_sample_tail = output_excess.flatten(1).amax(dim=1).square().mean()
+            self._last_output_penalty = (
+                output_mean_tail + 0.1 * output_sample_tail)
+            self._last_output_absmax = herpn_out.detach().float().abs().amax()
+            self._last_output_outside_fraction = (
+                output_excess.detach() > 0).float().mean()
             target = prelu_out.detach().float()
+            distillation_scale = max(
+                1.0 - blend, self._distillation_floor)
             self._last_distillation_loss = (
-                (1.0 - blend) * (herpn_out.float() - target).square().mean()
+                distillation_scale
+                * (herpn_out.float() - target).square().mean()
             )
 
         if blend <= 0.0:
@@ -278,15 +329,19 @@ class IResNet(nn.Module):
     def __init__(self,
                  block, layers, dropout=0, num_features=512, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 fp16=False, herpn_range_limit=6.0, herpn_bn_eps=1e-4,
-                 herpn_progress=5.0):
+                 fp16=False, herpn_range_limit=6.0, herpn_output_limit=8.0,
+                 herpn_bn_eps=1e-4, herpn_quadratic_bn_eps=1e-3,
+                 herpn_distillation_floor=0.1, herpn_progress=5.0):
         super(IResNet, self).__init__()
         self.extra_gflops = 0.0
         self.fp16 = fp16
         self.inplanes = 64
         self.dilation = 1
         self.herpn_range_limit = float(herpn_range_limit)
+        self.herpn_output_limit = float(herpn_output_limit)
         self.herpn_bn_eps = float(herpn_bn_eps)
+        self.herpn_quadratic_bn_eps = float(herpn_quadratic_bn_eps)
+        self.herpn_distillation_floor = float(herpn_distillation_floor)
         self.register_buffer(
             'herpn_progress', torch.tensor(float(herpn_progress), dtype=torch.float32),
             persistent=False)
@@ -301,7 +356,7 @@ class IResNet(nn.Module):
         self.conv1 = nn.Conv2d(
             3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(self.inplanes, eps=1e-5)
-        self.prelu = self._make_activation(self.inplanes, 'stem')
+        self.prelu = self._make_activation(self.inplanes, 'stem', 'prelu')
         self.layer1 = self._make_layer(
             block, 64, layers[0], stride=2, stage_name='layer1')
         self.layer2 = self._make_layer(
@@ -336,12 +391,16 @@ class IResNet(nn.Module):
 
         self.set_herpn_progress(herpn_progress)
 
-    def _make_activation(self, channels, stage_name):
+    def _make_activation(self, channels, stage_name, activation_name):
         return ProgressiveHerPNActivation(
             channels=channels,
             range_limit=self.herpn_range_limit,
+            output_limit=self.herpn_output_limit,
             bn_eps=self.herpn_bn_eps,
+            quadratic_bn_eps=self.herpn_quadratic_bn_eps,
+            distillation_floor=self.herpn_distillation_floor,
             stage_index=_HERPN_STAGE_NAMES.index(stage_name),
+            activation_name=activation_name,
             blend=0.0,
         )
 
@@ -359,15 +418,16 @@ class IResNet(nn.Module):
             )
         layers = []
         activation_factory = lambda channels: self._make_activation(
-            channels, stage_name)
+            channels, stage_name, '{}.0.prelu'.format(stage_name))
         layers.append(
             block(self.inplanes, planes, stride, downsample, self.groups,
                   self.base_width, previous_dilation,
                   activation_factory=activation_factory))
         self.inplanes = planes * block.expansion
-        for _ in range(1, blocks):
-            activation_factory = lambda channels: self._make_activation(
-                channels, stage_name)
+        for block_index in range(1, blocks):
+            activation_factory = lambda channels, index=block_index: self._make_activation(
+                channels, stage_name,
+                '{}.{}.prelu'.format(stage_name, index))
             layers.append(
                 block(self.inplanes,
                       planes,
@@ -389,6 +449,21 @@ class IResNet(nn.Module):
             activation.set_blend(
                 min(max(progress - activation.stage_index, 0.0), 1.0))
 
+    def set_herpn_blends(self, blends):
+        """Set arbitrary per-activation blends for block-wise conversion."""
+        activations = {
+            name: module for name, module in self.named_modules()
+            if isinstance(module, ProgressiveHerPNActivation)
+        }
+        unknown = sorted(set(blends).difference(activations))
+        if unknown:
+            raise ValueError('Unknown HerPN activation names: {}'.format(unknown))
+        for name, activation in activations.items():
+            activation.set_blend(float(blends.get(name, 0.0)))
+        converted_fraction = sum(
+            activation._blend for activation in activations.values()) / len(activations)
+        self.herpn_progress.fill_(converted_fraction * len(_HERPN_STAGE_NAMES))
+
     def herpn_range_penalty(self):
         penalties = [activation.range_penalty()
                      for activation in self.progressive_activations()]
@@ -405,6 +480,14 @@ class IResNet(nn.Module):
             return next(self.parameters()).new_zeros(())
         return torch.stack(losses).mean()
 
+    def herpn_output_penalty(self):
+        penalties = [activation.output_penalty()
+                     for activation in self.progressive_activations()]
+        penalties = [penalty for penalty in penalties if penalty is not None]
+        if not penalties:
+            return next(self.parameters()).new_zeros(())
+        return torch.stack(penalties).mean()
+
     def herpn_range_stats(self):
         stats = {}
         for name, module in self.named_modules():
@@ -417,10 +500,24 @@ class IResNet(nn.Module):
         absmax = [item['absmax'] for item in stats if item['absmax'] is not None]
         outside = [item['outside_fraction'] for item in stats
                    if item['outside_fraction'] is not None]
+        output_absmax = [item['output_absmax'] for item in stats
+                         if item['output_absmax'] is not None]
+        output_outside = [item['output_outside_fraction'] for item in stats
+                          if item['output_outside_fraction'] is not None]
         zero = next(self.parameters()).new_zeros(())
         return {
             'input_absmax': torch.stack(absmax).amax() if absmax else zero,
+            'output_absmax': (
+                torch.stack(output_absmax).amax() if output_absmax else zero),
             'outside_fraction': torch.stack(outside).mean() if outside else zero,
+            'output_outside_fraction': (
+                torch.stack(output_outside).mean() if output_outside else zero),
+            'herpn_weight_absmax': torch.stack([
+                item['herpn_weight_absmax'] for item in stats]).amax(),
+            'bn2_running_var_min': torch.stack([
+                item['bn2_running_var_min'] for item in stats]).amin(),
+            'coefficient2_absmax': torch.stack([
+                item['coefficient2_absmax'] for item in stats]).amax(),
         }
 
     def begin_batchnorm_recalibration(self, reset=True):

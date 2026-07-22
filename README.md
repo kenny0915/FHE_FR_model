@@ -25,6 +25,9 @@ Examples:
 - `casia_r50`: train an R50 model on CASIA/WebFace.
 - `ms1mv3_poolformer_s24`: train a PoolFormer-S24 model on MS1MV3.
 - `ms1mv3_poolformer_s24_no_ln`: train PoolFormer-S24 on MS1MV3 with layer normalization replaced by another operation.
+- `ms1mv3_poolformer_s24_no_ln_x2_act`: train the MLP-ratio-2 PoolFormer-S24
+  with progressive RepBatchNorm and NAFNet-style SimpleGate. Despite the
+  historical config name, the gate is `x1 * x2`, not a scalar `x**2`.
 - `ms1mv3_r50_no_relu`: train an R50 variant with ReLU/PReLU removed or replaced.
 
 Keep names short but specific enough to identify the dataset, backbone, and main experimental change.
@@ -71,6 +74,14 @@ Important training settings are controlled by the config file:
 - `output`: output directory. If `None`, the config loader may derive it from the config name.
 
 To resume training, set `config.resume = True` in the config and make sure the corresponding `checkpoint_gpu_*.pt` files exist in the output directory.
+
+For the SimpleGate/RepBatchNorm experiment, periodic verification begins only
+after the normalization transition finishes. At the end of training, BatchNorm
+statistics are reset and recalibrated through the final inference graph, a
+layer-wise gate profile is written to `simple_gate_final_profile.json`, and the
+recalibrated model is verified and saved. Per-layer operand, product, gradient,
+correlation, range, and residual-scale measurements are also available under
+`SimpleGate/` in TensorBoard.
 
 ## IJBB/IJBC Evaluation
 

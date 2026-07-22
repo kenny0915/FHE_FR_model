@@ -1,10 +1,10 @@
 import argparse
+import json
 import logging
 import math
 import os
 from datetime import datetime
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -60,6 +60,229 @@ def set_prepbn_progress(module: torch.nn.Module, current_step: int, total_steps:
             submodule.set_progress(current_step, total_steps)
 
 
+def prepbn_transition_complete(current_step: int, total_steps: int) -> bool:
+    return total_steps <= 0 or current_step >= total_steps
+
+
+def set_simple_gate_instrumentation(module: torch.nn.Module, enabled: bool,
+                                    gradient_scale: float = 1.0):
+    setter = getattr(module, "set_simple_gate_instrumentation", None)
+    if setter is not None:
+        setter(enabled, gradient_scale=gradient_scale)
+
+
+def collect_simple_gate_stats(module: torch.nn.Module):
+    collector = getattr(module, "simple_gate_range_stats", None)
+    return collector() if collector is not None else {}
+
+
+def serialize_simple_gate_stats(stats):
+    return {
+        layer_name: {
+            metric: float(value.detach().item())
+            for metric, value in layer_stats.items()
+        }
+        for layer_name, layer_stats in stats.items()
+    }
+
+
+def log_simple_gate_stats(stats, global_step, summary_writer=None,
+                          wandb_logger=None, prefix="SimpleGate"):
+    """Log every gate plus compact network-wide stability summaries."""
+    if not stats:
+        return {}
+    serialized = serialize_simple_gate_stats(stats)
+    for layer_name, layer_stats in serialized.items():
+        tensorboard_layer = layer_name.replace(".", "/")
+        if summary_writer is not None:
+            for metric, value in layer_stats.items():
+                summary_writer.add_scalar(
+                    f"{prefix}/{tensorboard_layer}/{metric}", value, global_step)
+
+    product_absmax = max(
+        values["product_absmax"] for values in serialized.values())
+    product_p999 = max(
+        values["product_p999"] for values in serialized.values())
+    outside_fraction = sum(
+        values["product_outside_fraction"] for values in serialized.values()
+    ) / len(serialized)
+    gradient_absmax = max(
+        (values.get("gradient_absmax", 0.0) for values in serialized.values()),
+        default=0.0,
+    )
+    summary = {
+        "product_absmax": product_absmax,
+        "product_p999": product_p999,
+        "product_outside_fraction": outside_fraction,
+        "gradient_absmax": gradient_absmax,
+    }
+    if summary_writer is not None:
+        for metric, value in summary.items():
+            summary_writer.add_scalar(f"{prefix}/Summary/{metric}", value, global_step)
+    if wandb_logger:
+        wandb_logger.log({
+            f"{prefix}/Summary/{metric}": value for metric, value in summary.items()
+        })
+
+    worst_layers = sorted(
+        serialized.items(),
+        key=lambda item: item[1]["product_absmax"],
+        reverse=True,
+    )[:3]
+    logging.info(
+        "[%s][%d] product_absmax=%.6g p99.9=%.6g outside=%.6g "
+        "gradient_absmax=%.6g worst=%s",
+        prefix,
+        global_step,
+        product_absmax,
+        product_p999,
+        outside_fraction,
+        gradient_absmax,
+        ", ".join(
+            f"{name}:{values['product_absmax']:.6g}"
+            for name, values in worst_layers
+        ),
+    )
+    return serialized
+
+
+def begin_batchnorm_recalibration(module: torch.nn.Module, reset=True):
+    """Use the final eval graph while updating only BatchNorm statistics."""
+    batchnorm_state = [
+        (submodule, submodule.training, submodule.momentum)
+        for submodule in module.modules()
+        if isinstance(submodule, nn.modules.batchnorm._BatchNorm)
+    ]
+    state = {
+        "model_training": module.training,
+        "batchnorm": batchnorm_state,
+    }
+    module.eval()
+    for submodule, _, _ in batchnorm_state:
+        if reset:
+            submodule.reset_running_stats()
+        submodule.momentum = None
+        submodule.train()
+    return state
+
+
+def end_batchnorm_recalibration(module: torch.nn.Module, state):
+    module.train(state["model_training"])
+    for submodule, was_training, momentum in state["batchnorm"]:
+        submodule.momentum = momentum
+        submodule.train(was_training)
+
+
+@torch.no_grad()
+def recalibrate_prepbn_batchnorm(backbone, train_loader, num_epochs, start_epoch,
+                                dali=False):
+    """Reset and refresh BN statistics through the fully converted RepBN path."""
+    if num_epochs <= 0:
+        return 0
+    module = backbone.module
+    state = begin_batchnorm_recalibration(module, reset=True)
+    completed = 0
+    try:
+        for stat_epoch in range(num_epochs):
+            if isinstance(train_loader, DataLoader):
+                sampler = train_loader.sampler
+                if hasattr(sampler, "set_epoch"):
+                    sampler.set_epoch(start_epoch + stat_epoch)
+            for img, _ in train_loader:
+                embeddings = backbone(img)
+                if not torch.isfinite(embeddings).all():
+                    raise FloatingPointError(
+                        "Non-finite embeddings during final RepBatchNorm recalibration")
+                completed += 1
+            if dali:
+                train_loader.reset()
+    finally:
+        end_batchnorm_recalibration(module, state)
+    if completed == 0:
+        raise RuntimeError("RepBatchNorm recalibration received no batches")
+    return completed
+
+
+@torch.no_grad()
+def profile_simple_gate_ranges(backbone, train_loader, num_batches, dali=False):
+    """Profile the final eval/RepBN graph over representative training images."""
+    module = backbone.module
+    if num_batches <= 0 or not hasattr(module, "simple_gate_range_stats"):
+        return {}
+    was_training = module.training
+    module.eval()
+    accumulated = {}
+    completed = 0
+    try:
+        for img, _ in train_loader:
+            set_simple_gate_instrumentation(module, True)
+            embeddings = backbone(img)
+            if not torch.isfinite(embeddings).all():
+                raise FloatingPointError(
+                    "Non-finite embeddings during final SimpleGate profiling")
+            batch_stats = serialize_simple_gate_stats(
+                collect_simple_gate_stats(module))
+            for layer_name, layer_stats in batch_stats.items():
+                target = accumulated.setdefault(
+                    layer_name,
+                    {metric: [] for metric in layer_stats},
+                )
+                for metric, value in layer_stats.items():
+                    target.setdefault(metric, []).append(value)
+            completed += 1
+            if completed >= num_batches:
+                break
+    finally:
+        set_simple_gate_instrumentation(module, False)
+        module.train(was_training)
+        if dali:
+            train_loader.reset()
+    if completed == 0:
+        raise RuntimeError("Final SimpleGate profiling received no batches")
+
+    max_metrics = {
+        "operand1_absmax", "operand2_absmax", "product_absmax",
+    }
+    min_metrics = {"finite", "gradient_finite"}
+    result = {}
+    profile_device = next(module.parameters()).device
+    for layer_name, layer_stats in accumulated.items():
+        result[layer_name] = {}
+        for metric, values in layer_stats.items():
+            if metric in max_metrics:
+                reduced = max(values)
+            elif metric in min_metrics:
+                reduced = min(values)
+            else:
+                reduced = sum(values) / len(values)
+            if distributed.is_initialized() and distributed.get_world_size() > 1:
+                reduced_tensor = torch.tensor(
+                    reduced, device=profile_device)
+                if metric in max_metrics:
+                    op = distributed.ReduceOp.MAX
+                elif metric in min_metrics:
+                    op = distributed.ReduceOp.MIN
+                else:
+                    op = distributed.ReduceOp.SUM
+                distributed.all_reduce(reduced_tensor, op=op)
+                reduced = float(reduced_tensor.item())
+                if op == distributed.ReduceOp.SUM:
+                    reduced /= distributed.get_world_size()
+            result[layer_name][metric] = reduced
+    total_profile_batches = completed
+    if distributed.is_initialized() and distributed.get_world_size() > 1:
+        completed_tensor = torch.tensor(
+            completed, device=profile_device, dtype=torch.long)
+        distributed.all_reduce(completed_tensor, op=distributed.ReduceOp.SUM)
+        total_profile_batches = int(completed_tensor.item())
+    result["_profile"] = {
+        "num_batches_across_ranks": total_profile_batches,
+        "absmax_reduction": "maximum across batches and ranks",
+        "other_metric_reduction": "mean across batches and ranks",
+    }
+    return result
+
+
 def herpn_progress_at_epoch(epoch_value, stage_epochs, transition_epochs):
     if not stage_epochs:
         return 5.0
@@ -73,6 +296,97 @@ def herpn_progress_at_epoch(epoch_value, stage_epochs, transition_epochs):
         raise ValueError("HerPN stage transitions must be ordered and non-overlapping")
     return sum(min(max((float(epoch_value) - start) / transition_epochs, 0.0), 1.0)
                for start in starts)
+
+
+def herpn_group_blends_at_epoch(epoch_value, conversion_groups, group_epochs,
+                                transition_epochs):
+    """Return per-activation blends for an arbitrary block-wise schedule."""
+    groups = tuple(tuple(group) for group in conversion_groups)
+    starts = tuple(float(value) for value in group_epochs)
+    transition_epochs = float(transition_epochs)
+    if len(groups) != len(starts):
+        raise ValueError(
+            "herpn_conversion_groups and herpn_group_epochs must have equal length")
+    if transition_epochs <= 0:
+        raise ValueError("herpn_transition_epochs must be positive")
+    if any(right < left + transition_epochs
+           for left, right in zip(starts, starts[1:])):
+        raise ValueError("HerPN conversion groups must be ordered and non-overlapping")
+
+    blends = {}
+    for group, start in zip(groups, starts):
+        blend = min(max(
+            (float(epoch_value) - start) / transition_epochs, 0.0), 1.0)
+        for activation_name in group:
+            if activation_name in blends:
+                raise ValueError(
+                    f"HerPN activation appears in multiple groups: {activation_name}")
+            blends[activation_name] = blend
+    return blends
+
+
+def validate_herpn_conversion_groups(module, conversion_groups):
+    expected = {
+        name for name, submodule in module.named_modules()
+        if submodule.__class__.__name__ == "ProgressiveHerPNActivation"
+    }
+    scheduled = {
+        name for group in conversion_groups for name in group
+    }
+    missing = sorted(expected.difference(scheduled))
+    unknown = sorted(scheduled.difference(expected))
+    count = sum(len(group) for group in conversion_groups)
+    if count != len(scheduled):
+        raise ValueError("An activation occurs more than once in HerPN conversion groups")
+    if missing or unknown:
+        raise ValueError(
+            f"Invalid HerPN conversion groups; missing={missing}, unknown={unknown}")
+
+
+def build_backbone_optimizer_groups(backbone, cfg):
+    """Give HerPN coefficients a lower LR and PReLU teachers no decay."""
+    herpn_params = []
+    teacher_params = []
+    for module in backbone.module.modules():
+        if module.__class__.__name__ != "ProgressiveHerPNActivation":
+            continue
+        herpn_params.extend(module.herpn.parameters())
+        teacher_params.extend(module.prelu.parameters())
+
+    special_ids = {id(param) for param in herpn_params + teacher_params}
+    base_params = [
+        param for param in backbone.parameters()
+        if param.requires_grad and id(param) not in special_ids
+    ]
+    if not herpn_params:
+        return [{"params": base_params}]
+    return [
+        {"params": base_params},
+        {
+            "params": herpn_params,
+            "lr": cfg.lr * float(getattr(cfg, "herpn_lr_multiplier", 0.1)),
+            "weight_decay": float(getattr(
+                cfg, "herpn_weight_decay", cfg.weight_decay)),
+        },
+        {
+            "params": teacher_params,
+            "weight_decay": 0.0,
+            # With no momentum, a fully converted branch's exact zero task
+            # gradient keeps its PReLU teacher fixed for persistent distillation.
+            "momentum": float(getattr(cfg, "herpn_teacher_momentum", 0.0)),
+        },
+    ]
+
+
+def save_training_checkpoint(checkpoint, output, rank, keep_previous=True):
+    """Atomically save a resumable checkpoint and retain the previous epoch."""
+    path = os.path.join(output, f"checkpoint_gpu_{rank}.pt")
+    temporary_path = path + ".tmp"
+    previous_path = path + ".previous"
+    torch.save(checkpoint, temporary_path)
+    if keep_previous and os.path.exists(path):
+        os.replace(path, previous_path)
+    os.replace(temporary_path, path)
 
 
 @torch.no_grad()
@@ -191,12 +505,28 @@ def main(args):
         )
     if cfg.network.startswith("r") and cfg.network.endswith("_no_relu"):
         default_herpn_progress = (
-            0.0 if getattr(cfg, "herpn_stage_epochs", ()) else 5.0)
+            0.0 if (getattr(cfg, "herpn_conversion_groups", ())
+                    or getattr(cfg, "herpn_stage_epochs", ())) else 5.0)
         model_kwargs.update(
             herpn_range_limit=float(getattr(cfg, "herpn_range_limit", 6.0)),
+            herpn_output_limit=float(getattr(cfg, "herpn_output_limit", 8.0)),
             herpn_bn_eps=float(getattr(cfg, "herpn_bn_eps", 1e-4)),
+            herpn_quadratic_bn_eps=float(getattr(
+                cfg, "herpn_quadratic_bn_eps", 1e-3)),
+            herpn_distillation_floor=float(getattr(
+                cfg, "herpn_distillation_floor", 0.1)),
             herpn_progress=float(getattr(
                 cfg, "herpn_initial_progress", default_herpn_progress)),
+        )
+    if cfg.network.startswith("poolformer_no_ln_x2_act"):
+        model_kwargs.update(
+            gate_range_limit=float(getattr(cfg, "simple_gate_range_limit", 6.0)),
+            gate_stats_sample_size=int(getattr(
+                cfg, "simple_gate_stats_sample_size", 16384)),
+            gate_compute_fp32=bool(getattr(
+                cfg, "simple_gate_compute_fp32", True)),
+            gate_fail_on_nonfinite=bool(getattr(
+                cfg, "simple_gate_fail_on_nonfinite", True)),
         )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
@@ -253,8 +583,10 @@ def main(args):
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
         # TODO the params of partial fc must be last in the params list
+        backbone_optimizer_groups = build_backbone_optimizer_groups(backbone, cfg)
         opt = torch.optim.SGD(
-            params=[{"params": backbone.parameters()}, {"params": module_partial_fc.parameters()}],
+            params=backbone_optimizer_groups + [
+                {"params": module_partial_fc.parameters()}],
             lr=cfg.lr, momentum=0.9, weight_decay=cfg.weight_decay)
 
     elif cfg.optimizer == "adamw":
@@ -262,8 +594,10 @@ def main(args):
             margin_loss, cfg.embedding_size, cfg.num_classes,
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
+        backbone_optimizer_groups = build_backbone_optimizer_groups(backbone, cfg)
         opt = torch.optim.AdamW(
-            params=[{"params": backbone.parameters()}, {"params": module_partial_fc.parameters()}],
+            params=backbone_optimizer_groups + [
+                {"params": module_partial_fc.parameters()}],
             lr=cfg.lr, weight_decay=cfg.weight_decay)
     else:
         raise
@@ -277,6 +611,11 @@ def main(args):
         prepbn_decay_steps = int(steps_per_epoch * prepbn_decay_epochs)
     else:
         prepbn_decay_steps = int(getattr(cfg, "prepbn_decay_steps", cfg.total_step))
+    if (getattr(cfg, "prepbn_require_full_transition", False)
+            and prepbn_decay_steps > cfg.total_step):
+        raise ValueError(
+            "RepBatchNorm transition does not finish before training ends: "
+            f"decay_steps={prepbn_decay_steps}, total_steps={cfg.total_step}")
 
     lr_scheduler_name = getattr(cfg, "lr_scheduler", "polynomial")
     lr_scheduler_step_per_epoch = cryptoface_patch_training and lr_scheduler_name == "multistep"
@@ -295,13 +634,18 @@ def main(args):
     start_epoch = 0
     global_step = 0
     if cfg.resume:
-        dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
+        resume_path = getattr(
+            cfg, "resume_checkpoint",
+            os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
+        resume_path = str(resume_path).format(rank=rank)
+        dict_checkpoint = torch.load(resume_path, map_location="cpu")
         start_epoch = dict_checkpoint["epoch"]
         global_step = dict_checkpoint["global_step"]
         backbone.module.load_state_dict(dict_checkpoint["state_dict_backbone"])
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
         opt.load_state_dict(dict_checkpoint["state_optimizer"])
         lr_scheduler.load_state_dict(dict_checkpoint["state_lr_scheduler"])
+        logging.info("Resumed complete training state from %s", resume_path)
         del dict_checkpoint
 
     for key, value in cfg.items():
@@ -334,13 +678,28 @@ def main(args):
     ]
 
     herpn_stage_epochs = tuple(getattr(cfg, "herpn_stage_epochs", ()))
+    herpn_conversion_groups = tuple(
+        tuple(group) for group in getattr(cfg, "herpn_conversion_groups", ()))
+    herpn_group_epochs = tuple(getattr(cfg, "herpn_group_epochs", ()))
     herpn_transition_epochs = float(getattr(cfg, "herpn_transition_epochs", 1.0))
     herpn_range_loss_weight = float(getattr(cfg, "herpn_range_loss_weight", 0.0))
+    herpn_output_loss_weight = float(getattr(cfg, "herpn_output_loss_weight", 0.0))
     herpn_distill_loss_weight = float(getattr(cfg, "herpn_distill_loss_weight", 0.0))
     herpn_bn_recalibration_batches = int(
         getattr(cfg, "herpn_bn_recalibration_batches", 0))
     herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
-    if herpn_enabled and herpn_stage_epochs:
+    herpn_group_schedule = bool(herpn_enabled and herpn_conversion_groups)
+    if herpn_group_schedule:
+        validate_herpn_conversion_groups(
+            backbone.module, herpn_conversion_groups)
+        final_blends = herpn_group_blends_at_epoch(
+            cfg.num_epoch, herpn_conversion_groups, herpn_group_epochs,
+            herpn_transition_epochs)
+        if (getattr(cfg, "herpn_require_full_conversion", True)
+                and min(final_blends.values(), default=0.0) < 1.0):
+            raise ValueError(
+                "HerPN group schedule does not finish before training ends")
+    elif herpn_enabled and herpn_stage_epochs:
         final_progress = herpn_progress_at_epoch(
             cfg.num_epoch, herpn_stage_epochs, herpn_transition_epochs)
         if getattr(cfg, "herpn_require_full_conversion", True) and final_progress < 5.0:
@@ -348,17 +707,56 @@ def main(args):
                 "HerPN schedule does not finish all five stages before training ends: "
                 f"final_progress={final_progress:.3f}"
             )
+    completed_herpn_groups = sum(
+        float(start_epoch) >= float(start) + herpn_transition_epochs
+        for start in herpn_group_epochs
+    ) if herpn_group_schedule else 0
     completed_herpn_stages = int(math.floor(float(
-        backbone.module.herpn_progress.item()) + 1e-6)) if herpn_enabled else 0
+        backbone.module.herpn_progress.item()) + 1e-6)
+    ) if herpn_enabled and not herpn_group_schedule else 0
     max_steps_per_epoch = int(getattr(cfg, "max_steps_per_epoch", 0))
     scheduled_steps_per_epoch = (
         max_steps_per_epoch if max_steps_per_epoch > 0 else steps_per_epoch)
+    simple_gate_stats_interval = int(getattr(
+        cfg, "simple_gate_stats_interval", 0))
+    simple_gate_enabled = hasattr(
+        backbone.module, "set_simple_gate_instrumentation")
+    validate_after_prepbn_transition = bool(getattr(
+        cfg, "validate_after_prepbn_transition", False))
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
         if isinstance(train_loader, DataLoader):
             train_loader.sampler.set_epoch(epoch)
-        if herpn_enabled and herpn_stage_epochs:
+        if herpn_group_schedule:
+            epoch_herpn_blends = herpn_group_blends_at_epoch(
+                epoch, herpn_conversion_groups, herpn_group_epochs,
+                herpn_transition_epochs)
+            backbone.module.set_herpn_blends(epoch_herpn_blends)
+            newly_completed = sum(
+                float(epoch) >= float(start) + herpn_transition_epochs
+                for start in herpn_group_epochs)
+            if newly_completed > completed_herpn_groups:
+                completed_names = [
+                    name
+                    for group in herpn_conversion_groups[
+                        completed_herpn_groups:newly_completed]
+                    for name in group
+                ]
+                if rank == 0:
+                    logging.info(
+                        "HerPN groups %d/%d completed (%s); recalibrating "
+                        "BatchNorm with %d batches",
+                        newly_completed, len(herpn_conversion_groups),
+                        ", ".join(completed_names),
+                        herpn_bn_recalibration_batches)
+                recalibrate_herpn_batchnorm(
+                    backbone, train_loader, herpn_bn_recalibration_batches,
+                    global_step)
+                if cfg.dali:
+                    train_loader.reset()
+                completed_herpn_groups = newly_completed
+        elif herpn_enabled and herpn_stage_epochs:
             epoch_herpn_progress = herpn_progress_at_epoch(
                 epoch, herpn_stage_epochs, herpn_transition_epochs)
             backbone.module.set_herpn_progress(epoch_herpn_progress)
@@ -378,7 +776,23 @@ def main(args):
                 break
             global_step += 1
             set_prepbn_progress(backbone.module, global_step, prepbn_decay_steps)
-            if herpn_enabled and herpn_stage_epochs:
+            capture_simple_gate_stats = (
+                simple_gate_enabled
+                and simple_gate_stats_interval > 0
+                and global_step % simple_gate_stats_interval == 0
+            )
+            set_simple_gate_instrumentation(
+                backbone.module,
+                capture_simple_gate_stats,
+                gradient_scale=float(amp.get_scale()) if cfg.fp16 else 1.0,
+            )
+            if herpn_group_schedule:
+                fractional_epoch = epoch + step_in_epoch / max(
+                    scheduled_steps_per_epoch, 1)
+                backbone.module.set_herpn_blends(herpn_group_blends_at_epoch(
+                    fractional_epoch, herpn_conversion_groups,
+                    herpn_group_epochs, herpn_transition_epochs))
+            elif herpn_enabled and herpn_stage_epochs:
                 fractional_epoch = epoch + step_in_epoch / max(
                     scheduled_steps_per_epoch, 1)
                 backbone.module.set_herpn_progress(herpn_progress_at_epoch(
@@ -399,6 +813,7 @@ def main(args):
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
             range_penalty = local_embeddings.new_zeros(())
+            output_penalty = local_embeddings.new_zeros(())
             distillation_loss = local_embeddings.new_zeros(())
             if herpn_enabled and herpn_range_loss_weight > 0:
                 range_penalty = backbone.module.herpn_range_penalty()
@@ -407,6 +822,13 @@ def main(args):
                         f"Non-finite HerPN range penalty at global_step={global_step}"
                     )
                 loss = loss + herpn_range_loss_weight * range_penalty
+            if herpn_enabled and herpn_output_loss_weight > 0:
+                output_penalty = backbone.module.herpn_output_penalty()
+                if not torch.isfinite(output_penalty):
+                    raise FloatingPointError(
+                        f"Non-finite HerPN output penalty at global_step={global_step}"
+                    )
+                loss = loss + herpn_output_loss_weight * output_penalty
             if herpn_enabled and herpn_distill_loss_weight > 0:
                 distillation_loss = backbone.module.herpn_distillation_loss()
                 if not torch.isfinite(distillation_loss):
@@ -455,11 +877,21 @@ def main(args):
                 lr_scheduler.step()
 
             with torch.no_grad():
+                if capture_simple_gate_stats:
+                    gate_stats = collect_simple_gate_stats(backbone.module)
+                    log_simple_gate_stats(
+                        gate_stats,
+                        global_step,
+                        summary_writer=summary_writer,
+                        wandb_logger=wandb_logger,
+                    )
+                    set_simple_gate_instrumentation(backbone.module, False)
                 if wandb_logger:
                     wandb_logger.log({
                         'Loss/Step Loss': loss.item(),
                         'Loss/Train Loss': loss_am.avg,
                         'Loss/HerPN Range Penalty': range_penalty.item(),
+                        'Loss/HerPN Output Penalty': output_penalty.item(),
                         'Loss/HerPN Distillation': distillation_loss.item(),
                         'Process/HerPN Progress': (
                             float(backbone.module.herpn_progress.item())
@@ -470,9 +902,12 @@ def main(args):
 
                 if (summary_writer is not None and herpn_enabled and
                         global_step % cfg.frequent == 0):
+                    layer_range_stats = backbone.module.herpn_range_stats()
                     range_summary = backbone.module.herpn_range_summary()
                     summary_writer.add_scalar(
                         'Loss/HerPN Range Penalty', range_penalty.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Loss/HerPN Output Penalty', output_penalty.item(), global_step)
                     summary_writer.add_scalar(
                         'Loss/HerPN Distillation', distillation_loss.item(), global_step)
                     summary_writer.add_scalar(
@@ -482,8 +917,61 @@ def main(args):
                         'HerPN/Input Abs Max',
                         float(range_summary['input_absmax'].item()), global_step)
                     summary_writer.add_scalar(
+                        'HerPN/Output Abs Max',
+                        float(range_summary['output_absmax'].item()), global_step)
+                    summary_writer.add_scalar(
                         'HerPN/Outside Range Fraction',
                         float(range_summary['outside_fraction'].item()), global_step)
+                    summary_writer.add_scalar(
+                        'HerPN/Output Outside Range Fraction',
+                        float(range_summary['output_outside_fraction'].item()),
+                        global_step)
+                    summary_writer.add_scalar(
+                        'HerPN/Weight Abs Max',
+                        float(range_summary['herpn_weight_absmax'].item()), global_step)
+                    summary_writer.add_scalar(
+                        'HerPN/BN2 Running Var Min',
+                        float(range_summary['bn2_running_var_min'].item()), global_step)
+                    summary_writer.add_scalar(
+                        'HerPN/Quadratic Coefficient Abs Max',
+                        float(range_summary['coefficient2_absmax'].item()), global_step)
+                    for layer_name, layer_stats in layer_range_stats.items():
+                        layer_tag = layer_name.replace('.', '/')
+                        for metric in (
+                                'output_absmax', 'herpn_weight_absmax',
+                                'bn2_running_var_min', 'coefficient2_absmax',
+                                'blend'):
+                            value = layer_stats[metric]
+                            if value is not None:
+                                summary_writer.add_scalar(
+                                    f'HerPN/Layers/{layer_tag}/{metric}',
+                                    float(value.item()), global_step)
+                    worst_output_name, worst_output_stats = max(
+                        layer_range_stats.items(),
+                        key=lambda item: float(
+                            item[1]['output_absmax'].item())
+                        if item[1]['output_absmax'] is not None else -1.0)
+                    worst_coefficient_name, worst_coefficient_stats = max(
+                        layer_range_stats.items(),
+                        key=lambda item: float(
+                            item[1]['coefficient2_absmax'].item()))
+                    logging.info(
+                        "HerPN stability step=%d output=%s:%.6g "
+                        "coefficient2=%s:%.6g bn2_var_min=%.6g",
+                        global_step,
+                        worst_output_name,
+                        float(worst_output_stats['output_absmax'].item()),
+                        worst_coefficient_name,
+                        float(worst_coefficient_stats[
+                            'coefficient2_absmax'].item()),
+                        float(range_summary['bn2_running_var_min'].item()))
+                if (summary_writer is not None and prepbn_decay_steps > 0
+                        and global_step % cfg.frequent == 0):
+                    summary_writer.add_scalar(
+                        'RepBatchNorm/Transition Progress',
+                        min(global_step / prepbn_decay_steps, 1.0),
+                        global_step,
+                    )
                     
                 loss_am.update(loss.item(), 1)
                 callback_logging(global_step, loss_am, epoch, cfg.fp16, lr_scheduler.get_last_lr()[0], amp)
@@ -494,12 +982,29 @@ def main(args):
                             backbone.module.state_dict(),
                             os.path.join(cfg.output, "model_validation.pt"),
                         )
-                    callback_verification(global_step, backbone)
+                    if (validate_after_prepbn_transition
+                            and not prepbn_transition_complete(
+                                global_step, prepbn_decay_steps)):
+                        if rank == 0:
+                            logging.info(
+                                "Skipping verification at step %d: RepBatchNorm "
+                                "transition is %.2f%% complete",
+                                global_step,
+                                100.0 * global_step / max(prepbn_decay_steps, 1),
+                            )
+                    else:
+                        callback_verification(global_step, backbone.module)
 
         if lr_scheduler_step_per_epoch:
             lr_scheduler.step()
 
-        if cfg.save_all_states:
+        checkpoint_interval = int(getattr(cfg, "checkpoint_interval_epochs", 0))
+        should_save_checkpoint = (
+            bool(cfg.save_all_states)
+            or (checkpoint_interval > 0
+                and (epoch + 1) % checkpoint_interval == 0)
+        )
+        if should_save_checkpoint:
             checkpoint = {
                 "epoch": epoch + 1,
                 "global_step": global_step,
@@ -508,7 +1013,13 @@ def main(args):
                 "state_optimizer": opt.state_dict(),
                 "state_lr_scheduler": lr_scheduler.state_dict()
             }
-            torch.save(checkpoint, os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
+            save_training_checkpoint(
+                checkpoint, cfg.output, rank,
+                keep_previous=bool(getattr(
+                    cfg, "checkpoint_keep_previous", True)))
+            logging.info(
+                "Saved resumable checkpoint for epoch %d on rank %d",
+                epoch + 1, rank)
 
         if rank == 0:
             path_module = os.path.join(cfg.output, "model.pt")
@@ -527,16 +1038,54 @@ def main(args):
     if prepbn_bn_stat_epochs > 0:
         if rank == 0:
             logging.info("Refreshing PRepBN BatchNorm statistics for %d epoch(s)", prepbn_bn_stat_epochs)
-        backbone.train()
         set_prepbn_progress(backbone.module, prepbn_decay_steps, prepbn_decay_steps)
-        with torch.no_grad():
-            for stat_epoch in range(prepbn_bn_stat_epochs):
-                if isinstance(train_loader, DataLoader):
-                    train_loader.sampler.set_epoch(cfg.num_epoch + stat_epoch)
-                for img, _ in train_loader:
-                    backbone(img)
-                if cfg.dali:
-                    train_loader.reset()
+        recalibration_batches = recalibrate_prepbn_batchnorm(
+            backbone,
+            train_loader,
+            prepbn_bn_stat_epochs,
+            cfg.num_epoch,
+            dali=cfg.dali,
+        )
+        if rank == 0:
+            logging.info(
+                "Refreshed final RepBatchNorm statistics with %d batches",
+                recalibration_batches,
+            )
+
+    final_gate_profile = profile_simple_gate_ranges(
+        backbone,
+        train_loader,
+        int(getattr(cfg, "simple_gate_final_profile_batches", 0)),
+        dali=cfg.dali,
+    )
+    if final_gate_profile and rank == 0:
+        profile_path = os.path.join(cfg.output, "simple_gate_final_profile.json")
+        with open(profile_path, "w", encoding="utf-8") as profile_file:
+            json.dump(final_gate_profile, profile_file, indent=2, sort_keys=True)
+        profile_layers = {
+            name: stats for name, stats in final_gate_profile.items()
+            if not name.startswith("_")
+        }
+        worst_name, worst_stats = max(
+            profile_layers.items(),
+            key=lambda item: item[1]["product_absmax"],
+        )
+        logging.info(
+            "Final SimpleGate profile saved to %s; worst product range is "
+            "%s absmax=%.6g p99.9=%.6g outside=%.6g",
+            profile_path,
+            worst_name,
+            worst_stats["product_absmax"],
+            worst_stats["product_p999"],
+            worst_stats["product_outside_fraction"],
+        )
+
+    if getattr(cfg, "final_verification_after_prepbn", False):
+        if rank == 0:
+            logging.info(
+                "Running final verification with fully converted and "
+                "recalibrated RepBatchNorm")
+        callback_verification(global_step, backbone.module)
 
     if rank == 0:
         path_module = os.path.join(cfg.output, "model.pt")
