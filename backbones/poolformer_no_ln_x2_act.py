@@ -79,15 +79,19 @@ class SimpleGate(nn.Module):
     def distillation_loss(self):
         if self._last_product is None or self._last_teacher is None:
             return None
-        return F.mse_loss(self._last_product, self._last_teacher.detach())
+        target = self._last_teacher.detach().to(
+            dtype=self._last_product.dtype)
+        return F.mse_loss(self._last_product, target)
 
     def range_penalty(self):
         if self._last_operand1 is None or self._last_operand2 is None:
             return None
         limit = self.range_limit
+        operand1 = self._last_operand1.float()
+        operand2 = self._last_operand2.float()
         return 0.5 * (
-            F.relu(self._last_operand1.abs() - limit).square().mean()
-            + F.relu(self._last_operand2.abs() - limit).square().mean()
+            F.relu(operand1.abs() - limit).square().mean()
+            + F.relu(operand2.abs() - limit).square().mean()
         )
 
     def set_instrumentation(self, enabled=True, gradient_scale=1.0):
@@ -221,7 +225,7 @@ class SimpleGate(nn.Module):
             # the main path and keep it close to GELU throughout conversion.
             loss_operand1 = self._sample_for_loss(x1)
             loss_operand2 = self._sample_for_loss(x2)
-            self._last_teacher = F.gelu(loss_operand1).detach()
+            self._last_teacher = F.gelu(loss_operand1).float().detach()
             self._last_product = (
                 loss_operand1.float() * loss_operand2.float())
             self._last_operand1 = loss_operand1

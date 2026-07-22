@@ -58,6 +58,26 @@ def test_distillation_warms_multiplier_while_main_path_is_gelu():
     assert torch.isfinite(gate.range_penalty())
 
 
+def test_mixed_dtype_auxiliary_losses_backward_in_float32():
+    gate = SimpleGate(initial_blend=0.0, sample_size=1024)
+    gate.set_auxiliary_losses(True)
+    inputs = torch.randn(2, 4, 3, 3, requires_grad=True)
+    output = gate(inputs)
+    # Reproduce CUDA autocast's cached FP16 teacher alongside the FP32
+    # multiplication product without requiring CPU FP16 GELU support.
+    gate._last_teacher = gate._last_teacher.half()
+    gate._last_operand1 = gate._last_operand1.half()
+    gate._last_operand2 = gate._last_operand2.half()
+    distillation = gate.distillation_loss()
+    range_penalty = gate.range_penalty()
+
+    assert distillation.dtype == torch.float32
+    assert range_penalty.dtype == torch.float32
+    (output.float().mean() + distillation + range_penalty).backward()
+    assert inputs.grad is not None
+    assert torch.isfinite(inputs.grad).all()
+
+
 def test_multiplier_initialization_is_local_gelu_approximation():
     mlp = Mlp(4, hidden_features=8)
     half = mlp.fc1.out_channels // 2
