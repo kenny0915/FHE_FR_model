@@ -75,13 +75,17 @@ Important training settings are controlled by the config file:
 
 To resume training, set `config.resume = True` in the config and make sure the corresponding `checkpoint_gpu_*.pt` files exist in the output directory.
 
-For the SimpleGate/RepBatchNorm experiment, periodic verification begins only
-after the normalization transition finishes. At the end of training, BatchNorm
-statistics are reset and recalibrated through the final inference graph, a
-layer-wise gate profile is written to `simple_gate_final_profile.json`, and the
-recalibrated model is verified and saved. Per-layer operand, product, gradient,
-correlation, range, and residual-scale measurements are also available under
-`SimpleGate/` in TensorBoard.
+For the SimpleGate/RepBatchNorm experiment, epochs 0-8 use GELU while the
+normalization transition finishes. BatchNorm is then recalibrated and verified
+before six contiguous block groups progressively blend from GELU into
+SimpleGate during epochs 8-20. The second projection half is initialized from
+the local GELU expansion and warmed by sampled distillation and range losses.
+Epochs 20-25 use only SimpleGate. At the end of training, BatchNorm statistics
+are reset and recalibrated through the final inference graph, a layer-wise gate
+profile is written to `simple_gate_final_profile.json`, and the recalibrated
+model is verified and saved. Per-layer operand, product, gradient, correlation,
+range, blend, teacher-error, and residual-scale measurements are available
+under `SimpleGate/` in TensorBoard.
 
 ## IJBB/IJBC Evaluation
 

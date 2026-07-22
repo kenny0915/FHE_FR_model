@@ -18,9 +18,9 @@ config.frequent = 1
 config.val_targets = []
 config.save_all_states = False
 
-# Exercise every block group and post-group BN recalibration quickly.
+# Exercise all eight conversion groups and checkpoint paths quickly.
 config.herpn_stage_epochs = ()
-config.herpn_group_epochs = tuple(index * 0.25 for index in range(
-    len(config.herpn_conversion_groups)))
-config.herpn_transition_epochs = 0.25
+config.herpn_group_epochs = tuple(
+    index * 0.5 for index in range(len(config.herpn_conversion_groups)))
+config.herpn_transition_epochs = 0.5
 config.herpn_bn_recalibration_batches = 1

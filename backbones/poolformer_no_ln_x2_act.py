@@ -19,6 +19,7 @@ import os
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from . import poolformer_no_ln as base
 
@@ -34,15 +35,18 @@ trunc_normal_ = base.trunc_normal_
 
 
 class SimpleGate(nn.Module):
-    """NAFNet SimpleGate with opt-in range and gradient instrumentation.
+    """Progressive GELU-to-SimpleGate activation with instrumentation.
 
     This is a bilinear gate ``x1 * x2``, not the scalar activation ``x**2``.
+    A fixed-width teacher path makes it possible to start from ``GELU(x1)``
+    and blend into the gate without changing either convolution's shape.
     Statistics are captured only when explicitly enabled so normal training has
     no quantile/reduction overhead. The multiplication can be evaluated in
     float32 under AMP to avoid an avoidable fp16 overflow during training.
     """
     def __init__(self, range_limit=6.0, sample_size=16384,
-                 compute_fp32=True, fail_on_nonfinite=True):
+                 compute_fp32=True, fail_on_nonfinite=True,
+                 conversion_group=0, initial_blend=0.0):
         super().__init__()
         if range_limit <= 0:
             raise ValueError("SimpleGate range_limit must be positive")
@@ -52,9 +56,39 @@ class SimpleGate(nn.Module):
         self.sample_size = int(sample_size)
         self.compute_fp32 = bool(compute_fp32)
         self.fail_on_nonfinite = bool(fail_on_nonfinite)
+        self.conversion_group = int(conversion_group)
+        # This is scheduled state rather than a learned value. Keeping it as a
+        # Python scalar avoids 24 GPU synchronizations in every forward pass;
+        # the training schedule reconstructs it after loading a checkpoint.
+        self.blend = float(initial_blend)
         self.instrumentation_enabled = False
+        self.auxiliary_losses_enabled = False
         self.gradient_scale = 1.0
         self._last_stats = None
+        self._last_teacher = None
+        self._last_product = None
+        self._last_operand1 = None
+        self._last_operand2 = None
+
+    def set_blend(self, blend):
+        blend = float(blend)
+        if not 0.0 <= blend <= 1.0:
+            raise ValueError(f"SimpleGate blend must be in [0, 1], got {blend}")
+        self.blend = blend
+
+    def distillation_loss(self):
+        if self._last_product is None or self._last_teacher is None:
+            return None
+        return F.mse_loss(self._last_product, self._last_teacher.detach())
+
+    def range_penalty(self):
+        if self._last_operand1 is None or self._last_operand2 is None:
+            return None
+        limit = self.range_limit
+        return 0.5 * (
+            F.relu(self._last_operand1.abs() - limit).square().mean()
+            + F.relu(self._last_operand2.abs() - limit).square().mean()
+        )
 
     def set_instrumentation(self, enabled=True, gradient_scale=1.0):
         self.instrumentation_enabled = bool(enabled)
@@ -62,11 +96,27 @@ class SimpleGate(nn.Module):
         if not enabled:
             self._last_stats = None
 
+    def set_auxiliary_losses(self, enabled=True):
+        self.auxiliary_losses_enabled = bool(enabled)
+        if not enabled:
+            self._last_teacher = None
+            self._last_product = None
+            self._last_operand1 = None
+            self._last_operand2 = None
+
     def range_stats(self):
         return self._last_stats
 
     def _sample(self, tensor):
         flat = tensor.detach().flatten()
+        if flat.numel() <= self.sample_size:
+            return flat
+        stride = (flat.numel() + self.sample_size - 1) // self.sample_size
+        return flat[::stride][:self.sample_size]
+
+    def _sample_for_loss(self, tensor):
+        """Bound auxiliary-loss memory while retaining sampled gradients."""
+        flat = tensor.flatten()
         if flat.numel() <= self.sample_size:
             return flat
         stride = (flat.numel() + self.sample_size - 1) // self.sample_size
@@ -143,16 +193,55 @@ class SimpleGate(nn.Module):
             raise ValueError(
                 f"SimpleGate needs an even channel count, got {x.shape[1]}")
         x1, x2 = x.chunk(2, dim=1)
-        if self.compute_fp32 and x.dtype in (torch.float16, torch.bfloat16):
-            product = (x1.float() * x2.float()).to(dtype=x.dtype)
+        blend = self.blend
+        need_full_product = blend > 0.0 or self.instrumentation_enabled
+        if need_full_product:
+            if self.compute_fp32 and x.dtype in (
+                    torch.float16, torch.bfloat16):
+                # Keep the result in fp32. Casting a finite large product back
+                # to fp16 here can itself create inf before the next autocast op.
+                product = x1.float() * x2.float()
+            else:
+                product = x1 * x2
         else:
-            product = x1 * x2
+            product = None
+
+        need_teacher = blend < 1.0 or (
+            self.training and self.auxiliary_losses_enabled)
+        teacher = F.gelu(x1) if need_teacher else None
+        if blend <= 0.0:
+            output = teacher
+        elif blend >= 1.0:
+            output = product
+        else:
+            output = torch.lerp(teacher.float(), product.float(), blend)
+
+        if self.training and self.auxiliary_losses_enabled:
+            # The auxiliary losses warm the multiplier branch before it enters
+            # the main path and keep it close to GELU throughout conversion.
+            loss_operand1 = self._sample_for_loss(x1)
+            loss_operand2 = self._sample_for_loss(x2)
+            self._last_teacher = F.gelu(loss_operand1).detach()
+            self._last_product = (
+                loss_operand1.float() * loss_operand2.float())
+            self._last_operand1 = loss_operand1
+            self._last_operand2 = loss_operand2
+        else:
+            self._last_teacher = None
+            self._last_product = None
+            self._last_operand1 = None
+            self._last_operand2 = None
 
         if self.instrumentation_enabled:
             self._capture_forward_stats(x1, x2, product)
-            if product.requires_grad:
-                product.register_hook(self._capture_gradient_stats)
-        return product
+            self._last_stats["blend"] = product.new_tensor(self.blend).float()
+            if teacher is not None:
+                teacher_error = product.float() - teacher.detach().float()
+                self._last_stats["teacher_error_rms"] = self._rms(
+                    self._sample(teacher_error))
+            if output.requires_grad:
+                output.register_hook(self._capture_gradient_stats)
+        return output
 
 
 class Mlp(nn.Module):
@@ -163,7 +252,8 @@ class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None,
                  out_features=None, act_layer=SimpleGate, drop=0.,
                  gate_range_limit=6.0, gate_stats_sample_size=16384,
-                 gate_compute_fp32=True, gate_fail_on_nonfinite=True):
+                 gate_compute_fp32=True, gate_fail_on_nonfinite=True,
+                 gate_conversion_group=0, gate_initial_blend=0.0):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -174,18 +264,37 @@ class Mlp(nn.Module):
                 sample_size=gate_stats_sample_size,
                 compute_fp32=gate_compute_fp32,
                 fail_on_nonfinite=gate_fail_on_nonfinite,
+                conversion_group=gate_conversion_group,
+                initial_blend=gate_initial_blend,
             )
         else:
             self.act = act_layer()
         self.fc2 = nn.Conv2d(hidden_features, out_features, 1)
         self.drop = nn.Dropout(drop)
         self.apply(self._init_weights)
+        if act_layer is SimpleGate:
+            self._init_gate_multiplier()
 
     def _init_weights(self, m):
         if isinstance(m, nn.Conv2d):
             trunc_normal_(m.weight, std=.02)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
+
+    def _init_gate_multiplier(self):
+        """Initialize x2 so x1*x2 matches GELU near the origin.
+
+        GELU(x) = x Phi(x) and Phi(x) is locally
+        ``0.5 + x / sqrt(2*pi)``.
+        """
+        half = self.fc1.out_channels // 2
+        inverse_sqrt_2pi = 0.3989422804014327
+        with torch.no_grad():
+            self.fc1.weight[half:].copy_(
+                inverse_sqrt_2pi * self.fc1.weight[:half])
+            if self.fc1.bias is not None:
+                self.fc1.bias[half:].copy_(
+                    0.5 + inverse_sqrt_2pi * self.fc1.bias[:half])
 
     def forward(self, x):
         x = self.fc1(x)
@@ -215,7 +324,8 @@ class PoolFormerBlock(nn.Module):
                  drop=0., drop_path=0.,
                  use_layer_scale=True, layer_scale_init_value=1e-5,
                  gate_range_limit=6.0, gate_stats_sample_size=16384,
-                 gate_compute_fp32=True, gate_fail_on_nonfinite=True):
+                 gate_compute_fp32=True, gate_fail_on_nonfinite=True,
+                 gate_conversion_group=0, gate_initial_blend=0.0):
 
         super().__init__()
 
@@ -228,7 +338,9 @@ class PoolFormerBlock(nn.Module):
                        gate_range_limit=gate_range_limit,
                        gate_stats_sample_size=gate_stats_sample_size,
                        gate_compute_fp32=gate_compute_fp32,
-                       gate_fail_on_nonfinite=gate_fail_on_nonfinite)
+                       gate_fail_on_nonfinite=gate_fail_on_nonfinite,
+                       gate_conversion_group=gate_conversion_group,
+                       gate_initial_blend=gate_initial_blend)
 
         # The following two techniques are useful to train deep PoolFormers.
         self.drop_path = DropPath(drop_path) if drop_path > 0. \
@@ -260,13 +372,23 @@ def basic_blocks(dim, index, layers,
                  drop_rate=.0, drop_path_rate=0.,
                  use_layer_scale=True, layer_scale_init_value=1e-5,
                  gate_range_limit=6.0, gate_stats_sample_size=16384,
-                 gate_compute_fp32=True, gate_fail_on_nonfinite=True):
+                 gate_compute_fp32=True, gate_fail_on_nonfinite=True,
+                 gate_initial_blend=0.0):
     """
     generate PoolFormer blocks for a stage
     return: PoolFormer blocks
     """
     blocks = []
     for block_idx in range(layers[index]):
+        if index < 2:
+            conversion_group = index
+        elif index == 2:
+            # Divide the longest stage into three contiguous groups. For S24
+            # these are blocks 0-3, 4-7, and 8-11.
+            conversion_group = 2 + min(
+                2, (3 * block_idx) // layers[index])
+        else:
+            conversion_group = 5
         block_dpr = drop_path_rate * (
             block_idx + sum(layers[:index])) / (sum(layers) - 1)
         blocks.append(PoolFormerBlock(
@@ -279,6 +401,8 @@ def basic_blocks(dim, index, layers,
             gate_stats_sample_size=gate_stats_sample_size,
             gate_compute_fp32=gate_compute_fp32,
             gate_fail_on_nonfinite=gate_fail_on_nonfinite,
+            gate_conversion_group=conversion_group,
+            gate_initial_blend=gate_initial_blend,
             ))
     blocks = nn.Sequential(*blocks)
 
@@ -315,6 +439,7 @@ class PoolFormer(nn.Module):
                  gate_stats_sample_size=16384,
                  gate_compute_fp32=True,
                  gate_fail_on_nonfinite=True,
+                 gate_initial_blend=0.0,
                  fork_feat=False,
                  face_embedding=True,
                  fp16=False,
@@ -347,7 +472,8 @@ class PoolFormer(nn.Module):
                                  gate_range_limit=gate_range_limit,
                                  gate_stats_sample_size=gate_stats_sample_size,
                                  gate_compute_fp32=gate_compute_fp32,
-                                 gate_fail_on_nonfinite=gate_fail_on_nonfinite)
+                                 gate_fail_on_nonfinite=gate_fail_on_nonfinite,
+                                 gate_initial_blend=gate_initial_blend)
             network.append(stage)
             if i >= len(layers) - 1:
                 break
@@ -489,6 +615,46 @@ class PoolFormer(nn.Module):
     def set_simple_gate_instrumentation(self, enabled=True, gradient_scale=1.0):
         for gate in self.simple_gates().values():
             gate.set_instrumentation(enabled, gradient_scale=gradient_scale)
+
+    def set_simple_gate_auxiliary_losses(self, enabled=True):
+        for gate in self.simple_gates().values():
+            gate.set_auxiliary_losses(enabled)
+
+    def set_simple_gate_blends(self, blends):
+        blends = tuple(float(value) for value in blends)
+        expected_groups = 1 + max(
+            (gate.conversion_group for gate in self.simple_gates().values()),
+            default=-1,
+        )
+        if len(blends) != expected_groups:
+            raise ValueError(
+                f"Expected {expected_groups} SimpleGate blends, got {len(blends)}")
+        for gate in self.simple_gates().values():
+            gate.set_blend(blends[gate.conversion_group])
+
+    def simple_gate_group_names(self):
+        groups = {}
+        for name, gate in self.simple_gates().items():
+            groups.setdefault(gate.conversion_group, []).append(name)
+        return tuple(tuple(groups[index]) for index in sorted(groups))
+
+    def simple_gate_distillation_loss(self):
+        losses = [
+            gate.distillation_loss() for gate in self.simple_gates().values()
+        ]
+        losses = [loss for loss in losses if loss is not None]
+        if losses:
+            return torch.stack(losses).mean()
+        return next(self.parameters()).new_zeros(())
+
+    def simple_gate_range_penalty(self):
+        penalties = [
+            gate.range_penalty() for gate in self.simple_gates().values()
+        ]
+        penalties = [penalty for penalty in penalties if penalty is not None]
+        if penalties:
+            return torch.stack(penalties).mean()
+        return next(self.parameters()).new_zeros(())
 
     def simple_gate_range_stats(self):
         modules = dict(self.named_modules())

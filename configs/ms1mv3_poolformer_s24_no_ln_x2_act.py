@@ -11,7 +11,7 @@ config.fp16 = True
 config.amp_init_scale = 1024.0
 config.amp_growth_interval = 1000
 config.gradient_clip = 1.0
-config.prepbn_decay_epochs = 20
+config.prepbn_decay_epochs = 8
 config.prepbn_bn_stat_epochs = 1
 config.prepbn_require_full_transition = True
 config.validate_after_prepbn_transition = True
@@ -21,11 +21,21 @@ config.final_verification_after_prepbn = True
 # halves. The MLP2 variant offsets the doubled pre-gate width. Range captures
 # are sampled to keep the layer-wise p99.9 instrumentation affordable.
 config.simple_gate_range_limit = 6.0
-config.simple_gate_stats_interval = 500
+config.simple_gate_stats_interval = 100
 config.simple_gate_stats_sample_size = 16384
 config.simple_gate_final_profile_batches = 50
 config.simple_gate_compute_fp32 = True
 config.simple_gate_fail_on_nonfinite = True
+# Convert six contiguous groups only after RepBatchNorm has reached its final
+# graph. Each group blends for two epochs; epochs 20-25 are pure SimpleGate.
+config.simple_gate_initial_blend = 0.0
+config.simple_gate_group_epochs = (8, 10, 12, 14, 16, 18)
+config.simple_gate_transition_epochs = 2.0
+config.simple_gate_require_full_conversion = True
+config.simple_gate_distill_loss_weight = 0.1
+config.simple_gate_range_loss_weight = 0.01
+config.simple_gate_repbn_recalibration_batches = 200
+config.simple_gate_verify_after_repbn = True
 config.fail_on_nonfinite_val = True
 config.momentum = 0.9
 config.weight_decay = 0.1
