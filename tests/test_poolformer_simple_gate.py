@@ -1,4 +1,5 @@
 import torch
+import pytest
 
 from backbones.poolformer_no_ln_x2_act import (
     Mlp,
@@ -124,3 +125,22 @@ def test_s24_mlp2_uses_24_gates_mlp2_width_and_skip_init():
     stats = model.simple_gate_range_stats()
     assert len(stats) == 24
     assert all("residual_scale_absmax" in layer for layer in stats.values())
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="requires CUDA FP16 convolution")
+def test_fp16_model_accepts_fp32_validation_input():
+    model = poolformer_s24_mlp2(
+        pretrained=False,
+        face_embedding=True,
+        num_classes=16,
+        fp16=True,
+        gate_stats_sample_size=256,
+    ).cuda().half().eval()
+    model.set_simple_gate_blends((0.0,) * 6)
+
+    with torch.no_grad():
+        output = model(torch.randn(1, 3, 112, 112, device="cuda"))
+    assert output.dtype == torch.float16
+    assert output.shape == (1, 16)
+    assert torch.isfinite(output).all()

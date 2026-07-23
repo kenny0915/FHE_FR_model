@@ -37,6 +37,10 @@ config.simple_gate_range_loss_weight = 0.01
 config.simple_gate_repbn_recalibration_batches = 200
 config.simple_gate_verify_after_repbn = True
 config.fail_on_nonfinite_val = True
+# Retain an inference-only backbone snapshot after every completed epoch so a
+# stable earlier model remains available if a later conversion group fails.
+config.save_epoch_models = True
+config.epoch_model_interval = 1
 config.momentum = 0.9
 config.weight_decay = 0.1
 config.batch_size = 256

@@ -594,6 +594,13 @@ class PoolFormer(nn.Module):
         return x
 
     def forward(self, x):
+        # Validation data is loaded as float32, while some training/export
+        # flows keep the backbone parameters in float16. CUDA autocast handles
+        # FP32 master weights, but it does not reliably reconcile an FP32 input
+        # with a convolution whose stored bias is already FP16.
+        input_dtype = self.patch_embed.proj.weight.dtype
+        if x.is_floating_point() and x.dtype != input_dtype:
+            x = x.to(dtype=input_dtype)
         with torch.cuda.amp.autocast(self.fp16):
             # input embedding
             x = self.forward_embeddings(x)
@@ -604,7 +611,11 @@ class PoolFormer(nn.Module):
             return x
         x = self.norm(x)
         if self.face_embedding:
-            return self.head(x.float() if self.fp16 else x)
+            head_parameter = next(self.head.parameters(), None)
+            if (head_parameter is not None and x.is_floating_point()
+                    and x.dtype != head_parameter.dtype):
+                x = x.to(dtype=head_parameter.dtype)
+            return self.head(x)
         x = x.mean([-2, -1])
         cls_out = self.head(x)
         # for image classification
