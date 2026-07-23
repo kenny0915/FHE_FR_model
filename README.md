@@ -87,6 +87,20 @@ model is verified and saved. Per-layer operand, product, gradient, correlation,
 range, blend, teacher-error, and residual-scale measurements are available
 under `SimpleGate/` in TensorBoard.
 
+To determine whether a progressive SimpleGate checkpoint fails only in FP16,
+run its saved epoch model through the standard verification sets in full FP32:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python eval_poolformer_checkpoint_fp32.py \
+  --checkpoint work_dirs/ms1mv3_poolformer_s24_no_ln_x2_act/model_epoch_10.pt \
+  --epoch 10 \
+  --batch-size 32
+```
+
+For `model_epoch_XX.pt`, `--epoch` can be omitted because it is inferred from
+the filename. The script reconstructs the gate blends for that epoch and exits
+with a failure if any requested validation embedding is non-finite.
+
 ## IJBB/IJBC Evaluation
 
 After training, evaluate a saved model with `eval_ijbc.py`:
