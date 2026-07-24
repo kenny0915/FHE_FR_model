@@ -57,12 +57,7 @@ parser.add_argument(
     action='store_true',
     help='abort immediately if an image produces a non-finite embedding',
 )
-parser.add_argument(
-    '--layer3-herpn-bn2-eps',
-    default=None,
-    type=float,
-    help='override eps only for layer3.7-13.herpn.bn2 BatchNorm layers',
-)
+
 args = parser.parse_args()
 
 target = args.target
@@ -76,36 +71,6 @@ use_flip_test = True  # if Ture, TestMode(F1)
 job = args.job
 batch_size = args.batch_size
 
-
-TARGET_BN_EPS_LAYERS = {
-    'layer3.7.prelu.herpn.bn2',
-    'layer3.8.prelu.herpn.bn2',
-    'layer3.9.prelu.herpn.bn2',
-    'layer3.10.prelu.herpn.bn2',
-    'layer3.11.prelu.herpn.bn2',
-    'layer3.12.prelu.herpn.bn2',
-    'layer3.13.prelu.herpn.bn2',
-}
-
-
-def override_target_bn_eps(model, eps):
-    if eps is None:
-        return
-
-    found = []
-    for name, module in model.named_modules():
-        if name in TARGET_BN_EPS_LAYERS:
-            if not isinstance(module, torch.nn.BatchNorm2d):
-                raise TypeError(f'{name} is {type(module)}, expected BatchNorm2d')
-            module.eps = eps
-            found.append(name)
-
-    missing = sorted(TARGET_BN_EPS_LAYERS.difference(found))
-    if missing:
-        raise ValueError(f'Missing target BN layers: {missing}')
-    print(f'Overrode eps={eps} for BN layers: {sorted(found)}')
-
-
 class Embedding(object):
     def __init__(self, prefix, data_shape, batch_size=1):
         image_size = (112, 112)
@@ -113,7 +78,6 @@ class Embedding(object):
         weight = torch.load(prefix)
         resnet = get_model(args.network, dropout=0, fp16=False).cuda()
         resnet.load_state_dict(weight)
-        override_target_bn_eps(resnet, args.layer3_herpn_bn2_eps)
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()
@@ -174,7 +138,8 @@ class Embedding(object):
         return feat.cpu().numpy()
 
 
-# 将一个list尽量均分成n份，限制len(list)==n，份数大于原list内元素个数则分配空list[]
+# slipt a list into n sublists, distributing elements as evenly as possible.
+# If n is greater than the number of elements in the list, some sublists will be empty.
 def divideIntoNstrand(listTemp, n):
     twoList = [[] for i in range(n)]
     for i, e in enumerate(listTemp):

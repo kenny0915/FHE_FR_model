@@ -507,11 +507,7 @@ def main(args):
         "fp16": cfg.fp16,
         "num_features": cfg.embedding_size,
     }
-    if cfg.network == "patch_cnn":
-        model_kwargs.update(
-            input_size=getattr(cfg, "input_size", 112),
-            patch_size=getattr(cfg, "patch_size", 28),
-        )
+
     if cfg.network.startswith("r") and cfg.network.endswith("_no_relu"):
         default_herpn_progress = (
             0.0 if (getattr(cfg, "herpn_conversion_groups", ())
