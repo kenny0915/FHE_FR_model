@@ -57,6 +57,12 @@ parser.add_argument(
     action='store_true',
     help='abort immediately if an image produces a non-finite embedding',
 )
+parser.add_argument(
+    '--simple-gate-blends',
+    default=None,
+    type=str,
+    help='comma-separated SimpleGate group blends, e.g. 1,0,0,0,0,0',
+)
 
 args = parser.parse_args()
 
@@ -76,8 +82,28 @@ class Embedding(object):
         image_size = (112, 112)
         self.image_size = image_size
         weight = torch.load(prefix)
-        resnet = get_model(args.network, dropout=0, fp16=False).cuda()
-        resnet.load_state_dict(weight)
+        resnet = get_model(
+            args.network,
+            dropout=0,
+            fp16=False,
+            gate_initial_blend=0.0,
+            gate_compute_fp32=True,
+        ).cuda()
+        resnet.load_state_dict(weight, strict=True)
+        if args.simple_gate_blends is not None:
+            if not hasattr(resnet, 'set_simple_gate_blends'):
+                raise ValueError(
+                    '--simple-gate-blends was provided for a model without '
+                    'SimpleGate scheduling')
+            try:
+                blends = tuple(
+                    float(value.strip())
+                    for value in args.simple_gate_blends.split(','))
+            except ValueError as error:
+                raise ValueError(
+                    '--simple-gate-blends must be comma-separated numbers'
+                ) from error
+            resnet.set_simple_gate_blends(blends)
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()
