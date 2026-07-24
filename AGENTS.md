@@ -1,3 +1,9 @@
+## Execution environment
+
+- Full training runs on a separate GPU server with 4 NVIDIA V100-SXM2-32GB GPUs.
+- This repository checkout is only for code modifications and small, lightweight tests.
+- Do not launch full training jobs in this environment; prepare and validate the code here, then run training on the GPU server.
+
 # Repository working instructions
 
 - When the user asks to fix, modify, or generate repository content, finish the requested work and run appropriate tests.
