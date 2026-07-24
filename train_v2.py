@@ -351,7 +351,9 @@ def herpn_group_blends_at_epoch(epoch_value, conversion_groups, group_epochs,
 def validate_herpn_conversion_groups(module, conversion_groups):
     expected = {
         name for name, submodule in module.named_modules()
-        if submodule.__class__.__name__ == "ProgressiveHerPNActivation"
+        if (submodule.__class__.__name__ == "ProgressiveHerPNActivation"
+            or getattr(
+                submodule, "is_progressive_polynomial_activation", False))
     }
     scheduled = {name for group in conversion_groups for name in group}
     count = sum(len(group) for group in conversion_groups)
@@ -518,6 +520,18 @@ def main(args):
             herpn_progress=float(getattr(
                 cfg, "herpn_initial_progress", default_herpn_progress)),
         )
+    if cfg.network.startswith("r") and cfg.network.endswith("_quadratic"):
+        model_kwargs.update(
+            quadratic_input_scale=float(getattr(
+                cfg, "quadratic_input_scale", 6.0)),
+            quadratic_range_limit=float(getattr(
+                cfg, "quadratic_range_limit", 6.0)),
+            quadratic_abs_init=float(getattr(
+                cfg, "quadratic_abs_init",
+                1.0 / math.sqrt(2.0 * math.pi))),
+            quadratic_progress=float(getattr(
+                cfg, "herpn_initial_progress", 0.0)),
+        )
     if cfg.network.startswith("poolformer_no_ln_x2_act"):
         gate_group_epochs = tuple(getattr(
             cfg, "simple_gate_group_epochs", ()))
@@ -554,7 +568,8 @@ def main(args):
         broadcast_buffers=bool(getattr(cfg, "broadcast_buffers", True)),
         device_ids=[local_rank], bucket_cap_mb=16,
         find_unused_parameters=True)
-    backbone.register_comm_hook(None, fp16_compress_hook)
+    if getattr(cfg, "ddp_fp16_compress", True):
+        backbone.register_comm_hook(None, fp16_compress_hook)
 
     backbone.train()
     # FIXME using gradient checkpoint if there are some unused parameters will cause error

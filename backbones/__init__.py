@@ -27,6 +27,18 @@ def iresnet200_no_relu(pretrained=False, progress=True, **kwargs):
     return _iresnet200_no_relu(pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_iresnet_quadratic(depth, pretrained=False, progress=True, **kwargs):
+    from . import iresnet_quadratic
+    factory = {
+        18: iresnet_quadratic.iresnet18,
+        34: iresnet_quadratic.iresnet34,
+        50: iresnet_quadratic.iresnet50,
+        100: iresnet_quadratic.iresnet100,
+        200: iresnet_quadratic.iresnet200,
+    }[depth]
+    return factory(pretrained=pretrained, progress=progress, **kwargs)
+
+
 def get_mbf_no_relu(fp16=False, num_features=512, blocks=(1, 4, 6, 2), scale=2):
     from .mobilefacenet_no_relu import get_mbf as _get_mbf_no_relu
     return _get_mbf_no_relu(
@@ -59,6 +71,16 @@ def get_model(name, **kwargs):
         return iresnet100_no_relu(False, **kwargs)
     elif name in ("r200_no_relu",):
         return iresnet200_no_relu(False, **kwargs)
+    elif name in ("r18_quadratic",):
+        return get_iresnet_quadratic(18, False, **kwargs)
+    elif name in ("r34_quadratic",):
+        return get_iresnet_quadratic(34, False, **kwargs)
+    elif name in ("r50_quadratic",):
+        return get_iresnet_quadratic(50, False, **kwargs)
+    elif name in ("r100_quadratic",):
+        return get_iresnet_quadratic(100, False, **kwargs)
+    elif name in ("r200_quadratic",):
+        return get_iresnet_quadratic(200, False, **kwargs)
     elif name in ("mbf_no_relu",):
         fp16 = kwargs.get("fp16", False)
         num_features = kwargs.get("num_features", 512)
