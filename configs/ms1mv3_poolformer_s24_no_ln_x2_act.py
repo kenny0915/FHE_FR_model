@@ -36,6 +36,11 @@ config.simple_gate_distill_loss_weight = 0.1
 config.simple_gate_range_loss_weight = 0.01
 config.simple_gate_repbn_recalibration_batches = 200
 config.simple_gate_verify_after_repbn = True
+# Each distributed rank consumes this many batches; the cumulative running
+# statistics are merged before verification and checkpointing.
+config.simple_gate_group_bn_recalibration_batches = 500
+config.simple_gate_verify_after_group = True
+config.simple_gate_save_after_group = True
 config.fail_on_nonfinite_val = True
 # Retain an inference-only backbone snapshot after every completed epoch so a
 # stable earlier model remains available if a later conversion group fails.

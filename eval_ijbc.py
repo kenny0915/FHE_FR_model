@@ -81,7 +81,14 @@ class Embedding(object):
     def __init__(self, prefix, data_shape, batch_size=1):
         image_size = (112, 112)
         self.image_size = image_size
-        weight = torch.load(prefix)
+        checkpoint = torch.load(prefix)
+        checkpoint_blends = None
+        if (isinstance(checkpoint, dict)
+                and isinstance(checkpoint.get('state_dict_backbone'), dict)):
+            checkpoint_blends = checkpoint.get('simple_gate_blends')
+            weight = checkpoint['state_dict_backbone']
+        else:
+            weight = checkpoint
         resnet = get_model(
             args.network,
             dropout=0,
@@ -90,19 +97,25 @@ class Embedding(object):
             gate_compute_fp32=True,
         ).cuda()
         resnet.load_state_dict(weight, strict=True)
-        if args.simple_gate_blends is not None:
-            if not hasattr(resnet, 'set_simple_gate_blends'):
-                raise ValueError(
-                    '--simple-gate-blends was provided for a model without '
-                    'SimpleGate scheduling')
+        requested_blends = args.simple_gate_blends
+        if requested_blends is not None:
             try:
                 blends = tuple(
                     float(value.strip())
-                    for value in args.simple_gate_blends.split(','))
+                    for value in requested_blends.split(','))
             except ValueError as error:
                 raise ValueError(
                     '--simple-gate-blends must be comma-separated numbers'
                 ) from error
+        elif checkpoint_blends is not None:
+            blends = tuple(float(value) for value in checkpoint_blends)
+        else:
+            blends = None
+        if blends is not None:
+            if not hasattr(resnet, 'set_simple_gate_blends'):
+                raise ValueError(
+                    'SimpleGate blends were provided for a model without '
+                    'SimpleGate scheduling')
             resnet.set_simple_gate_blends(blends)
         model = torch.nn.DataParallel(resnet)
         self.model = model

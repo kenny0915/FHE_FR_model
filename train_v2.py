@@ -197,6 +197,39 @@ def end_batchnorm_recalibration(module: torch.nn.Module, state):
         submodule.train(was_training)
 
 
+def merge_cumulative_batchnorm_stats(batchnorm_state):
+    """Merge cumulative BN statistics from every distributed data shard."""
+    if not distributed.is_available() or not distributed.is_initialized():
+        return
+    if distributed.get_world_size() <= 1:
+        return
+
+    for submodule, _, _ in batchnorm_state:
+        if (submodule.running_mean is None
+                or submodule.running_var is None
+                or submodule.num_batches_tracked is None):
+            continue
+        local_batches = submodule.num_batches_tracked.detach().clone()
+        total_batches = local_batches.clone()
+        distributed.all_reduce(total_batches, op=distributed.ReduceOp.SUM)
+        if total_batches.item() == 0:
+            continue
+
+        weight = local_batches.to(
+            device=submodule.running_mean.device,
+            dtype=submodule.running_mean.dtype,
+        )
+        for running_stat in (
+                submodule.running_mean, submodule.running_var):
+            weighted_stat = running_stat * weight
+            distributed.all_reduce(
+                weighted_stat, op=distributed.ReduceOp.SUM)
+            running_stat.copy_(
+                weighted_stat
+                / total_batches.to(dtype=running_stat.dtype))
+        submodule.num_batches_tracked.copy_(total_batches)
+
+
 @torch.no_grad()
 def recalibrate_prepbn_batchnorm(backbone, train_loader, num_epochs, start_epoch,
                                 dali=False):
@@ -409,7 +442,9 @@ def recalibrate_batchnorm_batches(backbone, train_loader, num_batches,
     completed = 0
     try:
         for img, _ in train_loader:
-            embeddings = backbone(img)
+            # Bypass DDP so broadcast_buffers cannot replace each rank's
+            # independently accumulated running statistics before a forward.
+            embeddings = module(img)
             if not torch.isfinite(embeddings).all():
                 raise FloatingPointError(
                     f"Non-finite embeddings during {reason} BatchNorm "
@@ -422,6 +457,7 @@ def recalibrate_batchnorm_batches(backbone, train_loader, num_batches,
         end_batchnorm_recalibration(module, state)
     if completed == 0:
         raise RuntimeError(f"{reason} BatchNorm recalibration received no batches")
+    merge_cumulative_batchnorm_stats(state["batchnorm"])
     return completed
 
 
@@ -649,10 +685,13 @@ def main(args):
 
     start_epoch = 0
     global_step = 0
+    resumed_completed_simple_gate_groups = None
     if cfg.resume:
         dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
         start_epoch = dict_checkpoint["epoch"]
         global_step = dict_checkpoint["global_step"]
+        resumed_completed_simple_gate_groups = dict_checkpoint.get(
+            "completed_simple_gate_groups")
         backbone.module.load_state_dict(dict_checkpoint["state_dict_backbone"])
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
         opt.load_state_dict(dict_checkpoint["state_optimizer"])
@@ -780,14 +819,33 @@ def main(args):
             simple_gate_distill_loss_weight > 0
             or simple_gate_range_loss_weight > 0)
     completed_simple_gate_groups = sum(
-        float(start_epoch) >= float(start) + simple_gate_transition_epochs
+        float(start_epoch) > float(start) + simple_gate_transition_epochs
         for start in simple_gate_group_epochs
     ) if simple_gate_schedule else 0
+    if resumed_completed_simple_gate_groups is not None:
+        completed_simple_gate_groups = int(
+            resumed_completed_simple_gate_groups)
+        if not 0 <= completed_simple_gate_groups <= len(
+                simple_gate_group_epochs):
+            raise ValueError(
+                "Invalid completed_simple_gate_groups in checkpoint: "
+                f"{completed_simple_gate_groups}")
     repbn_gate_recalibrated = False
     simple_gate_repbn_recalibration_batches = int(getattr(
         cfg, "simple_gate_repbn_recalibration_batches", 0))
     simple_gate_verify_after_repbn = bool(getattr(
         cfg, "simple_gate_verify_after_repbn", False))
+    simple_gate_group_bn_recalibration_batches = int(getattr(
+        cfg, "simple_gate_group_bn_recalibration_batches", 0))
+    simple_gate_verify_after_group = bool(getattr(
+        cfg, "simple_gate_verify_after_group", False))
+    simple_gate_save_after_group = bool(getattr(
+        cfg, "simple_gate_save_after_group", False))
+    if ((simple_gate_verify_after_group or simple_gate_save_after_group)
+            and simple_gate_group_bn_recalibration_batches <= 0):
+        raise ValueError(
+            "SimpleGate group verification/checkpointing requires "
+            "simple_gate_group_bn_recalibration_batches > 0")
     last_simple_gate_snapshot = {}
     last_simple_gate_snapshot_step = None
     validate_after_prepbn_transition = bool(getattr(
@@ -831,11 +889,87 @@ def main(args):
                 float(epoch) >= float(start) + simple_gate_transition_epochs
                 for start in simple_gate_group_epochs)
             if newly_completed_gates > completed_simple_gate_groups:
+                if newly_completed_gates != completed_simple_gate_groups + 1:
+                    raise RuntimeError(
+                        "SimpleGate schedule crossed more than one group "
+                        "completion boundary in a single epoch; use epoch-aligned "
+                        "group transitions so every group can be recalibrated "
+                        "and checkpointed before the next group begins")
+                finalized_gate_blends = list(epoch_gate_blends)
+                finalized_gate_blends[newly_completed_gates - 1] = 1.0
+                if any(
+                        blend > 0.0
+                        for blend in finalized_gate_blends[
+                            newly_completed_gates:]):
+                    raise RuntimeError(
+                        "A later SimpleGate group started before the completed "
+                        "group's recalibration boundary")
+                finalized_gate_blends = tuple(finalized_gate_blends)
+                set_simple_gate_blends(
+                    backbone.module, finalized_gate_blends)
                 if rank == 0:
                     logging.info(
-                        "SimpleGate group %d/%d completed; blends=%s",
+                        "SimpleGate group %d/%d completed; forcing blends=%s",
                         newly_completed_gates, len(simple_gate_group_epochs),
-                        ",".join(f"{value:.3f}" for value in epoch_gate_blends))
+                        ",".join(
+                            f"{value:.3f}"
+                            for value in finalized_gate_blends))
+                if simple_gate_group_bn_recalibration_batches > 0:
+                    if rank == 0:
+                        logging.info(
+                            "Recalibrating all BatchNorm statistics after "
+                            "SimpleGate group %d/%d with %d batches per rank",
+                            newly_completed_gates,
+                            len(simple_gate_group_epochs),
+                            simple_gate_group_bn_recalibration_batches)
+                    calibrated = recalibrate_batchnorm_batches(
+                        backbone,
+                        train_loader,
+                        simple_gate_group_bn_recalibration_batches,
+                        global_step,
+                        f"post-SimpleGate group {newly_completed_gates}",
+                    )
+                    if cfg.dali:
+                        train_loader.reset()
+                    if rank == 0:
+                        logging.info(
+                            "SimpleGate group %d/%d BatchNorm recalibration "
+                            "complete; refreshed %d batches per rank",
+                            newly_completed_gates,
+                            len(simple_gate_group_epochs),
+                            calibrated)
+                    if simple_gate_verify_after_group:
+                        callback_verification(global_step, backbone.module)
+                    if simple_gate_save_after_group and rank == 0:
+                        group_checkpoint_path = os.path.join(
+                            cfg.output,
+                            "model_simple_gate_group_"
+                            f"{newly_completed_gates:02d}_bnrecalibrated.pt",
+                        )
+                        atomic_torch_save(
+                            {
+                                "state_dict_backbone":
+                                    backbone.module.state_dict(),
+                                "simple_gate_blends":
+                                    finalized_gate_blends,
+                                "simple_gate_group":
+                                    newly_completed_gates,
+                                "epoch": epoch,
+                                "global_step": global_step,
+                                "bn_recalibration_batches_per_rank":
+                                    calibrated,
+                                "bn_recalibration_world_size":
+                                    distributed.get_world_size(),
+                            },
+                            group_checkpoint_path,
+                        )
+                        logging.info(
+                            "Saved recalibrated SimpleGate group %d "
+                            "checkpoint to %s",
+                            newly_completed_gates, group_checkpoint_path)
+                    if (distributed.is_available()
+                            and distributed.is_initialized()):
+                        distributed.barrier()
                 completed_simple_gate_groups = newly_completed_gates
         if herpn_group_schedule:
             epoch_blends = herpn_group_blends_at_epoch(
@@ -1134,7 +1268,8 @@ def main(args):
                 "state_dict_backbone": backbone.module.state_dict(),
                 "state_dict_softmax_fc": module_partial_fc.state_dict(),
                 "state_optimizer": opt.state_dict(),
-                "state_lr_scheduler": lr_scheduler.state_dict()
+                "state_lr_scheduler": lr_scheduler.state_dict(),
+                "completed_simple_gate_groups": completed_simple_gate_groups,
             }
             atomic_torch_save(
                 checkpoint,

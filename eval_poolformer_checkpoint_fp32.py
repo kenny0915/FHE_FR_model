@@ -87,11 +87,16 @@ def main():
         else infer_completed_epoch(args.checkpoint)
     )
     raw_checkpoint = torch.load(args.checkpoint, map_location="cpu")
+    checkpoint_blends = (
+        raw_checkpoint.get("simple_gate_blends")
+        if isinstance(raw_checkpoint, dict)
+        else None
+    )
     if completed_epoch is None and isinstance(raw_checkpoint, dict):
         completed_epoch = raw_checkpoint.get("epoch")
-    if completed_epoch is None:
+    if completed_epoch is None and checkpoint_blends is None:
         raise ValueError(
-            "Cannot determine checkpoint epoch; pass --epoch explicitly")
+            "Cannot determine checkpoint blends; pass --epoch explicitly")
 
     model = get_model(
         cfg.network,
@@ -110,12 +115,15 @@ def main():
     })
     model.load_state_dict(state, strict=True)
 
-    group_epochs = tuple(cfg.simple_gate_group_epochs)
-    blends = gate_blends_for_epoch(
-        completed_epoch,
-        group_epochs,
-        cfg.simple_gate_transition_epochs,
-    )
+    if checkpoint_blends is not None:
+        blends = tuple(float(value) for value in checkpoint_blends)
+    else:
+        group_epochs = tuple(cfg.simple_gate_group_epochs)
+        blends = gate_blends_for_epoch(
+            completed_epoch,
+            group_epochs,
+            cfg.simple_gate_transition_epochs,
+        )
     model.set_simple_gate_blends(blends)
     for module in model.modules():
         if module.__class__.__name__ == "RepBatchNorm2d":

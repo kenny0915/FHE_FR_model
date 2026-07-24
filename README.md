@@ -80,12 +80,18 @@ normalization transition finishes. BatchNorm is then recalibrated and verified
 before six contiguous block groups progressively blend from GELU into
 SimpleGate during epochs 8-20. The second projection half is initialized from
 the local GELU expansion and warmed by sampled distillation and range losses.
-Epochs 20-25 use only SimpleGate. At the end of training, BatchNorm statistics
-are reset and recalibrated through the final inference graph, a layer-wise gate
-profile is written to `simple_gate_final_profile.json`, and the recalibrated
-model is verified and saved. Per-layer operand, product, gradient, correlation,
-range, blend, teacher-error, and residual-scale measurements are available
-under `SimpleGate/` in TensorBoard.
+After each group reaches blend 1.0, BatchNorm statistics are reset and
+recalibrated through that exact inference graph before verification and a
+`model_simple_gate_group_XX_bnrecalibrated.pt` snapshot. Only then does the
+next group begin. Group snapshots include the exact blend tuple and calibration
+metadata, so the evaluation tools reconstruct the saved inference graph
+automatically. Epochs 20-25 use only SimpleGate. At the end of training,
+BatchNorm statistics are reset and recalibrated through the final inference
+graph, a layer-wise gate profile is written to
+`simple_gate_final_profile.json`, and the recalibrated model is verified and
+saved. Per-layer operand, product, gradient, correlation, range, blend,
+teacher-error, and residual-scale measurements are available under
+`SimpleGate/` in TensorBoard.
 
 To determine whether a progressive SimpleGate checkpoint fails only in FP16,
 run its saved epoch model through the standard verification sets in full FP32:

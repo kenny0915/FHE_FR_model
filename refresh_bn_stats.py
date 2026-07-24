@@ -102,16 +102,28 @@ def main(args):
         )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
-    state = torch.load(args.model, map_location="cpu")
+    checkpoint = torch.load(args.model, map_location="cpu")
+    checkpoint_blends = None
+    if (isinstance(checkpoint, dict)
+            and isinstance(checkpoint.get("state_dict_backbone"), dict)):
+        checkpoint_blends = checkpoint.get("simple_gate_blends")
+        state = checkpoint["state_dict_backbone"]
+    else:
+        state = checkpoint
     backbone.load_state_dict(state, strict=True)
 
-    if args.simple_gate_blends is not None:
+    simple_gate_blends = (
+        args.simple_gate_blends
+        if args.simple_gate_blends is not None
+        else checkpoint_blends
+    )
+    if simple_gate_blends is not None:
         if not hasattr(backbone, "set_simple_gate_blends"):
             raise ValueError(
-                "--simple-gate-blends was provided for a model without "
+                "SimpleGate blends were provided for a model without "
                 "SimpleGate scheduling"
             )
-        backbone.set_simple_gate_blends(args.simple_gate_blends)
+        backbone.set_simple_gate_blends(simple_gate_blends)
 
     train_loader = get_dataloader(
         cfg.rec,
