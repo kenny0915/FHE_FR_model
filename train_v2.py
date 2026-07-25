@@ -197,6 +197,36 @@ def end_batchnorm_recalibration(module: torch.nn.Module, state):
         submodule.train(was_training)
 
 
+def snapshot_batchnorm_running_stats(module: torch.nn.Module):
+    """Copy mutable BN buffers so a rejected forward can be rolled back."""
+    snapshots = []
+    for submodule in module.modules():
+        if not isinstance(
+                submodule, nn.modules.batchnorm._BatchNorm):
+            continue
+        snapshots.append((
+            submodule,
+            (submodule.running_mean.detach().clone()
+             if submodule.running_mean is not None else None),
+            (submodule.running_var.detach().clone()
+             if submodule.running_var is not None else None),
+            (submodule.num_batches_tracked.detach().clone()
+             if submodule.num_batches_tracked is not None else None),
+        ))
+    return snapshots
+
+
+@torch.no_grad()
+def restore_batchnorm_running_stats(snapshots):
+    for submodule, running_mean, running_var, num_batches_tracked in snapshots:
+        if running_mean is not None:
+            submodule.running_mean.copy_(running_mean)
+        if running_var is not None:
+            submodule.running_var.copy_(running_var)
+        if num_batches_tracked is not None:
+            submodule.num_batches_tracked.copy_(num_batches_tracked)
+
+
 def merge_cumulative_batchnorm_stats(batchnorm_state):
     """Merge cumulative BN statistics from every distributed data shard."""
     if not distributed.is_available() or not distributed.is_initialized():
@@ -830,7 +860,16 @@ def main(args):
             raise ValueError(
                 "Invalid completed_simple_gate_groups in checkpoint: "
                 f"{completed_simple_gate_groups}")
-    repbn_gate_recalibrated = False
+    # A completed SimpleGate group proves that the one-time post-RepBN
+    # recalibration already ran before that group started.  Do not reset all
+    # BN statistics again when resuming a later, partially blended group.
+    repbn_gate_recalibrated = bool(
+        cfg.resume and completed_simple_gate_groups > 0)
+    if repbn_gate_recalibrated and rank == 0:
+        logging.info(
+            "Resume checkpoint has %d completed SimpleGate group(s); "
+            "skipping the already completed post-RepBatchNorm recalibration",
+            completed_simple_gate_groups)
     simple_gate_repbn_recalibration_batches = int(getattr(
         cfg, "simple_gate_repbn_recalibration_batches", 0))
     simple_gate_verify_after_repbn = bool(getattr(
@@ -848,6 +887,9 @@ def main(args):
             "simple_gate_group_bn_recalibration_batches > 0")
     last_simple_gate_snapshot = {}
     last_simple_gate_snapshot_step = None
+    max_nonfinite_embedding_skips = int(getattr(
+        cfg, "max_nonfinite_embedding_skips", 0))
+    nonfinite_embedding_skips = 0
     validate_after_prepbn_transition = bool(getattr(
         cfg, "validate_after_prepbn_transition", False))
 
@@ -1049,12 +1091,22 @@ def main(args):
                         fractional_epoch, simple_gate_group_epochs,
                         simple_gate_transition_epochs),
                 )
+            batchnorm_snapshot = (
+                snapshot_batchnorm_running_stats(backbone.module)
+                if max_nonfinite_embedding_skips > 0 else None)
             backbone_output = backbone(img)
             if cryptoface_patch_training:
                 local_embeddings, patch_pred, patch_target = backbone_output
             else:
                 local_embeddings = backbone_output
-            if not torch.isfinite(local_embeddings).all():
+            embeddings_finite = torch.isfinite(local_embeddings).all()
+            finite_rank_count = embeddings_finite.to(dtype=torch.long)
+            if distributed.is_available() and distributed.is_initialized():
+                distributed.all_reduce(
+                    finite_rank_count, op=distributed.ReduceOp.SUM)
+            finite_rank_count = int(finite_rank_count.item())
+            if finite_rank_count != world_size:
+                nonfinite_embedding_skips += 1
                 gate_context = ""
                 if last_simple_gate_snapshot:
                     worst_name, worst_stats = max(
@@ -1067,9 +1119,43 @@ def main(args):
                         f"product_absmax={worst_stats['product_absmax']:.6g}, "
                         f"product_p999={worst_stats['product_p999']:.6g}, "
                         f"blend={worst_stats.get('blend', float('nan')):.3f}")
-                raise FloatingPointError(
-                    f"Non-finite embeddings at global_step={global_step}"
-                    f"{gate_context}")
+                if (max_nonfinite_embedding_skips <= 0
+                        or nonfinite_embedding_skips
+                        > max_nonfinite_embedding_skips):
+                    raise FloatingPointError(
+                        f"Non-finite embeddings at global_step={global_step}; "
+                        f"finite_ranks={finite_rank_count}/{world_size}, "
+                        f"skip_count={nonfinite_embedding_skips}/"
+                        f"{max_nonfinite_embedding_skips}{gate_context}")
+                if rank == 0:
+                    logging.warning(
+                        "Skipping synchronized training batch at "
+                        "global_step=%d because embeddings were finite on "
+                        "%d/%d ranks; skip_count=%d/%d%s",
+                        global_step, finite_rank_count, world_size,
+                        nonfinite_embedding_skips,
+                        max_nonfinite_embedding_skips, gate_context)
+                opt.zero_grad()
+                if batchnorm_snapshot is not None:
+                    restore_batchnorm_running_stats(batchnorm_snapshot)
+                # The auxiliary SimpleGate tensors retain the current
+                # autograd graph. A skipped batch has no backward pass to
+                # release it, so clear those references before the next
+                # forward or two full graphs can overlap and exhaust VRAM.
+                clear_gate_cache = getattr(
+                    backbone.module,
+                    "clear_simple_gate_cached_tensors",
+                    None,
+                )
+                if clear_gate_cache is not None:
+                    clear_gate_cache()
+                del backbone_output, local_embeddings
+                torch.cuda.empty_cache()
+                if not lr_scheduler_step_per_epoch:
+                    lr_scheduler.step()
+                set_simple_gate_instrumentation(backbone.module, False)
+                continue
+            del batchnorm_snapshot
             if cryptoface_patch_training:
                 local_labels = local_labels.squeeze().long()
                 logits = module_partial_fc(local_embeddings, local_labels)

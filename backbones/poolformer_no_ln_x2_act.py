@@ -103,10 +103,14 @@ class SimpleGate(nn.Module):
     def set_auxiliary_losses(self, enabled=True):
         self.auxiliary_losses_enabled = bool(enabled)
         if not enabled:
-            self._last_teacher = None
-            self._last_product = None
-            self._last_operand1 = None
-            self._last_operand2 = None
+            self.clear_cached_tensors()
+
+    def clear_cached_tensors(self):
+        """Release tensors that may retain the most recent autograd graph."""
+        self._last_teacher = None
+        self._last_product = None
+        self._last_operand1 = None
+        self._last_operand2 = None
 
     def range_stats(self):
         return self._last_stats
@@ -634,6 +638,10 @@ class PoolFormer(nn.Module):
     def set_simple_gate_auxiliary_losses(self, enabled=True):
         for gate in self.simple_gates().values():
             gate.set_auxiliary_losses(enabled)
+
+    def clear_simple_gate_cached_tensors(self):
+        for gate in self.simple_gates().values():
+            gate.clear_cached_tensors()
 
     def set_simple_gate_blends(self, blends):
         blends = tuple(float(value) for value in blends)

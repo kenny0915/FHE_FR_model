@@ -59,6 +59,25 @@ def test_distillation_warms_multiplier_while_main_path_is_gelu():
     assert torch.isfinite(gate.range_penalty())
 
 
+def test_clear_cached_tensors_releases_auxiliary_forward_references():
+    gate = SimpleGate(initial_blend=0.5, sample_size=1024)
+    gate.set_auxiliary_losses(True)
+    inputs = torch.randn(2, 4, 3, 3, requires_grad=True)
+    gate(inputs)
+
+    assert gate._last_teacher is not None
+    assert gate._last_product is not None
+    assert gate._last_operand1 is not None
+    assert gate._last_operand2 is not None
+
+    gate.clear_cached_tensors()
+
+    assert gate._last_teacher is None
+    assert gate._last_product is None
+    assert gate._last_operand1 is None
+    assert gate._last_operand2 is None
+
+
 def test_mixed_dtype_auxiliary_losses_backward_in_float32():
     gate = SimpleGate(initial_blend=0.0, sample_size=1024)
     gate.set_auxiliary_losses(True)
