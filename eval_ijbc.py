@@ -89,13 +89,16 @@ class Embedding(object):
             weight = checkpoint['state_dict_backbone']
         else:
             weight = checkpoint
-        resnet = get_model(
-            args.network,
-            dropout=0,
-            fp16=False,
-            gate_initial_blend=0.0,
-            gate_compute_fp32=True,
-        ).cuda()
+        model_kwargs = {
+            'dropout': 0,
+            'fp16': False,
+        }
+        if args.network.startswith('poolformer_no_ln_x2_act'):
+            model_kwargs.update(
+                gate_initial_blend=0.0,
+                gate_compute_fp32=True,
+            )
+        resnet = get_model(args.network, **model_kwargs).cuda()
         resnet.load_state_dict(weight, strict=True)
         requested_blends = args.simple_gate_blends
         if requested_blends is not None:
