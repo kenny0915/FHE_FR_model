@@ -1232,6 +1232,7 @@ def main(args):
                 loss = loss + float(getattr(cfg, "patch_cnn_jigsaw_weight", 0.005)) * loss_jigsaw
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
+            task_loss = loss
             range_penalty = local_embeddings.new_zeros(())
             distillation_loss = local_embeddings.new_zeros(())
             simple_gate_range_penalty = local_embeddings.new_zeros(())
@@ -1322,6 +1323,8 @@ def main(args):
                     set_simple_gate_instrumentation(backbone.module, False)
                 if wandb_logger:
                     wandb_logger.log({
+                        'Loss/Task Loss': task_loss.item(),
+                        'Loss/Total Loss': loss.item(),
                         'Loss/Step Loss': loss.item(),
                         'Loss/Train Loss': loss_am.avg,
                         'Loss/HerPN Range Penalty': range_penalty.item(),
@@ -1347,6 +1350,10 @@ def main(args):
                 if (summary_writer is not None and herpn_enabled and
                         global_step % cfg.frequent == 0):
                     range_summary = backbone.module.herpn_range_summary()
+                    summary_writer.add_scalar(
+                        'Loss/Task Loss', task_loss.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Loss/Total Loss', loss.item(), global_step)
                     summary_writer.add_scalar(
                         'Loss/HerPN Range Penalty', range_penalty.item(), global_step)
                     summary_writer.add_scalar(

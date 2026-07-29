@@ -24,6 +24,7 @@ def split_weight_decay_parameters(module):
         exclude_module = (
             isinstance(submodule, _NORMALIZATION_TYPES)
             or submodule.__class__.__name__ == "HerPN"
+            or getattr(submodule, "exclude_from_weight_decay", False)
         )
         for name, parameter in submodule.named_parameters(recurse=False):
             if parameter.requires_grad and (exclude_module or name == "bias"):

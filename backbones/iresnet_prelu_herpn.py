@@ -19,6 +19,8 @@ ciphertext-ciphertext multiplication for ``x^2``.  The channel slope and
 folded coefficients are plaintext constants during inference.
 """
 
+import math
+
 import torch
 from torch import nn
 
@@ -42,6 +44,44 @@ __all__ = [
 _STAGE_NAMES = ("stem", "layer1", "layer2", "layer3", "layer4")
 
 
+class _PReLUHerPN(HerPN):
+    """HerPN variant exposing its basis for local activation distillation."""
+
+    exclude_from_weight_decay = True
+
+    def __init__(self, channels, eps):
+        super().__init__(channels, eps=eps)
+        # At blend=0 the teacher supplies the actual network output. Starting
+        # the student at a*x (zero ReLU branch) gives an O(1) relative error;
+        # HerPN's default unit scale can be 15x larger than deep PReLU targets.
+        nn.init.zeros_(self.weight)
+        nn.init.zeros_(self.bias)
+
+    def forward_with_basis(self, x):
+        compute_dtype = (
+            torch.float32
+            if x.dtype in (torch.float16, torch.bfloat16)
+            else x.dtype
+        )
+        compute_x = x.to(dtype=compute_dtype)
+        x0 = self.bn0(torch.ones_like(compute_x))
+        x1 = self.bn1(compute_x)
+        x2 = self.bn2(
+            (compute_x.square() - 1.0) / math.sqrt(2.0))
+        basis = (
+            x0 / math.sqrt(2.0 * math.pi)
+            + x1 / 2.0
+            + x2 / math.sqrt(4.0 * math.pi)
+        )
+        output = self.weight.to(dtype=compute_dtype) * basis
+        output = output + self.bias.to(dtype=compute_dtype)
+        return output.to(dtype=x.dtype), basis
+
+    def forward(self, x):
+        output, _ = self.forward_with_basis(x)
+        return output
+
+
 class PReLUHerPNActivation(nn.Module):
     """Progressively blend a frozen PReLU teacher into its HerPN student."""
 
@@ -59,7 +99,7 @@ class PReLUHerPNActivation(nn.Module):
         # The pretrained PReLU is the fixed teacher and supplies the
         # channel-wise plaintext slope in the polynomial student.
         self.prelu.weight.requires_grad = False
-        self.herpn = HerPN(channels, eps=bn_eps)
+        self.herpn = _PReLUHerPN(channels, eps=bn_eps)
         self.stage_index = int(stage_index)
         self.register_buffer(
             "blend", torch.tensor(float(blend), dtype=torch.float32))
@@ -128,6 +168,30 @@ class PReLUHerPNActivation(nn.Module):
             device=x.device, dtype=x.dtype)
         return slope * x + (1.0 - slope) * relu_student
 
+    def _student_and_local_student(self, x):
+        """Return the task student and a value-equal input-detached student.
+
+        Both outputs share one HerPN basis evaluation. The task student keeps
+        the normal derivative through ``x``. The local copy detaches only the
+        basis and input, so activation distillation updates HerPN's scale and
+        bias without modifying earlier pretrained backbone layers.
+        """
+        relu_student, basis = self.herpn.forward_with_basis(x)
+        slope = self.prelu.weight.reshape(1, -1, 1, 1).to(
+            device=x.device, dtype=x.dtype)
+        student = slope * x + (1.0 - slope) * relu_student
+
+        compute_dtype = basis.dtype
+        local_relu_student = (
+            self.herpn.weight.to(dtype=compute_dtype) * basis.detach()
+            + self.herpn.bias.to(dtype=compute_dtype)
+        ).to(dtype=x.dtype)
+        local_student = (
+            slope.detach() * x.detach()
+            + (1.0 - slope.detach()) * local_relu_student
+        )
+        return student, local_student
+
     def forward(self, x):
         if self.training:
             compute_x = (
@@ -154,17 +218,21 @@ class PReLUHerPNActivation(nn.Module):
             return self.prelu(x)
 
         teacher = self.prelu(x)
-        student = self._student(x)
         if self.training:
+            student, local_student = self._student_and_local_student(x)
             # Normalize by teacher energy so shrinking activation scales cannot
             # make the teacher constraint disappear.  Keep this active after
-            # full conversion to prevent long-run polynomial drift.
+            # full conversion to prevent long-run polynomial drift. Distill
+            # only HerPN's affine coefficients; task loss remains responsible
+            # for adapting preceding layers to the polynomial graph.
             target = teacher.detach().float()
             denominator = target.square().mean().detach()
             denominator = denominator + self.distill_eps.to(
                 device=x.device, dtype=denominator.dtype)
             self._last_distillation_loss = (
-                student.float() - target).square().mean() / denominator
+                local_student.float() - target).square().mean() / denominator
+        else:
+            student = self._student(x)
 
         if blend <= 0.0:
             return teacher + student * 0.0

@@ -62,7 +62,9 @@ config.herpn_conversion_groups = (
     ("layer4.1.prelu",),
     ("layer4.2.prelu",),
 )
-config.herpn_group_epochs = tuple(range(1, 29, 2))
+# Fit every zero-initialized HerPN student locally for epochs 0 and 1 before
+# the stem starts converting at epoch 2.
+config.herpn_group_epochs = tuple(range(2, 30, 2))
 config.herpn_transition_epochs = 2.0
 config.herpn_bn_recalibration_batches = 200
 config.herpn_save_after_group = True
@@ -78,6 +80,6 @@ config.epoch_model_interval = 1
 config.rec = "./ms1m-retinaface-t1"
 config.num_classes = 93431
 config.num_image = 5179510
-config.num_epoch = 33
+config.num_epoch = 34
 config.warmup_epoch = 1
 config.val_targets = ["lfw", "cfp_fp", "agedb_30"]

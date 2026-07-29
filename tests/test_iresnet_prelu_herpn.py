@@ -47,6 +47,12 @@ def test_baseline_prelu_state_loads_strictly_and_blend_zero_is_exact():
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     torch.testing.assert_close(activation.prelu.weight, slopes)
     assert not activation.prelu.weight.requires_grad
+    torch.testing.assert_close(
+        activation.herpn.weight,
+        torch.zeros_like(activation.herpn.weight))
+    torch.testing.assert_close(
+        activation.herpn.bias,
+        torch.zeros_like(activation.herpn.bias))
 
 
 def test_prelu_herpn_uses_exact_prelu_decomposition():
@@ -109,6 +115,39 @@ def test_relative_distillation_remains_active_at_full_conversion():
     assert activation.herpn.weight.grad is not None
     assert torch.isfinite(activation.herpn.weight.grad).all()
     assert activation.prelu.weight.grad is None
+
+
+def test_distillation_gradient_is_local_but_task_gradient_reaches_input():
+    activation = PReLUHerPNActivation(
+        channels=2, blend=1.0).train()
+    inputs = torch.randn(4, 2, 3, 3, requires_grad=True)
+    output = activation(inputs)
+    distillation_loss = activation.distillation_loss()
+    distillation_loss.backward(retain_graph=True)
+
+    assert activation.herpn.weight.grad is not None
+    assert float(activation.herpn.weight.grad.abs().sum()) > 0.0
+    assert inputs.grad is None or torch.count_nonzero(inputs.grad) == 0
+
+    activation.zero_grad(set_to_none=True)
+    inputs.grad = None
+    output.square().mean().backward()
+    assert inputs.grad is not None
+    assert float(inputs.grad.abs().sum()) > 0.0
+
+
+def test_zero_initialized_student_has_bounded_relative_loss():
+    activation = PReLUHerPNActivation(
+        channels=3, blend=0.0).train()
+    with torch.no_grad():
+        activation.prelu.weight.copy_(
+            torch.tensor([-0.1, -0.15, 0.05]))
+    inputs = 0.1 * torch.randn(8, 3, 5, 5)
+    activation(inputs)
+
+    loss = activation.distillation_loss()
+    assert torch.isfinite(loss)
+    assert 0.0 < float(loss) < 2.0
 
 
 def test_r50_config_schedules_every_prelu_herpn_activation():
