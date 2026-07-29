@@ -1,5 +1,6 @@
 # coding: utf-8
 
+import csv
 import os
 import pickle
 
@@ -419,6 +420,13 @@ def read_score(path):
     return img_feats
 
 
+def save_tar_at_far(path, columns, rows):
+    with open(path, 'w', newline='', encoding='utf-8') as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(columns)
+        writer.writerows(rows)
+
+
 # # Step1: Load Meta Data
 
 # In[ ]:
@@ -561,7 +569,9 @@ scores = dict(zip(methods, scores))
 colormap = plt.get_cmap('Set2')
 colours = dict(zip(methods, [colormap(i) for i in range(methods.shape[0])]))
 x_labels = [10 ** -6, 10 ** -5, 10 ** -4, 10 ** -3, 10 ** -2, 10 ** -1]
-tpr_fpr_table = PrettyTable(['Methods'] + [str(x) for x in x_labels])
+tpr_fpr_columns = ['Methods'] + [str(x) for x in x_labels]
+tpr_fpr_table = PrettyTable(tpr_fpr_columns)
+tpr_fpr_rows = []
 fig = plt.figure()
 for method in methods:
     fpr, tpr, _ = roc_curve(label, scores[method])
@@ -581,6 +591,7 @@ for method in methods:
             list(zip(abs(fpr - x_labels[fpr_iter]), range(len(fpr)))))
         tpr_fpr_row.append('%.2f' % (tpr[min_index] * 100))
     tpr_fpr_table.add_row(tpr_fpr_row)
+    tpr_fpr_rows.append(tpr_fpr_row)
 plt.xlim([10 ** -6, 0.1])
 plt.ylim([0.3, 1.0])
 plt.grid(linestyle='--', linewidth=1)
@@ -592,4 +603,8 @@ plt.ylabel('True Positive Rate')
 plt.title('ROC on IJB')
 plt.legend(loc="lower right")
 fig.savefig(os.path.join(save_path, '%s.pdf' % target.lower()))
+tpr_fpr_save_file = os.path.join(
+    save_path, '%s_tar_at_far.csv' % target.lower())
+save_tar_at_far(tpr_fpr_save_file, tpr_fpr_columns, tpr_fpr_rows)
 print(tpr_fpr_table)
+print('TAR@FAR results saved to {}'.format(tpr_fpr_save_file))
