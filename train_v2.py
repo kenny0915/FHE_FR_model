@@ -20,6 +20,7 @@ from utils.utils_callbacks import CallBackLogging, CallBackVerification
 from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
+from utils.utils_optimizer import split_weight_decay_parameters
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
 assert torch.__version__ >= "1.12.0", "In order to enjoy the features of the new torch, \
@@ -576,7 +577,8 @@ def main(args):
         "num_features": cfg.embedding_size,
     }
 
-    if cfg.network.startswith("r") and cfg.network.endswith("_no_relu"):
+    if (cfg.network.startswith("r")
+            and cfg.network.endswith(("_no_relu", "_prelu_herpn"))):
         default_herpn_progress = (
             0.0 if (getattr(cfg, "herpn_conversion_groups", ())
                     or getattr(cfg, "herpn_stage_epochs", ())) else 5.0)
@@ -586,6 +588,9 @@ def main(args):
             herpn_progress=float(getattr(
                 cfg, "herpn_initial_progress", default_herpn_progress)),
         )
+        if cfg.network.endswith("_prelu_herpn"):
+            model_kwargs["prelu_herpn_distill_eps"] = float(getattr(
+                cfg, "prelu_herpn_distill_eps", 1e-4))
     if cfg.network.startswith("r") and cfg.network.endswith("_quadratic"):
         model_kwargs.update(
             quadratic_input_scale=float(getattr(
@@ -669,9 +674,33 @@ def main(args):
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
         # TODO the params of partial fc must be last in the params list
+        if getattr(cfg, "selective_weight_decay", False):
+            decay_params, no_decay_params = split_weight_decay_parameters(
+                backbone)
+            parameter_groups = [
+                {"params": decay_params, "weight_decay": cfg.weight_decay},
+                {"params": no_decay_params, "weight_decay": 0.0},
+                {
+                    "params": module_partial_fc.parameters(),
+                    "weight_decay": cfg.weight_decay,
+                },
+            ]
+            logging.info(
+                "Selective weight decay: %d backbone tensors with decay, "
+                "%d without decay",
+                len(decay_params), len(no_decay_params))
+        else:
+            parameter_groups = [
+                {"params": backbone.parameters()},
+                {"params": module_partial_fc.parameters()},
+            ]
         opt = torch.optim.SGD(
-            params=[{"params": backbone.parameters()}, {"params": module_partial_fc.parameters()}],
-            lr=cfg.lr, momentum=0.9, weight_decay=cfg.weight_decay)
+            params=parameter_groups,
+            lr=cfg.lr,
+            momentum=cfg.momentum,
+            weight_decay=(0.0 if getattr(
+                cfg, "selective_weight_decay", False)
+                else cfg.weight_decay))
 
     elif cfg.optimizer == "adamw":
         module_partial_fc = PartialFC_V2(
@@ -766,6 +795,8 @@ def main(args):
     herpn_distill_loss_weight = float(getattr(cfg, "herpn_distill_loss_weight", 0.0))
     herpn_bn_recalibration_batches = int(
         getattr(cfg, "herpn_bn_recalibration_batches", 0))
+    herpn_save_after_group = bool(
+        getattr(cfg, "herpn_save_after_group", False))
     herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
     herpn_group_schedule = bool(herpn_enabled and herpn_conversion_groups)
     if herpn_group_schedule:
@@ -1040,6 +1071,43 @@ def main(args):
                     global_step)
                 if cfg.dali:
                     train_loader.reset()
+                if herpn_save_after_group and rank == 0:
+                    group_checkpoint_path = os.path.join(
+                        cfg.output,
+                        "model_herpn_group_"
+                        f"{newly_completed:02d}_bnrecalibrated.pt",
+                    )
+                    serialized_blends = {
+                        name: float(activation.blend.item())
+                        for name, activation
+                        in backbone.module.named_modules()
+                        if getattr(
+                            activation,
+                            "is_progressive_polynomial_activation",
+                            False)
+                    }
+                    atomic_torch_save(
+                        {
+                            "state_dict_backbone":
+                                backbone.module.state_dict(),
+                            "herpn_blends": serialized_blends,
+                            "herpn_group": newly_completed,
+                            "epoch": epoch,
+                            "global_step": global_step,
+                            "bn_recalibration_batches_per_rank":
+                                herpn_bn_recalibration_batches,
+                            "bn_recalibration_world_size":
+                                distributed.get_world_size(),
+                        },
+                        group_checkpoint_path,
+                    )
+                    logging.info(
+                        "Saved recalibrated HerPN group %d checkpoint to %s",
+                        newly_completed, group_checkpoint_path)
+                if (herpn_save_after_group
+                        and distributed.is_available()
+                        and distributed.is_initialized()):
+                    distributed.barrier()
                 completed_herpn_groups = newly_completed
         elif herpn_enabled and herpn_stage_epochs:
             epoch_herpn_progress = herpn_progress_at_epoch(
