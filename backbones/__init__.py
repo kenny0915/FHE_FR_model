@@ -303,6 +303,7 @@ def get_model(name, **kwargs):
             gate_compute_fp32=kwargs.get("gate_compute_fp32", True),
             gate_fail_on_nonfinite=kwargs.get("gate_fail_on_nonfinite", True),
             gate_initial_blend=kwargs.get("gate_initial_blend", 0.0),
+            gate_grouping=kwargs.get("gate_grouping", "stage_chunks"),
         )
 
     elif name == "vit_t":

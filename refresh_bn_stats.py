@@ -95,6 +95,9 @@ def main(args):
         "fp16": cfg.fp16,
         "num_features": cfg.embedding_size,
     }
+    if cfg.network.startswith("poolformer_no_ln_x2_act"):
+        model_kwargs["gate_grouping"] = str(getattr(
+            cfg, "simple_gate_grouping", "stage_chunks"))
     if cfg.network == "patch_cnn":
         model_kwargs.update(
             input_size=getattr(cfg, "input_size", 112),

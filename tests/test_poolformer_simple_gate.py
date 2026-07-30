@@ -1,6 +1,7 @@
 import torch
 import pytest
 
+from backbones import get_model
 from backbones.poolformer_no_ln_x2_act import (
     Mlp,
     SimpleGate,
@@ -144,6 +145,29 @@ def test_s24_mlp2_uses_24_gates_mlp2_width_and_skip_init():
     stats = model.simple_gate_range_stats()
     assert len(stats) == 24
     assert all("residual_scale_absmax" in layer for layer in stats.values())
+
+
+def test_s24_mlp2_can_convert_one_block_at_a_time_in_reverse_order():
+    model = get_model(
+        "poolformer_no_ln_x2_act_s24_mlp2",
+        num_features=16,
+        fp16=False,
+        gate_grouping="one_block_reverse",
+        gate_stats_sample_size=256,
+    )
+
+    groups = model.simple_gate_group_names()
+    assert len(groups) == 24
+    assert all(len(group) == 1 for group in groups)
+    assert groups[0] == ("network.6.3.mlp.act",)
+    assert groups[1] == ("network.6.2.mlp.act",)
+    assert groups[-1] == ("network.0.0.mlp.act",)
+
+    model.set_simple_gate_auxiliary_groups((0,))
+    gates = model.simple_gates()
+    assert gates["network.6.3.mlp.act"].auxiliary_losses_enabled
+    assert not gates["network.6.2.mlp.act"].auxiliary_losses_enabled
+    assert not gates["network.0.0.mlp.act"].auxiliary_losses_enabled
 
 
 @pytest.mark.skipif(

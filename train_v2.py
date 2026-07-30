@@ -20,7 +20,10 @@ from utils.utils_callbacks import CallBackLogging, CallBackVerification
 from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
-from utils.utils_optimizer import split_weight_decay_parameters
+from utils.utils_optimizer import (
+    split_weight_decay_parameters,
+    temporary_optimizer_lr_scale,
+)
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
 assert torch.__version__ >= "1.12.0", "In order to enjoy the features of the new torch, \
@@ -617,6 +620,8 @@ def main(args):
             gate_initial_blend=float(getattr(
                 cfg, "simple_gate_initial_blend",
                 0.0 if gate_group_epochs else 1.0)),
+            gate_grouping=str(getattr(
+                cfg, "simple_gate_grouping", "stage_chunks")),
         )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
@@ -644,7 +649,14 @@ def main(args):
 
     backbone.train()
     # FIXME using gradient checkpoint if there are some unused parameters will cause error
-    backbone._set_static_graph()
+    simple_gate_current_group_auxiliary = bool(getattr(
+        cfg, "simple_gate_current_group_auxiliary", False))
+    if simple_gate_current_group_auxiliary:
+        logging.info(
+            "Using dynamic DDP graph for current-group-only SimpleGate "
+            "auxiliary losses")
+    else:
+        backbone._set_static_graph()
 
     cryptoface_patch_training = is_cryptoface_patch_training(cfg)
     if cryptoface_patch_training and world_size != 1:
@@ -745,12 +757,25 @@ def main(args):
     start_epoch = 0
     global_step = 0
     resumed_completed_simple_gate_groups = None
+    resumed_repbn_gate_recalibrated = None
     if cfg.resume:
         dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
         start_epoch = dict_checkpoint["epoch"]
         global_step = dict_checkpoint["global_step"]
         resumed_completed_simple_gate_groups = dict_checkpoint.get(
             "completed_simple_gate_groups")
+        resumed_repbn_gate_recalibrated = dict_checkpoint.get(
+            "repbn_gate_recalibrated")
+        checkpoint_gate_grouping = dict_checkpoint.get(
+            "simple_gate_grouping")
+        configured_gate_grouping = str(getattr(
+            cfg, "simple_gate_grouping", "stage_chunks"))
+        if (checkpoint_gate_grouping is not None
+                and checkpoint_gate_grouping != configured_gate_grouping):
+            raise ValueError(
+                "Resume checkpoint SimpleGate grouping "
+                f"{checkpoint_gate_grouping!r} does not match config "
+                f"{configured_gate_grouping!r}")
         backbone.module.load_state_dict(dict_checkpoint["state_dict_backbone"])
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
         opt.load_state_dict(dict_checkpoint["state_optimizer"])
@@ -841,6 +866,10 @@ def main(args):
         cfg, "simple_gate_distill_loss_weight", 0.0))
     simple_gate_range_loss_weight = float(getattr(
         cfg, "simple_gate_range_loss_weight", 0.0))
+    simple_gate_lr_multiplier = float(getattr(
+        cfg, "simple_gate_lr_multiplier", 1.0))
+    if simple_gate_lr_multiplier <= 0.0:
+        raise ValueError("simple_gate_lr_multiplier must be positive")
     simple_gate_schedule = bool(
         simple_gate_progressive and simple_gate_group_epochs)
     if simple_gate_schedule:
@@ -875,7 +904,18 @@ def main(args):
                 start_epoch, simple_gate_group_epochs,
                 simple_gate_transition_epochs),
         )
-    if simple_gate_progressive:
+    if simple_gate_progressive and simple_gate_current_group_auxiliary:
+        initial_blends = simple_gate_blends_at_epoch(
+            start_epoch, simple_gate_group_epochs,
+            simple_gate_transition_epochs)
+        initial_group = next(
+            (index for index, blend in enumerate(initial_blends)
+             if blend < 1.0),
+            None,
+        )
+        backbone.module.set_simple_gate_auxiliary_groups(
+            () if initial_group is None else (initial_group,))
+    elif simple_gate_progressive:
         backbone.module.set_simple_gate_auxiliary_losses(
             simple_gate_distill_loss_weight > 0
             or simple_gate_range_loss_weight > 0)
@@ -895,11 +935,13 @@ def main(args):
     # recalibration already ran before that group started.  Do not reset all
     # BN statistics again when resuming a later, partially blended group.
     repbn_gate_recalibrated = bool(
-        cfg.resume and completed_simple_gate_groups > 0)
+        resumed_repbn_gate_recalibrated
+        if resumed_repbn_gate_recalibrated is not None
+        else cfg.resume and completed_simple_gate_groups > 0)
     if repbn_gate_recalibrated and rank == 0:
         logging.info(
-            "Resume checkpoint has %d completed SimpleGate group(s); "
-            "skipping the already completed post-RepBatchNorm recalibration",
+            "Resume checkpoint records post-RepBatchNorm recalibration "
+            "complete with %d completed SimpleGate group(s); skipping it",
             completed_simple_gate_groups)
     simple_gate_repbn_recalibration_batches = int(getattr(
         cfg, "simple_gate_repbn_recalibration_batches", 0))
@@ -1027,6 +1069,12 @@ def main(args):
                                     finalized_gate_blends,
                                 "simple_gate_group":
                                     newly_completed_gates,
+                                "simple_gate_group_names":
+                                    gate_groups[
+                                        newly_completed_gates - 1],
+                                "simple_gate_grouping": str(getattr(
+                                    cfg, "simple_gate_grouping",
+                                    "stage_chunks")),
                                 "epoch": epoch,
                                 "global_step": global_step,
                                 "bn_recalibration_batches_per_rank":
@@ -1150,15 +1198,27 @@ def main(args):
                     scheduled_steps_per_epoch, 1)
                 backbone.module.set_herpn_progress(herpn_progress_at_epoch(
                     fractional_epoch, herpn_stage_epochs, herpn_transition_epochs))
+            effective_simple_gate_lr_scale = 1.0
             if simple_gate_schedule:
                 fractional_epoch = epoch + step_in_epoch / max(
                     scheduled_steps_per_epoch, 1)
+                current_gate_blends = simple_gate_blends_at_epoch(
+                    fractional_epoch, simple_gate_group_epochs,
+                    simple_gate_transition_epochs)
                 set_simple_gate_blends(
                     backbone.module,
-                    simple_gate_blends_at_epoch(
-                        fractional_epoch, simple_gate_group_epochs,
-                        simple_gate_transition_epochs),
-                )
+                    current_gate_blends)
+                if simple_gate_current_group_auxiliary:
+                    current_group = next(
+                        (index for index, blend in enumerate(
+                            current_gate_blends) if blend < 1.0),
+                        None,
+                    )
+                    backbone.module.set_simple_gate_auxiliary_groups(
+                        () if current_group is None else (current_group,))
+                if fractional_epoch >= simple_gate_group_epochs[0]:
+                    effective_simple_gate_lr_scale = (
+                        simple_gate_lr_multiplier)
             batchnorm_snapshot = (
                 snapshot_batchnorm_running_stats(backbone.module)
                 if max_nonfinite_embedding_skips > 0 else None)
@@ -1288,7 +1348,9 @@ def main(args):
                             clipped_params, grad_clip, error_if_nonfinite=False
                         )
                     if getattr(cfg, "gradient_clip_type", "norm") == "value" or torch.isfinite(total_norm):
-                        amp.step(opt)
+                        with temporary_optimizer_lr_scale(
+                                opt, effective_simple_gate_lr_scale):
+                            amp.step(opt)
                     else:
                         logging.warning(
                             "Skipping optimizer step at global_step=%d due to non-finite grad norm: %s",
@@ -1305,7 +1367,9 @@ def main(args):
                         torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
                     else:
                         torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
-                    opt.step()
+                    with temporary_optimizer_lr_scale(
+                            opt, effective_simple_gate_lr_scale):
+                        opt.step()
                     opt.zero_grad()
             if not lr_scheduler_step_per_epoch:
                 lr_scheduler.step()
@@ -1395,7 +1459,11 @@ def main(args):
                     )
                     
                 loss_am.update(loss.item(), 1)
-                callback_logging(global_step, loss_am, epoch, cfg.fp16, lr_scheduler.get_last_lr()[0], amp)
+                callback_logging(
+                    global_step, loss_am, epoch, cfg.fp16,
+                    lr_scheduler.get_last_lr()[0]
+                    * effective_simple_gate_lr_scale,
+                    amp)
 
                 if global_step % cfg.verbose == 0 and global_step > 0:
                     if rank == 0 and getattr(cfg, "save_validation_snapshots", False):
@@ -1431,6 +1499,9 @@ def main(args):
                 "state_optimizer": opt.state_dict(),
                 "state_lr_scheduler": lr_scheduler.state_dict(),
                 "completed_simple_gate_groups": completed_simple_gate_groups,
+                "repbn_gate_recalibrated": repbn_gate_recalibrated,
+                "simple_gate_grouping": str(getattr(
+                    cfg, "simple_gate_grouping", "stage_chunks")),
             }
             atomic_torch_save(
                 checkpoint,

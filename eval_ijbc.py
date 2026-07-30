@@ -64,6 +64,15 @@ parser.add_argument(
     type=str,
     help='comma-separated SimpleGate group blends, e.g. 1,0,0,0,0,0',
 )
+parser.add_argument(
+    '--simple-gate-grouping',
+    default=None,
+    choices=('stage_chunks', 'one_block_reverse'),
+    help=(
+        'SimpleGate conversion grouping. Defaults to checkpoint metadata or '
+        'the legacy six stage chunks.'
+    ),
+)
 
 args = parser.parse_args()
 
@@ -84,9 +93,11 @@ class Embedding(object):
         self.image_size = image_size
         checkpoint = torch.load(prefix)
         checkpoint_blends = None
+        checkpoint_grouping = None
         if (isinstance(checkpoint, dict)
                 and isinstance(checkpoint.get('state_dict_backbone'), dict)):
             checkpoint_blends = checkpoint.get('simple_gate_blends')
+            checkpoint_grouping = checkpoint.get('simple_gate_grouping')
             weight = checkpoint['state_dict_backbone']
         else:
             weight = checkpoint
@@ -98,6 +109,11 @@ class Embedding(object):
             model_kwargs.update(
                 gate_initial_blend=0.0,
                 gate_compute_fp32=True,
+                gate_grouping=(
+                    args.simple_gate_grouping
+                    or checkpoint_grouping
+                    or 'stage_chunks'
+                ),
             )
         resnet = get_model(args.network, **model_kwargs).cuda()
         resnet.load_state_dict(weight, strict=True)

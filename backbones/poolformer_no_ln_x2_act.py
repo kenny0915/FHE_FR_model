@@ -448,6 +448,7 @@ class PoolFormer(nn.Module):
                  gate_compute_fp32=True,
                  gate_fail_on_nonfinite=True,
                  gate_initial_blend=0.0,
+                 gate_grouping="stage_chunks",
                  fork_feat=False,
                  face_embedding=True,
                  fp16=False,
@@ -524,6 +525,8 @@ class PoolFormer(nn.Module):
                     embed_dims[-1], num_classes) if num_classes > 0 \
                     else nn.Identity()
 
+        self.simple_gate_grouping = str(gate_grouping)
+        self._configure_simple_gate_groups(self.simple_gate_grouping)
         self.apply(self.cls_init_weights)
 
         self.init_cfg = copy.deepcopy(init_cfg)
@@ -631,6 +634,18 @@ class PoolFormer(nn.Module):
             if isinstance(module, SimpleGate)
         }
 
+    def _configure_simple_gate_groups(self, grouping):
+        gates = list(self.simple_gates().values())
+        if grouping == "stage_chunks":
+            return
+        if grouping == "one_block_reverse":
+            for group_index, gate in enumerate(reversed(gates)):
+                gate.conversion_group = group_index
+            return
+        raise ValueError(
+            "Unsupported SimpleGate grouping "
+            f"{grouping!r}; expected 'stage_chunks' or 'one_block_reverse'")
+
     def set_simple_gate_instrumentation(self, enabled=True, gradient_scale=1.0):
         for gate in self.simple_gates().values():
             gate.set_instrumentation(enabled, gradient_scale=gradient_scale)
@@ -638,6 +653,12 @@ class PoolFormer(nn.Module):
     def set_simple_gate_auxiliary_losses(self, enabled=True):
         for gate in self.simple_gates().values():
             gate.set_auxiliary_losses(enabled)
+
+    def set_simple_gate_auxiliary_groups(self, group_indices):
+        selected = {int(index) for index in group_indices}
+        for gate in self.simple_gates().values():
+            gate.set_auxiliary_losses(
+                gate.conversion_group in selected)
 
     def clear_simple_gate_cached_tensors(self):
         for gate in self.simple_gates().values():
