@@ -642,9 +642,14 @@ class PoolFormer(nn.Module):
             for group_index, gate in enumerate(reversed(gates)):
                 gate.conversion_group = group_index
             return
+        if grouping == "two_blocks_reverse":
+            for reverse_index, gate in enumerate(reversed(gates)):
+                gate.conversion_group = reverse_index // 2
+            return
         raise ValueError(
             "Unsupported SimpleGate grouping "
-            f"{grouping!r}; expected 'stage_chunks' or 'one_block_reverse'")
+            f"{grouping!r}; expected 'stage_chunks', 'one_block_reverse', "
+            "or 'two_blocks_reverse'")
 
     def set_simple_gate_instrumentation(self, enabled=True, gradient_scale=1.0):
         for gate in self.simple_gates().values():

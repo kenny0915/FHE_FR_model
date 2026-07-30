@@ -67,7 +67,7 @@ parser.add_argument(
 parser.add_argument(
     '--simple-gate-grouping',
     default=None,
-    choices=('stage_chunks', 'one_block_reverse'),
+    choices=('stage_chunks', 'one_block_reverse', 'two_blocks_reverse'),
     help=(
         'SimpleGate conversion grouping. Defaults to checkpoint metadata or '
         'the legacy six stage chunks.'
