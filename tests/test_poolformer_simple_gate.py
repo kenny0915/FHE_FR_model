@@ -1,6 +1,7 @@
 import torch
 import pytest
 
+from backbones import get_model
 from backbones.poolformer_no_ln_x2_act import (
     Mlp,
     SimpleGate,
@@ -57,6 +58,25 @@ def test_distillation_warms_multiplier_while_main_path_is_gelu():
 
     assert inputs.grad[:, 2:].abs().sum().item() > 0
     assert torch.isfinite(gate.range_penalty())
+
+
+def test_clear_cached_tensors_releases_auxiliary_forward_references():
+    gate = SimpleGate(initial_blend=0.5, sample_size=1024)
+    gate.set_auxiliary_losses(True)
+    inputs = torch.randn(2, 4, 3, 3, requires_grad=True)
+    gate(inputs)
+
+    assert gate._last_teacher is not None
+    assert gate._last_product is not None
+    assert gate._last_operand1 is not None
+    assert gate._last_operand2 is not None
+
+    gate.clear_cached_tensors()
+
+    assert gate._last_teacher is None
+    assert gate._last_product is None
+    assert gate._last_operand1 is None
+    assert gate._last_operand2 is None
 
 
 def test_mixed_dtype_auxiliary_losses_backward_in_float32():
@@ -125,6 +145,61 @@ def test_s24_mlp2_uses_24_gates_mlp2_width_and_skip_init():
     stats = model.simple_gate_range_stats()
     assert len(stats) == 24
     assert all("residual_scale_absmax" in layer for layer in stats.values())
+
+
+def test_s24_mlp2_can_convert_one_block_at_a_time_in_reverse_order():
+    model = get_model(
+        "poolformer_no_ln_x2_act_s24_mlp2",
+        num_features=16,
+        fp16=False,
+        gate_grouping="one_block_reverse",
+        gate_stats_sample_size=256,
+    )
+
+    groups = model.simple_gate_group_names()
+    assert len(groups) == 24
+    assert all(len(group) == 1 for group in groups)
+    assert groups[0] == ("network.6.3.mlp.act",)
+    assert groups[1] == ("network.6.2.mlp.act",)
+    assert groups[-1] == ("network.0.0.mlp.act",)
+
+    model.set_simple_gate_auxiliary_groups((0,))
+    gates = model.simple_gates()
+    assert gates["network.6.3.mlp.act"].auxiliary_losses_enabled
+    assert not gates["network.6.2.mlp.act"].auxiliary_losses_enabled
+    assert not gates["network.0.0.mlp.act"].auxiliary_losses_enabled
+
+
+def test_s24_mlp2_can_convert_two_blocks_at_a_time_in_reverse_order():
+    model = get_model(
+        "poolformer_no_ln_x2_act_s24_mlp2",
+        num_features=16,
+        fp16=False,
+        gate_grouping="two_blocks_reverse",
+        gate_stats_sample_size=256,
+    )
+
+    groups = model.simple_gate_group_names()
+    assert len(groups) == 12
+    assert all(len(group) == 2 for group in groups)
+    assert groups[0] == (
+        "network.6.2.mlp.act",
+        "network.6.3.mlp.act",
+    )
+    assert groups[1] == (
+        "network.6.0.mlp.act",
+        "network.6.1.mlp.act",
+    )
+    assert groups[-1] == (
+        "network.0.0.mlp.act",
+        "network.0.1.mlp.act",
+    )
+
+    model.set_simple_gate_auxiliary_groups((0,))
+    gates = model.simple_gates()
+    assert gates["network.6.2.mlp.act"].auxiliary_losses_enabled
+    assert gates["network.6.3.mlp.act"].auxiliary_losses_enabled
+    assert not gates["network.6.1.mlp.act"].auxiliary_losses_enabled
 
 
 @pytest.mark.skipif(

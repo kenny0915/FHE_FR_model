@@ -107,6 +107,8 @@ def main():
         gate_compute_fp32=True,
         gate_fail_on_nonfinite=True,
         gate_initial_blend=0.0,
+        gate_grouping=str(getattr(
+            cfg, "simple_gate_grouping", "stage_chunks")),
     )
     state = extract_backbone_state(raw_checkpoint)
     checkpoint_dtypes = sorted({

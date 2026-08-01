@@ -25,7 +25,7 @@ config.simple_gate_stats_interval = 100
 config.simple_gate_stats_sample_size = 16384
 config.simple_gate_final_profile_batches = 50
 config.simple_gate_compute_fp32 = True
-config.simple_gate_fail_on_nonfinite = True
+config.simple_gate_fail_on_nonfinite = False
 # Convert six contiguous groups only after RepBatchNorm has reached its final
 # graph. Each group blends for two epochs; epochs 20-25 are pure SimpleGate.
 config.simple_gate_initial_blend = 0.0
@@ -41,7 +41,11 @@ config.simple_gate_verify_after_repbn = True
 config.simple_gate_group_bn_recalibration_batches = 500
 config.simple_gate_verify_after_group = True
 config.simple_gate_save_after_group = True
-config.fail_on_nonfinite_val = True
+config.fail_on_nonfinite_val = False
+# A rare sample can overflow a downstream autocast operation while the
+# bilinear gate is blending. All ranks skip the same batch; repeated events
+# still abort instead of silently masking an unstable transition.
+config.max_nonfinite_embedding_skips = 32
 # Retain an inference-only backbone snapshot after every completed epoch so a
 # stable earlier model remains available if a later conversion group fails.
 config.save_epoch_models = True
@@ -58,6 +62,7 @@ config.rec = "./ms1m-retinaface-t1"
 config.num_classes = 93431
 config.num_image = 5179510
 config.num_epoch = 25
+config.save_all_states = True
 config.warmup_epoch = 2
 
 config.interclass_filtering_threshold = 0

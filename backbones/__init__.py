@@ -39,6 +39,18 @@ def get_iresnet_quadratic(depth, pretrained=False, progress=True, **kwargs):
     return factory(pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_iresnet_prelu_herpn(depth, pretrained=False, progress=True, **kwargs):
+    from . import iresnet_prelu_herpn
+    factory = {
+        18: iresnet_prelu_herpn.iresnet18,
+        34: iresnet_prelu_herpn.iresnet34,
+        50: iresnet_prelu_herpn.iresnet50,
+        100: iresnet_prelu_herpn.iresnet100,
+        200: iresnet_prelu_herpn.iresnet200,
+    }[depth]
+    return factory(pretrained=pretrained, progress=progress, **kwargs)
+
+
 def get_mbf_no_relu(fp16=False, num_features=512, blocks=(1, 4, 6, 2), scale=2):
     from .mobilefacenet_no_relu import get_mbf as _get_mbf_no_relu
     return _get_mbf_no_relu(
@@ -81,6 +93,16 @@ def get_model(name, **kwargs):
         return get_iresnet_quadratic(100, False, **kwargs)
     elif name in ("r200_quadratic",):
         return get_iresnet_quadratic(200, False, **kwargs)
+    elif name in ("r18_prelu_herpn",):
+        return get_iresnet_prelu_herpn(18, False, **kwargs)
+    elif name in ("r34_prelu_herpn",):
+        return get_iresnet_prelu_herpn(34, False, **kwargs)
+    elif name in ("r50_prelu_herpn",):
+        return get_iresnet_prelu_herpn(50, False, **kwargs)
+    elif name in ("r100_prelu_herpn",):
+        return get_iresnet_prelu_herpn(100, False, **kwargs)
+    elif name in ("r200_prelu_herpn",):
+        return get_iresnet_prelu_herpn(200, False, **kwargs)
     elif name in ("mbf_no_relu",):
         fp16 = kwargs.get("fp16", False)
         num_features = kwargs.get("num_features", 512)
@@ -281,6 +303,7 @@ def get_model(name, **kwargs):
             gate_compute_fp32=kwargs.get("gate_compute_fp32", True),
             gate_fail_on_nonfinite=kwargs.get("gate_fail_on_nonfinite", True),
             gate_initial_blend=kwargs.get("gate_initial_blend", 0.0),
+            gate_grouping=kwargs.get("gate_grouping", "stage_chunks"),
         )
 
     elif name == "vit_t":
