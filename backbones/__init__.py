@@ -306,6 +306,15 @@ def get_model(name, **kwargs):
             gate_grouping=kwargs.get("gate_grouping", "stage_chunks"),
         )
 
+    elif name == "poolformer_fully_gated_s24":
+        from .poolformer_fully_gated import poolformer_fully_gated_s24
+        return poolformer_fully_gated_s24(
+            pretrained=False,
+            num_classes=kwargs.get("num_features", 512),
+            face_embedding=True,
+            fp16=kwargs.get("fp16", False),
+        )
+
     elif name == "vit_t":
         num_features = kwargs.get("num_features", 512)
         from .vit import VisionTransformer

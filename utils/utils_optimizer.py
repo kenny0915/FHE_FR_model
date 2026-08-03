@@ -62,3 +62,31 @@ def split_weight_decay_parameters(module):
         target.append(parameter)
 
     return decay, no_decay
+
+
+def select_gradient_clip_parameters(optimizer, backbone, scope="all"):
+    """Select the parameters controlled by the configured gradient clip.
+
+    ``backbone`` matches single-network recipes such as NAFNet without letting
+    a large PartialFC classifier dominate the shared gradient norm.
+    """
+    if scope == "all":
+        parameters = [
+            parameter
+            for group in optimizer.param_groups
+            for parameter in group["params"]
+            if parameter.requires_grad
+        ]
+    elif scope == "backbone":
+        parameters = [
+            parameter for parameter in backbone.parameters()
+            if parameter.requires_grad
+        ]
+    else:
+        raise ValueError(
+            "gradient_clip_scope must be 'all' or 'backbone', got "
+            f"{scope!r}")
+    if not parameters:
+        raise ValueError(
+            f"gradient_clip_scope={scope!r} selected no parameters")
+    return parameters

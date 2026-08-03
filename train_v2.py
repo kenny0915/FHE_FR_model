@@ -21,6 +21,7 @@ from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
 from utils.utils_optimizer import (
+    select_gradient_clip_parameters,
     split_weight_decay_parameters,
     temporary_optimizer_lr_scale,
 )
@@ -807,9 +808,13 @@ def main(args):
         growth_interval=int(getattr(cfg, "amp_growth_interval", 100)),
     )
     grad_clip = float(getattr(cfg, "gradient_clip", 5.0))
-    clipped_params = [
-        p for group in opt.param_groups for p in group["params"] if p.requires_grad
-    ]
+    gradient_clip_scope = str(getattr(cfg, "gradient_clip_scope", "all"))
+    clipped_params = select_gradient_clip_parameters(
+        opt, backbone, scope=gradient_clip_scope)
+    if rank == 0:
+        logging.info(
+            "Gradient clipping: scope=%s, max=%g, tensors=%d",
+            gradient_clip_scope, grad_clip, len(clipped_params))
 
     herpn_stage_epochs = tuple(getattr(cfg, "herpn_stage_epochs", ()))
     herpn_conversion_groups = tuple(

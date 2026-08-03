@@ -28,6 +28,10 @@ Examples:
 - `ms1mv3_poolformer_s24_no_ln_x2_act`: train the MLP-ratio-2 PoolFormer-S24
   with progressive RepBatchNorm and NAFNet-style SimpleGate. Despite the
   historical config name, the gate is `x1 * x2`, not a scalar `x**2`.
+- `ms1mv3_poolformer_s24_fully_gated_fp32`: train a diagnostic PoolFormer-S24
+  from scratch in FP32 with all 24 SimpleGates active, NAFNet channel-wise
+  LayerNorm, exact `C -> 2C -> gate -> C` expansion, and zero residual scales.
+  This variant retains non-FHE LayerNorm to isolate gate-training stability.
 - `ms1mv3_r50_no_relu`: train an R50 variant with ReLU/PReLU removed or replaced.
 
 Keep names short but specific enough to identify the dataset, backbone, and main experimental change.
