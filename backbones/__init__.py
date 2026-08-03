@@ -51,6 +51,18 @@ def get_iresnet_prelu_herpn(depth, pretrained=False, progress=True, **kwargs):
     return factory(pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_iresnet_layerwise_poly(depth, pretrained=False, progress=True, **kwargs):
+    from . import iresnet_layerwise_poly
+    factory = {
+        18: iresnet_layerwise_poly.iresnet18,
+        34: iresnet_layerwise_poly.iresnet34,
+        50: iresnet_layerwise_poly.iresnet50,
+        100: iresnet_layerwise_poly.iresnet100,
+        200: iresnet_layerwise_poly.iresnet200,
+    }[depth]
+    return factory(pretrained=pretrained, progress=progress, **kwargs)
+
+
 def get_mbf_no_relu(fp16=False, num_features=512, blocks=(1, 4, 6, 2), scale=2):
     from .mobilefacenet_no_relu import get_mbf as _get_mbf_no_relu
     return _get_mbf_no_relu(
@@ -103,6 +115,16 @@ def get_model(name, **kwargs):
         return get_iresnet_prelu_herpn(100, False, **kwargs)
     elif name in ("r200_prelu_herpn",):
         return get_iresnet_prelu_herpn(200, False, **kwargs)
+    elif name in ("r18_layerwise_poly",):
+        return get_iresnet_layerwise_poly(18, False, **kwargs)
+    elif name in ("r34_layerwise_poly",):
+        return get_iresnet_layerwise_poly(34, False, **kwargs)
+    elif name in ("r50_layerwise_poly",):
+        return get_iresnet_layerwise_poly(50, False, **kwargs)
+    elif name in ("r100_layerwise_poly",):
+        return get_iresnet_layerwise_poly(100, False, **kwargs)
+    elif name in ("r200_layerwise_poly",):
+        return get_iresnet_layerwise_poly(200, False, **kwargs)
     elif name in ("mbf_no_relu",):
         fp16 = kwargs.get("fp16", False)
         num_features = kwargs.get("num_features", 512)

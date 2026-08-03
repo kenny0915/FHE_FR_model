@@ -442,11 +442,17 @@ def atomic_torch_save(value, path):
 
 
 @torch.no_grad()
-def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step):
+def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step,
+                                after_activation_name=None):
     module = backbone.module
     if num_batches <= 0 or not hasattr(module, "begin_batchnorm_recalibration"):
         return
-    state = module.begin_batchnorm_recalibration(reset=True)
+    if (after_activation_name is not None
+            and hasattr(module, "begin_batchnorm_recalibration_after")):
+        state = module.begin_batchnorm_recalibration_after(
+            after_activation_name, reset=True)
+    else:
+        state = module.begin_batchnorm_recalibration(reset=True)
     completed = 0
     try:
         for batch in train_loader:
@@ -464,6 +470,88 @@ def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step
         module.end_batchnorm_recalibration(state)
     if completed == 0:
         raise RuntimeError("HerPN BatchNorm recalibration received no batches")
+
+
+@torch.no_grad()
+def calibrate_layerwise_poly_input_scale(
+        backbone, train_loader, activation_name, num_batches, margin,
+        min_scale, global_step, dali=False):
+    """Measure one activation's global input absmax on the current eval graph.
+
+    ``num_batches=0`` consumes the complete representative loader shard on
+    every rank.  The maximum is reduced across ranks before applying the
+    configured safety margin, so every worker stores the same public scale.
+    """
+    if num_batches < 0:
+        raise ValueError("layerwise_poly_range_calibration_batches must be >= 0")
+    margin = float(margin)
+    min_scale = float(min_scale)
+    if margin < 1.0:
+        raise ValueError("layerwise_poly_range_margin must be at least 1")
+    if min_scale <= 0.0:
+        raise ValueError("layerwise_poly_min_scale must be positive")
+
+    module = backbone.module
+    activations = dict(module.named_modules())
+    activation = activations.get(activation_name)
+    if not getattr(activation, "is_layerwise_rescaled_polynomial", False):
+        raise ValueError(
+            f"Unknown layerwise polynomial activation: {activation_name}")
+
+    device = next(module.parameters()).device
+    local_absmax = torch.zeros((), device=device, dtype=torch.float32)
+    completed = 0
+
+    def capture_input(_, inputs):
+        if not inputs or not torch.is_tensor(inputs[0]):
+            raise RuntimeError(
+                f"Activation {activation_name} received no tensor input")
+        values = inputs[0].detach().float()
+        if not torch.isfinite(values).all():
+            raise FloatingPointError(
+                "Non-finite activation input during layerwise interval "
+                f"calibration for {activation_name} at global_step={global_step}")
+        local_absmax.copy_(torch.maximum(local_absmax, values.abs().amax()))
+
+    training_states = [
+        (submodule, submodule.training) for submodule in module.modules()
+    ]
+    handle = activation.register_forward_pre_hook(capture_input)
+    module.eval()
+    try:
+        for img, _ in train_loader:
+            embeddings = module(img)
+            if not torch.isfinite(embeddings).all():
+                raise FloatingPointError(
+                    "Non-finite embeddings during layerwise interval "
+                    f"calibration for {activation_name} at "
+                    f"global_step={global_step}, batch={completed}")
+            completed += 1
+            if num_batches > 0 and completed >= num_batches:
+                break
+    finally:
+        handle.remove()
+        for submodule, was_training in training_states:
+            submodule.train(was_training)
+        if dali:
+            train_loader.reset()
+
+    if completed == 0:
+        raise RuntimeError(
+            f"Interval calibration for {activation_name} received no batches")
+    if distributed.is_available() and distributed.is_initialized():
+        distributed.all_reduce(local_absmax, op=distributed.ReduceOp.MAX)
+    observed_absmax = float(local_absmax.item())
+    calibrated_scale = max(observed_absmax * margin, min_scale)
+    module.set_layerwise_poly_input_scale(
+        activation_name, calibrated_scale)
+    return {
+        "activation": activation_name,
+        "observed_absmax": observed_absmax,
+        "input_scale": calibrated_scale,
+        "margin": margin,
+        "batches_per_rank": completed,
+    }
 
 
 @torch.no_grad()
@@ -574,6 +662,21 @@ def main(args):
         cfg.seed,
         cfg.num_workers
     )
+    layerwise_poly_range_loader = train_loader
+    if (cfg.network.endswith("_layerwise_poly") and not cfg.dali):
+        # Training drops the final incomplete batch. Interval calibration must
+        # instead see every representative image; DistributedSampler may pad a
+        # few samples across ranks, but none are omitted.
+        layerwise_poly_range_loader = get_dataloader(
+            cfg.rec,
+            local_rank,
+            cfg.batch_size,
+            False,
+            cfg.dali_aug,
+            cfg.seed,
+            cfg.num_workers,
+            drop_last=False,
+        )
 
     model_kwargs = {
         "dropout": 0.0,
@@ -605,6 +708,18 @@ def main(args):
                 cfg, "quadratic_abs_init",
                 1.0 / math.sqrt(2.0 * math.pi))),
             quadratic_progress=float(getattr(
+                cfg, "herpn_initial_progress", 0.0)),
+        )
+    if (cfg.network.startswith("r")
+            and cfg.network.endswith("_layerwise_poly")):
+        model_kwargs.update(
+            layerwise_poly_degree=int(getattr(
+                cfg, "layerwise_poly_degree", 2)),
+            layerwise_poly_initial_scale=float(getattr(
+                cfg, "layerwise_poly_initial_scale", 1.0)),
+            layerwise_poly_distill_eps=float(getattr(
+                cfg, "layerwise_poly_distill_eps", 1e-4)),
+            layerwise_poly_progress=float(getattr(
                 cfg, "herpn_initial_progress", 0.0)),
         )
     if cfg.network.startswith("poolformer_no_ln_x2_act"):
@@ -829,6 +944,14 @@ def main(args):
         getattr(cfg, "herpn_save_after_group", False))
     herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
     herpn_group_schedule = bool(herpn_enabled and herpn_conversion_groups)
+    layerwise_poly_enabled = hasattr(
+        backbone.module, "layerwise_poly_activation_names")
+    layerwise_poly_range_batches = int(getattr(
+        cfg, "layerwise_poly_range_calibration_batches", 0))
+    layerwise_poly_range_margin = float(getattr(
+        cfg, "layerwise_poly_range_margin", 1.1))
+    layerwise_poly_min_scale = float(getattr(
+        cfg, "layerwise_poly_min_scale", 1e-3))
     if herpn_group_schedule:
         validate_herpn_conversion_groups(
             backbone.module, herpn_conversion_groups)
@@ -847,6 +970,28 @@ def main(args):
                 "HerPN schedule does not finish all five stages before training ends: "
                 f"final_progress={final_progress:.3f}"
             )
+    if layerwise_poly_enabled:
+        if not herpn_group_schedule:
+            raise ValueError(
+                "Layerwise polynomial training requires herpn_conversion_groups")
+        expected_order = tuple(
+            backbone.module.layerwise_poly_activation_names())
+        configured_order = tuple(
+            name for group in herpn_conversion_groups for name in group)
+        if any(len(group) != 1 for group in herpn_conversion_groups):
+            raise ValueError(
+                "Layerwise polynomial intervals require one activation per group")
+        if configured_order != expected_order:
+            raise ValueError(
+                "Layerwise polynomial activations must convert in forward order; "
+                f"configured={configured_order}, expected={expected_order}")
+        if layerwise_poly_range_batches < 0:
+            raise ValueError(
+                "layerwise_poly_range_calibration_batches must be >= 0")
+        if layerwise_poly_range_margin < 1.0:
+            raise ValueError("layerwise_poly_range_margin must be at least 1")
+        if layerwise_poly_min_scale <= 0.0:
+            raise ValueError("layerwise_poly_min_scale must be positive")
     completed_herpn_groups = sum(
         float(start_epoch) >= float(start) + herpn_transition_epochs
         for start in herpn_group_epochs
@@ -970,6 +1115,49 @@ def main(args):
     nonfinite_embedding_skips = 0
     validate_after_prepbn_transition = bool(getattr(
         cfg, "validate_after_prepbn_transition", False))
+
+    def calibrate_next_layerwise_poly():
+        if not layerwise_poly_enabled:
+            return None
+        pending = backbone.module.uncalibrated_layerwise_poly_names()
+        if not pending:
+            return None
+        result = calibrate_layerwise_poly_input_scale(
+            backbone,
+            layerwise_poly_range_loader,
+            pending[0],
+            layerwise_poly_range_batches,
+            layerwise_poly_range_margin,
+            layerwise_poly_min_scale,
+            global_step,
+            dali=cfg.dali,
+        )
+        if rank == 0:
+            logging.info(
+                "Layerwise polynomial interval calibrated: %s observed "
+                "absmax=%.7g margin=%.4g scale=%.7g batches/rank=%d",
+                result["activation"],
+                result["observed_absmax"],
+                result["margin"],
+                result["input_scale"],
+                result["batches_per_rank"],
+            )
+            if summary_writer is not None:
+                summary_writer.add_scalar(
+                    "LayerwisePoly/InputScale/"
+                    + result["activation"].replace(".", "/"),
+                    result["input_scale"],
+                    global_step,
+                )
+        return result
+
+    # Profile the stem before its local-fit warmup. On resume, the calibrated
+    # buffers in the checkpoint make this select only the first unfinished
+    # activation (or do nothing after complete conversion).
+    if layerwise_poly_enabled:
+        if isinstance(layerwise_poly_range_loader, DataLoader):
+            layerwise_poly_range_loader.sampler.set_epoch(start_epoch)
+        calibrate_next_layerwise_poly()
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
@@ -1121,9 +1309,19 @@ def main(args):
                         herpn_bn_recalibration_batches)
                 recalibrate_herpn_batchnorm(
                     backbone, train_loader, herpn_bn_recalibration_batches,
-                    global_step)
+                    global_step,
+                    after_activation_name=(
+                        completed_names[-1]
+                        if layerwise_poly_enabled else None),
+                )
                 if cfg.dali:
                     train_loader.reset()
+                if layerwise_poly_enabled:
+                    # The next activation is measured only after the previous
+                    # one is fully polynomial and BN running statistics have
+                    # been refreshed. Its configured gap supplies local-fit
+                    # training before the next blend starts.
+                    calibrate_next_layerwise_poly()
                 if herpn_save_after_group and rank == 0:
                     group_checkpoint_path = os.path.join(
                         cfg.output,

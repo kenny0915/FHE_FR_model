@@ -54,6 +54,7 @@ def get_dataloader(
     dali_aug = False,
     seed = 2048,
     num_workers = 2,
+    drop_last = True,
     ) -> Iterable:
 
     rec = os.path.join(root_dir, 'train.rec')
@@ -100,7 +101,7 @@ def get_dataloader(
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=True,
-        drop_last=True,
+        drop_last=drop_last,
         worker_init_fn=init_fn,
     )
 
