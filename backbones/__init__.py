@@ -337,6 +337,20 @@ def get_model(name, **kwargs):
             fp16=kwargs.get("fp16", False),
         )
 
+    elif name == "poolformer_fully_gated_prepbn_s24":
+        from .poolformer_fully_gated_prepbn import (
+            poolformer_fully_gated_prepbn_s24,
+        )
+        return poolformer_fully_gated_prepbn_s24(
+            pretrained=False,
+            num_classes=kwargs.get("num_features", 512),
+            face_embedding=True,
+            fp16=kwargs.get("fp16", False),
+            repbn_bn_eps=kwargs.get("repbn_bn_eps", 1e-5),
+            repbn_bn_momentum=kwargs.get("repbn_bn_momentum", 0.1),
+            repbn_eta_init=kwargs.get("repbn_eta_init", 0.0),
+        )
+
     elif name == "vit_t":
         num_features = kwargs.get("num_features", 512)
         from .vit import VisionTransformer

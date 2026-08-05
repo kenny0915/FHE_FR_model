@@ -739,6 +739,13 @@ def main(args):
             gate_grouping=str(getattr(
                 cfg, "simple_gate_grouping", "stage_chunks")),
         )
+    if cfg.network.startswith("poolformer_fully_gated_prepbn"):
+        model_kwargs.update(
+            repbn_bn_eps=float(getattr(cfg, "repbn_bn_eps", 1e-5)),
+            repbn_bn_momentum=float(getattr(
+                cfg, "repbn_bn_momentum", 0.1)),
+            repbn_eta_init=float(getattr(cfg, "repbn_eta_init", 0.0)),
+        )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
     backbone_init = getattr(cfg, "backbone_init", "")
@@ -746,7 +753,12 @@ def main(args):
         init_checkpoint = torch.load(backbone_init, map_location="cpu")
         if "state_dict_backbone" in init_checkpoint:
             init_checkpoint = init_checkpoint["state_dict_backbone"]
-        backbone.load_state_dict(init_checkpoint, strict=True)
+        init_loader = getattr(
+            backbone, "load_backbone_init_state_dict", None)
+        if init_loader is None:
+            backbone.load_state_dict(init_checkpoint, strict=True)
+        else:
+            init_loader(init_checkpoint)
         if hasattr(backbone, "set_herpn_progress"):
             backbone.set_herpn_progress(
                 float(getattr(cfg, "herpn_initial_progress", 0.0)))
