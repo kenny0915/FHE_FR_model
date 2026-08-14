@@ -296,6 +296,42 @@ def recalibrate_prepbn_batchnorm(backbone, train_loader, num_epochs, start_epoch
 
 
 @torch.no_grad()
+def calibrate_affine_normalization(backbone, train_loader, num_batches,
+                                   ridge=1e-6, dali=False):
+    """Fit fixed channel affine maps to the warm-start LayerNorm outputs."""
+    if num_batches <= 0:
+        raise ValueError("affine_calibration_batches must be positive")
+    begin = getattr(backbone, "begin_affine_calibration", None)
+    finish = getattr(backbone, "finish_affine_calibration", None)
+    if begin is None or finish is None:
+        raise TypeError(
+            "Affine calibration requested for a backbone without calibration hooks")
+
+    was_training = backbone.training
+    backbone.eval()
+    begin()
+    completed = 0
+    try:
+        for img, _ in train_loader:
+            embeddings = backbone(img)
+            if not torch.isfinite(embeddings).all():
+                raise FloatingPointError(
+                    "Non-finite embeddings during affine normalization calibration")
+            completed += 1
+            if completed >= num_batches:
+                break
+        if completed == 0:
+            raise RuntimeError(
+                "Affine normalization calibration received no batches")
+        diagnostics = finish(ridge=ridge, distributed=True)
+    finally:
+        backbone.train(was_training)
+        if dali:
+            train_loader.reset()
+    return completed, diagnostics
+
+
+@torch.no_grad()
 def profile_simple_gate_ranges(backbone, train_loader, num_batches, dali=False):
     """Profile the final eval/RepBN graph over representative training images."""
     module = backbone.module
@@ -764,6 +800,27 @@ def main(args):
                 float(getattr(cfg, "herpn_initial_progress", 0.0)))
         logging.info("Initialized backbone from %s", backbone_init)
         del init_checkpoint
+    affine_calibration_batches = int(getattr(
+        cfg, "affine_calibration_batches", 0))
+    if affine_calibration_batches > 0 and not cfg.resume:
+        completed, diagnostics = calibrate_affine_normalization(
+            backbone,
+            train_loader,
+            affine_calibration_batches,
+            ridge=float(getattr(cfg, "affine_calibration_ridge", 1e-6)),
+            dali=cfg.dali,
+        )
+        if rank == 0:
+            logging.info(
+                "Calibrated %d fixed-affine normalization sites with %d "
+                "representative batches; worst scale_absmax=%.6g, "
+                "bias_absmax=%.6g, relative_rmse_max=%.6g",
+                len(diagnostics),
+                completed,
+                max(item["scale_absmax"] for item in diagnostics),
+                max(item["bias_absmax"] for item in diagnostics),
+                max(item["relative_rmse_max"] for item in diagnostics),
+            )
     if getattr(cfg, "sync_bn", False):
         backbone = torch.nn.SyncBatchNorm.convert_sync_batchnorm(backbone)
 
@@ -1798,9 +1855,7 @@ def main(args):
 
     if getattr(cfg, "final_verification_after_prepbn", False):
         if rank == 0:
-            logging.info(
-                "Running final verification with fully converted and "
-                "recalibrated RepBatchNorm")
+            logging.info("Running final verification with fully converted normalization")
         callback_verification(global_step, backbone.module)
 
     if rank == 0:
