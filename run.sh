@@ -52,3 +52,15 @@ CUDA_VISIBLE_DEVICES=0 python eval_ijbc.py \
 CUDA_VISIBLE_DEVICES=0,1 torchrun \
  --nproc_per_node=1 \
  train_v2.py configs/casia_patch_cnn
+
+
+
+
+ CUDA_VISIBLE_DEVICES=1 python eval_ijbc_replace_non_linear.py \
+  --model-prefix work_dirs/ms1mv3_r50/model.pt \
+  --image-path ijb/IJBC \
+  --result-dir work_dirs/ms1mv3_r50/ijbc_result_no_relu \
+  --batch-size 256 \
+  --job ms1mv3_r50 \
+  --target IJBC \
+  --network r50

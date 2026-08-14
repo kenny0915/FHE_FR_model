@@ -265,6 +265,9 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
             img_feats[batch * batch_size:batch * batch_size +
                                          batch_size][:] = embedding.forward_db(batch_data)
             batch += 1
+        score = float(name_lmk_score[-1])
+        if  np.all(np.isfinite(score)):
+            raise ValueError('Non-finite faceness scores found for image {}: {}'.format(name_lmk_score[0], name_lmk_score[-1]))
         faceness_scores.append(name_lmk_score[-1])
 
     if rare_size > 0:
