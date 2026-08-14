@@ -20,6 +20,11 @@ from utils.utils_callbacks import CallBackLogging, CallBackVerification
 from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
+from utils.utils_optimizer import (
+    select_gradient_clip_parameters,
+    split_weight_decay_parameters,
+    temporary_optimizer_lr_scale,
+)
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
 assert torch.__version__ >= "1.12.0", "In order to enjoy the features of the new torch, \
@@ -197,6 +202,69 @@ def end_batchnorm_recalibration(module: torch.nn.Module, state):
         submodule.train(was_training)
 
 
+def snapshot_batchnorm_running_stats(module: torch.nn.Module):
+    """Copy mutable BN buffers so a rejected forward can be rolled back."""
+    snapshots = []
+    for submodule in module.modules():
+        if not isinstance(
+                submodule, nn.modules.batchnorm._BatchNorm):
+            continue
+        snapshots.append((
+            submodule,
+            (submodule.running_mean.detach().clone()
+             if submodule.running_mean is not None else None),
+            (submodule.running_var.detach().clone()
+             if submodule.running_var is not None else None),
+            (submodule.num_batches_tracked.detach().clone()
+             if submodule.num_batches_tracked is not None else None),
+        ))
+    return snapshots
+
+
+@torch.no_grad()
+def restore_batchnorm_running_stats(snapshots):
+    for submodule, running_mean, running_var, num_batches_tracked in snapshots:
+        if running_mean is not None:
+            submodule.running_mean.copy_(running_mean)
+        if running_var is not None:
+            submodule.running_var.copy_(running_var)
+        if num_batches_tracked is not None:
+            submodule.num_batches_tracked.copy_(num_batches_tracked)
+
+
+def merge_cumulative_batchnorm_stats(batchnorm_state):
+    """Merge cumulative BN statistics from every distributed data shard."""
+    if not distributed.is_available() or not distributed.is_initialized():
+        return
+    if distributed.get_world_size() <= 1:
+        return
+
+    for submodule, _, _ in batchnorm_state:
+        if (submodule.running_mean is None
+                or submodule.running_var is None
+                or submodule.num_batches_tracked is None):
+            continue
+        local_batches = submodule.num_batches_tracked.detach().clone()
+        total_batches = local_batches.clone()
+        distributed.all_reduce(total_batches, op=distributed.ReduceOp.SUM)
+        if total_batches.item() == 0:
+            continue
+
+        weight = local_batches.to(
+            device=submodule.running_mean.device,
+            dtype=submodule.running_mean.dtype,
+        )
+        for running_stat in (
+                submodule.running_mean, submodule.running_var):
+            weighted_stat = running_stat * weight
+            distributed.all_reduce(
+                weighted_stat, op=distributed.ReduceOp.SUM)
+            running_stat.copy_(
+                weighted_stat
+                / total_batches.to(dtype=running_stat.dtype))
+        submodule.num_batches_tracked.copy_(total_batches)
+
+
 @torch.no_grad()
 def recalibrate_prepbn_batchnorm(backbone, train_loader, num_epochs, start_epoch,
                                 dali=False):
@@ -225,6 +293,42 @@ def recalibrate_prepbn_batchnorm(backbone, train_loader, num_epochs, start_epoch
     if completed == 0:
         raise RuntimeError("RepBatchNorm recalibration received no batches")
     return completed
+
+
+@torch.no_grad()
+def calibrate_affine_normalization(backbone, train_loader, num_batches,
+                                   ridge=1e-6, dali=False):
+    """Fit fixed channel affine maps to the warm-start LayerNorm outputs."""
+    if num_batches <= 0:
+        raise ValueError("affine_calibration_batches must be positive")
+    begin = getattr(backbone, "begin_affine_calibration", None)
+    finish = getattr(backbone, "finish_affine_calibration", None)
+    if begin is None or finish is None:
+        raise TypeError(
+            "Affine calibration requested for a backbone without calibration hooks")
+
+    was_training = backbone.training
+    backbone.eval()
+    begin()
+    completed = 0
+    try:
+        for img, _ in train_loader:
+            embeddings = backbone(img)
+            if not torch.isfinite(embeddings).all():
+                raise FloatingPointError(
+                    "Non-finite embeddings during affine normalization calibration")
+            completed += 1
+            if completed >= num_batches:
+                break
+        if completed == 0:
+            raise RuntimeError(
+                "Affine normalization calibration received no batches")
+        diagnostics = finish(ridge=ridge, distributed=True)
+    finally:
+        backbone.train(was_training)
+        if dali:
+            train_loader.reset()
+    return completed, diagnostics
 
 
 @torch.no_grad()
@@ -374,11 +478,17 @@ def atomic_torch_save(value, path):
 
 
 @torch.no_grad()
-def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step):
+def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step,
+                                after_activation_name=None):
     module = backbone.module
     if num_batches <= 0 or not hasattr(module, "begin_batchnorm_recalibration"):
         return
-    state = module.begin_batchnorm_recalibration(reset=True)
+    if (after_activation_name is not None
+            and hasattr(module, "begin_batchnorm_recalibration_after")):
+        state = module.begin_batchnorm_recalibration_after(
+            after_activation_name, reset=True)
+    else:
+        state = module.begin_batchnorm_recalibration(reset=True)
     completed = 0
     try:
         for batch in train_loader:
@@ -399,6 +509,88 @@ def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step
 
 
 @torch.no_grad()
+def calibrate_layerwise_poly_input_scale(
+        backbone, train_loader, activation_name, num_batches, margin,
+        min_scale, global_step, dali=False):
+    """Measure one activation's global input absmax on the current eval graph.
+
+    ``num_batches=0`` consumes the complete representative loader shard on
+    every rank.  The maximum is reduced across ranks before applying the
+    configured safety margin, so every worker stores the same public scale.
+    """
+    if num_batches < 0:
+        raise ValueError("layerwise_poly_range_calibration_batches must be >= 0")
+    margin = float(margin)
+    min_scale = float(min_scale)
+    if margin < 1.0:
+        raise ValueError("layerwise_poly_range_margin must be at least 1")
+    if min_scale <= 0.0:
+        raise ValueError("layerwise_poly_min_scale must be positive")
+
+    module = backbone.module
+    activations = dict(module.named_modules())
+    activation = activations.get(activation_name)
+    if not getattr(activation, "is_layerwise_rescaled_polynomial", False):
+        raise ValueError(
+            f"Unknown layerwise polynomial activation: {activation_name}")
+
+    device = next(module.parameters()).device
+    local_absmax = torch.zeros((), device=device, dtype=torch.float32)
+    completed = 0
+
+    def capture_input(_, inputs):
+        if not inputs or not torch.is_tensor(inputs[0]):
+            raise RuntimeError(
+                f"Activation {activation_name} received no tensor input")
+        values = inputs[0].detach().float()
+        if not torch.isfinite(values).all():
+            raise FloatingPointError(
+                "Non-finite activation input during layerwise interval "
+                f"calibration for {activation_name} at global_step={global_step}")
+        local_absmax.copy_(torch.maximum(local_absmax, values.abs().amax()))
+
+    training_states = [
+        (submodule, submodule.training) for submodule in module.modules()
+    ]
+    handle = activation.register_forward_pre_hook(capture_input)
+    module.eval()
+    try:
+        for img, _ in train_loader:
+            embeddings = module(img)
+            if not torch.isfinite(embeddings).all():
+                raise FloatingPointError(
+                    "Non-finite embeddings during layerwise interval "
+                    f"calibration for {activation_name} at "
+                    f"global_step={global_step}, batch={completed}")
+            completed += 1
+            if num_batches > 0 and completed >= num_batches:
+                break
+    finally:
+        handle.remove()
+        for submodule, was_training in training_states:
+            submodule.train(was_training)
+        if dali:
+            train_loader.reset()
+
+    if completed == 0:
+        raise RuntimeError(
+            f"Interval calibration for {activation_name} received no batches")
+    if distributed.is_available() and distributed.is_initialized():
+        distributed.all_reduce(local_absmax, op=distributed.ReduceOp.MAX)
+    observed_absmax = float(local_absmax.item())
+    calibrated_scale = max(observed_absmax * margin, min_scale)
+    module.set_layerwise_poly_input_scale(
+        activation_name, calibrated_scale)
+    return {
+        "activation": activation_name,
+        "observed_absmax": observed_absmax,
+        "input_scale": calibrated_scale,
+        "margin": margin,
+        "batches_per_rank": completed,
+    }
+
+
+@torch.no_grad()
 def recalibrate_batchnorm_batches(backbone, train_loader, num_batches,
                                   global_step, reason):
     """Reset and refresh BN statistics using the current inference graph."""
@@ -409,7 +601,9 @@ def recalibrate_batchnorm_batches(backbone, train_loader, num_batches,
     completed = 0
     try:
         for img, _ in train_loader:
-            embeddings = backbone(img)
+            # Bypass DDP so broadcast_buffers cannot replace each rank's
+            # independently accumulated running statistics before a forward.
+            embeddings = module(img)
             if not torch.isfinite(embeddings).all():
                 raise FloatingPointError(
                     f"Non-finite embeddings during {reason} BatchNorm "
@@ -422,6 +616,7 @@ def recalibrate_batchnorm_batches(backbone, train_loader, num_batches,
         end_batchnorm_recalibration(module, state)
     if completed == 0:
         raise RuntimeError(f"{reason} BatchNorm recalibration received no batches")
+    merge_cumulative_batchnorm_stats(state["batchnorm"])
     return completed
 
 
@@ -503,6 +698,21 @@ def main(args):
         cfg.seed,
         cfg.num_workers
     )
+    layerwise_poly_range_loader = train_loader
+    if (cfg.network.endswith("_layerwise_poly") and not cfg.dali):
+        # Training drops the final incomplete batch. Interval calibration must
+        # instead see every representative image; DistributedSampler may pad a
+        # few samples across ranks, but none are omitted.
+        layerwise_poly_range_loader = get_dataloader(
+            cfg.rec,
+            local_rank,
+            cfg.batch_size,
+            False,
+            cfg.dali_aug,
+            cfg.seed,
+            cfg.num_workers,
+            drop_last=False,
+        )
 
     model_kwargs = {
         "dropout": 0.0,
@@ -510,7 +720,8 @@ def main(args):
         "num_features": cfg.embedding_size,
     }
 
-    if cfg.network.startswith("r") and cfg.network.endswith("_no_relu"):
+    if (cfg.network.startswith("r")
+            and cfg.network.endswith(("_no_relu", "_prelu_herpn"))):
         default_herpn_progress = (
             0.0 if (getattr(cfg, "herpn_conversion_groups", ())
                     or getattr(cfg, "herpn_stage_epochs", ())) else 5.0)
@@ -520,6 +731,9 @@ def main(args):
             herpn_progress=float(getattr(
                 cfg, "herpn_initial_progress", default_herpn_progress)),
         )
+        if cfg.network.endswith("_prelu_herpn"):
+            model_kwargs["prelu_herpn_distill_eps"] = float(getattr(
+                cfg, "prelu_herpn_distill_eps", 1e-4))
     if cfg.network.startswith("r") and cfg.network.endswith("_quadratic"):
         model_kwargs.update(
             quadratic_input_scale=float(getattr(
@@ -530,6 +744,18 @@ def main(args):
                 cfg, "quadratic_abs_init",
                 1.0 / math.sqrt(2.0 * math.pi))),
             quadratic_progress=float(getattr(
+                cfg, "herpn_initial_progress", 0.0)),
+        )
+    if (cfg.network.startswith("r")
+            and cfg.network.endswith("_layerwise_poly")):
+        model_kwargs.update(
+            layerwise_poly_degree=int(getattr(
+                cfg, "layerwise_poly_degree", 2)),
+            layerwise_poly_initial_scale=float(getattr(
+                cfg, "layerwise_poly_initial_scale", 1.0)),
+            layerwise_poly_distill_eps=float(getattr(
+                cfg, "layerwise_poly_distill_eps", 1e-4)),
+            layerwise_poly_progress=float(getattr(
                 cfg, "herpn_initial_progress", 0.0)),
         )
     if cfg.network.startswith("poolformer_no_ln_x2_act"):
@@ -546,6 +772,15 @@ def main(args):
             gate_initial_blend=float(getattr(
                 cfg, "simple_gate_initial_blend",
                 0.0 if gate_group_epochs else 1.0)),
+            gate_grouping=str(getattr(
+                cfg, "simple_gate_grouping", "stage_chunks")),
+        )
+    if cfg.network.startswith("poolformer_fully_gated_prepbn"):
+        model_kwargs.update(
+            repbn_bn_eps=float(getattr(cfg, "repbn_bn_eps", 1e-5)),
+            repbn_bn_momentum=float(getattr(
+                cfg, "repbn_bn_momentum", 0.1)),
+            repbn_eta_init=float(getattr(cfg, "repbn_eta_init", 0.0)),
         )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
@@ -554,12 +789,38 @@ def main(args):
         init_checkpoint = torch.load(backbone_init, map_location="cpu")
         if "state_dict_backbone" in init_checkpoint:
             init_checkpoint = init_checkpoint["state_dict_backbone"]
-        backbone.load_state_dict(init_checkpoint, strict=True)
+        init_loader = getattr(
+            backbone, "load_backbone_init_state_dict", None)
+        if init_loader is None:
+            backbone.load_state_dict(init_checkpoint, strict=True)
+        else:
+            init_loader(init_checkpoint)
         if hasattr(backbone, "set_herpn_progress"):
             backbone.set_herpn_progress(
                 float(getattr(cfg, "herpn_initial_progress", 0.0)))
         logging.info("Initialized backbone from %s", backbone_init)
         del init_checkpoint
+    affine_calibration_batches = int(getattr(
+        cfg, "affine_calibration_batches", 0))
+    if affine_calibration_batches > 0 and not cfg.resume:
+        completed, diagnostics = calibrate_affine_normalization(
+            backbone,
+            train_loader,
+            affine_calibration_batches,
+            ridge=float(getattr(cfg, "affine_calibration_ridge", 1e-6)),
+            dali=cfg.dali,
+        )
+        if rank == 0:
+            logging.info(
+                "Calibrated %d fixed-affine normalization sites with %d "
+                "representative batches; worst scale_absmax=%.6g, "
+                "bias_absmax=%.6g, relative_rmse_max=%.6g",
+                len(diagnostics),
+                completed,
+                max(item["scale_absmax"] for item in diagnostics),
+                max(item["bias_absmax"] for item in diagnostics),
+                max(item["relative_rmse_max"] for item in diagnostics),
+            )
     if getattr(cfg, "sync_bn", False):
         backbone = torch.nn.SyncBatchNorm.convert_sync_batchnorm(backbone)
 
@@ -573,7 +834,14 @@ def main(args):
 
     backbone.train()
     # FIXME using gradient checkpoint if there are some unused parameters will cause error
-    backbone._set_static_graph()
+    simple_gate_current_group_auxiliary = bool(getattr(
+        cfg, "simple_gate_current_group_auxiliary", False))
+    if simple_gate_current_group_auxiliary:
+        logging.info(
+            "Using dynamic DDP graph for current-group-only SimpleGate "
+            "auxiliary losses")
+    else:
+        backbone._set_static_graph()
 
     cryptoface_patch_training = is_cryptoface_patch_training(cfg)
     if cryptoface_patch_training and world_size != 1:
@@ -603,9 +871,33 @@ def main(args):
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
         # TODO the params of partial fc must be last in the params list
+        if getattr(cfg, "selective_weight_decay", False):
+            decay_params, no_decay_params = split_weight_decay_parameters(
+                backbone)
+            parameter_groups = [
+                {"params": decay_params, "weight_decay": cfg.weight_decay},
+                {"params": no_decay_params, "weight_decay": 0.0},
+                {
+                    "params": module_partial_fc.parameters(),
+                    "weight_decay": cfg.weight_decay,
+                },
+            ]
+            logging.info(
+                "Selective weight decay: %d backbone tensors with decay, "
+                "%d without decay",
+                len(decay_params), len(no_decay_params))
+        else:
+            parameter_groups = [
+                {"params": backbone.parameters()},
+                {"params": module_partial_fc.parameters()},
+            ]
         opt = torch.optim.SGD(
-            params=[{"params": backbone.parameters()}, {"params": module_partial_fc.parameters()}],
-            lr=cfg.lr, momentum=0.9, weight_decay=cfg.weight_decay)
+            params=parameter_groups,
+            lr=cfg.lr,
+            momentum=cfg.momentum,
+            weight_decay=(0.0 if getattr(
+                cfg, "selective_weight_decay", False)
+                else cfg.weight_decay))
 
     elif cfg.optimizer == "adamw":
         module_partial_fc = PartialFC_V2(
@@ -649,10 +941,26 @@ def main(args):
 
     start_epoch = 0
     global_step = 0
+    resumed_completed_simple_gate_groups = None
+    resumed_repbn_gate_recalibrated = None
     if cfg.resume:
         dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
         start_epoch = dict_checkpoint["epoch"]
         global_step = dict_checkpoint["global_step"]
+        resumed_completed_simple_gate_groups = dict_checkpoint.get(
+            "completed_simple_gate_groups")
+        resumed_repbn_gate_recalibrated = dict_checkpoint.get(
+            "repbn_gate_recalibrated")
+        checkpoint_gate_grouping = dict_checkpoint.get(
+            "simple_gate_grouping")
+        configured_gate_grouping = str(getattr(
+            cfg, "simple_gate_grouping", "stage_chunks"))
+        if (checkpoint_gate_grouping is not None
+                and checkpoint_gate_grouping != configured_gate_grouping):
+            raise ValueError(
+                "Resume checkpoint SimpleGate grouping "
+                f"{checkpoint_gate_grouping!r} does not match config "
+                f"{configured_gate_grouping!r}")
         backbone.module.load_state_dict(dict_checkpoint["state_dict_backbone"])
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
         opt.load_state_dict(dict_checkpoint["state_optimizer"])
@@ -684,9 +992,13 @@ def main(args):
         growth_interval=int(getattr(cfg, "amp_growth_interval", 100)),
     )
     grad_clip = float(getattr(cfg, "gradient_clip", 5.0))
-    clipped_params = [
-        p for group in opt.param_groups for p in group["params"] if p.requires_grad
-    ]
+    gradient_clip_scope = str(getattr(cfg, "gradient_clip_scope", "all"))
+    clipped_params = select_gradient_clip_parameters(
+        opt, backbone, scope=gradient_clip_scope)
+    if rank == 0:
+        logging.info(
+            "Gradient clipping: scope=%s, max=%g, tensors=%d",
+            gradient_clip_scope, grad_clip, len(clipped_params))
 
     herpn_stage_epochs = tuple(getattr(cfg, "herpn_stage_epochs", ()))
     herpn_conversion_groups = tuple(
@@ -697,8 +1009,18 @@ def main(args):
     herpn_distill_loss_weight = float(getattr(cfg, "herpn_distill_loss_weight", 0.0))
     herpn_bn_recalibration_batches = int(
         getattr(cfg, "herpn_bn_recalibration_batches", 0))
+    herpn_save_after_group = bool(
+        getattr(cfg, "herpn_save_after_group", False))
     herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
     herpn_group_schedule = bool(herpn_enabled and herpn_conversion_groups)
+    layerwise_poly_enabled = hasattr(
+        backbone.module, "layerwise_poly_activation_names")
+    layerwise_poly_range_batches = int(getattr(
+        cfg, "layerwise_poly_range_calibration_batches", 0))
+    layerwise_poly_range_margin = float(getattr(
+        cfg, "layerwise_poly_range_margin", 1.1))
+    layerwise_poly_min_scale = float(getattr(
+        cfg, "layerwise_poly_min_scale", 1e-3))
     if herpn_group_schedule:
         validate_herpn_conversion_groups(
             backbone.module, herpn_conversion_groups)
@@ -717,6 +1039,28 @@ def main(args):
                 "HerPN schedule does not finish all five stages before training ends: "
                 f"final_progress={final_progress:.3f}"
             )
+    if layerwise_poly_enabled:
+        if not herpn_group_schedule:
+            raise ValueError(
+                "Layerwise polynomial training requires herpn_conversion_groups")
+        expected_order = tuple(
+            backbone.module.layerwise_poly_activation_names())
+        configured_order = tuple(
+            name for group in herpn_conversion_groups for name in group)
+        if any(len(group) != 1 for group in herpn_conversion_groups):
+            raise ValueError(
+                "Layerwise polynomial intervals require one activation per group")
+        if configured_order != expected_order:
+            raise ValueError(
+                "Layerwise polynomial activations must convert in forward order; "
+                f"configured={configured_order}, expected={expected_order}")
+        if layerwise_poly_range_batches < 0:
+            raise ValueError(
+                "layerwise_poly_range_calibration_batches must be >= 0")
+        if layerwise_poly_range_margin < 1.0:
+            raise ValueError("layerwise_poly_range_margin must be at least 1")
+        if layerwise_poly_min_scale <= 0.0:
+            raise ValueError("layerwise_poly_min_scale must be positive")
     completed_herpn_groups = sum(
         float(start_epoch) >= float(start) + herpn_transition_epochs
         for start in herpn_group_epochs
@@ -741,6 +1085,10 @@ def main(args):
         cfg, "simple_gate_distill_loss_weight", 0.0))
     simple_gate_range_loss_weight = float(getattr(
         cfg, "simple_gate_range_loss_weight", 0.0))
+    simple_gate_lr_multiplier = float(getattr(
+        cfg, "simple_gate_lr_multiplier", 1.0))
+    if simple_gate_lr_multiplier <= 0.0:
+        raise ValueError("simple_gate_lr_multiplier must be positive")
     simple_gate_schedule = bool(
         simple_gate_progressive and simple_gate_group_epochs)
     if simple_gate_schedule:
@@ -775,23 +1123,110 @@ def main(args):
                 start_epoch, simple_gate_group_epochs,
                 simple_gate_transition_epochs),
         )
-    if simple_gate_progressive:
+    if simple_gate_progressive and simple_gate_current_group_auxiliary:
+        initial_blends = simple_gate_blends_at_epoch(
+            start_epoch, simple_gate_group_epochs,
+            simple_gate_transition_epochs)
+        initial_group = next(
+            (index for index, blend in enumerate(initial_blends)
+             if blend < 1.0),
+            None,
+        )
+        backbone.module.set_simple_gate_auxiliary_groups(
+            () if initial_group is None else (initial_group,))
+    elif simple_gate_progressive:
         backbone.module.set_simple_gate_auxiliary_losses(
             simple_gate_distill_loss_weight > 0
             or simple_gate_range_loss_weight > 0)
     completed_simple_gate_groups = sum(
-        float(start_epoch) >= float(start) + simple_gate_transition_epochs
+        float(start_epoch) > float(start) + simple_gate_transition_epochs
         for start in simple_gate_group_epochs
     ) if simple_gate_schedule else 0
-    repbn_gate_recalibrated = False
+    if resumed_completed_simple_gate_groups is not None:
+        completed_simple_gate_groups = int(
+            resumed_completed_simple_gate_groups)
+        if not 0 <= completed_simple_gate_groups <= len(
+                simple_gate_group_epochs):
+            raise ValueError(
+                "Invalid completed_simple_gate_groups in checkpoint: "
+                f"{completed_simple_gate_groups}")
+    # A completed SimpleGate group proves that the one-time post-RepBN
+    # recalibration already ran before that group started.  Do not reset all
+    # BN statistics again when resuming a later, partially blended group.
+    repbn_gate_recalibrated = bool(
+        resumed_repbn_gate_recalibrated
+        if resumed_repbn_gate_recalibrated is not None
+        else cfg.resume and completed_simple_gate_groups > 0)
+    if repbn_gate_recalibrated and rank == 0:
+        logging.info(
+            "Resume checkpoint records post-RepBatchNorm recalibration "
+            "complete with %d completed SimpleGate group(s); skipping it",
+            completed_simple_gate_groups)
     simple_gate_repbn_recalibration_batches = int(getattr(
         cfg, "simple_gate_repbn_recalibration_batches", 0))
     simple_gate_verify_after_repbn = bool(getattr(
         cfg, "simple_gate_verify_after_repbn", False))
+    simple_gate_group_bn_recalibration_batches = int(getattr(
+        cfg, "simple_gate_group_bn_recalibration_batches", 0))
+    simple_gate_verify_after_group = bool(getattr(
+        cfg, "simple_gate_verify_after_group", False))
+    simple_gate_save_after_group = bool(getattr(
+        cfg, "simple_gate_save_after_group", False))
+    if ((simple_gate_verify_after_group or simple_gate_save_after_group)
+            and simple_gate_group_bn_recalibration_batches <= 0):
+        raise ValueError(
+            "SimpleGate group verification/checkpointing requires "
+            "simple_gate_group_bn_recalibration_batches > 0")
     last_simple_gate_snapshot = {}
     last_simple_gate_snapshot_step = None
+    max_nonfinite_embedding_skips = int(getattr(
+        cfg, "max_nonfinite_embedding_skips", 0))
+    nonfinite_embedding_skips = 0
     validate_after_prepbn_transition = bool(getattr(
         cfg, "validate_after_prepbn_transition", False))
+
+    def calibrate_next_layerwise_poly():
+        if not layerwise_poly_enabled:
+            return None
+        pending = backbone.module.uncalibrated_layerwise_poly_names()
+        if not pending:
+            return None
+        result = calibrate_layerwise_poly_input_scale(
+            backbone,
+            layerwise_poly_range_loader,
+            pending[0],
+            layerwise_poly_range_batches,
+            layerwise_poly_range_margin,
+            layerwise_poly_min_scale,
+            global_step,
+            dali=cfg.dali,
+        )
+        if rank == 0:
+            logging.info(
+                "Layerwise polynomial interval calibrated: %s observed "
+                "absmax=%.7g margin=%.4g scale=%.7g batches/rank=%d",
+                result["activation"],
+                result["observed_absmax"],
+                result["margin"],
+                result["input_scale"],
+                result["batches_per_rank"],
+            )
+            if summary_writer is not None:
+                summary_writer.add_scalar(
+                    "LayerwisePoly/InputScale/"
+                    + result["activation"].replace(".", "/"),
+                    result["input_scale"],
+                    global_step,
+                )
+        return result
+
+    # Profile the stem before its local-fit warmup. On resume, the calibrated
+    # buffers in the checkpoint make this select only the first unfinished
+    # activation (or do nothing after complete conversion).
+    if layerwise_poly_enabled:
+        if isinstance(layerwise_poly_range_loader, DataLoader):
+            layerwise_poly_range_loader.sampler.set_epoch(start_epoch)
+        calibrate_next_layerwise_poly()
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
@@ -831,11 +1266,93 @@ def main(args):
                 float(epoch) >= float(start) + simple_gate_transition_epochs
                 for start in simple_gate_group_epochs)
             if newly_completed_gates > completed_simple_gate_groups:
+                if newly_completed_gates != completed_simple_gate_groups + 1:
+                    raise RuntimeError(
+                        "SimpleGate schedule crossed more than one group "
+                        "completion boundary in a single epoch; use epoch-aligned "
+                        "group transitions so every group can be recalibrated "
+                        "and checkpointed before the next group begins")
+                finalized_gate_blends = list(epoch_gate_blends)
+                finalized_gate_blends[newly_completed_gates - 1] = 1.0
+                if any(
+                        blend > 0.0
+                        for blend in finalized_gate_blends[
+                            newly_completed_gates:]):
+                    raise RuntimeError(
+                        "A later SimpleGate group started before the completed "
+                        "group's recalibration boundary")
+                finalized_gate_blends = tuple(finalized_gate_blends)
+                set_simple_gate_blends(
+                    backbone.module, finalized_gate_blends)
                 if rank == 0:
                     logging.info(
-                        "SimpleGate group %d/%d completed; blends=%s",
+                        "SimpleGate group %d/%d completed; forcing blends=%s",
                         newly_completed_gates, len(simple_gate_group_epochs),
-                        ",".join(f"{value:.3f}" for value in epoch_gate_blends))
+                        ",".join(
+                            f"{value:.3f}"
+                            for value in finalized_gate_blends))
+                if simple_gate_group_bn_recalibration_batches > 0:
+                    if rank == 0:
+                        logging.info(
+                            "Recalibrating all BatchNorm statistics after "
+                            "SimpleGate group %d/%d with %d batches per rank",
+                            newly_completed_gates,
+                            len(simple_gate_group_epochs),
+                            simple_gate_group_bn_recalibration_batches)
+                    calibrated = recalibrate_batchnorm_batches(
+                        backbone,
+                        train_loader,
+                        simple_gate_group_bn_recalibration_batches,
+                        global_step,
+                        f"post-SimpleGate group {newly_completed_gates}",
+                    )
+                    if cfg.dali:
+                        train_loader.reset()
+                    if rank == 0:
+                        logging.info(
+                            "SimpleGate group %d/%d BatchNorm recalibration "
+                            "complete; refreshed %d batches per rank",
+                            newly_completed_gates,
+                            len(simple_gate_group_epochs),
+                            calibrated)
+                    if simple_gate_verify_after_group:
+                        callback_verification(global_step, backbone.module)
+                    if simple_gate_save_after_group and rank == 0:
+                        group_checkpoint_path = os.path.join(
+                            cfg.output,
+                            "model_simple_gate_group_"
+                            f"{newly_completed_gates:02d}_bnrecalibrated.pt",
+                        )
+                        atomic_torch_save(
+                            {
+                                "state_dict_backbone":
+                                    backbone.module.state_dict(),
+                                "simple_gate_blends":
+                                    finalized_gate_blends,
+                                "simple_gate_group":
+                                    newly_completed_gates,
+                                "simple_gate_group_names":
+                                    gate_groups[
+                                        newly_completed_gates - 1],
+                                "simple_gate_grouping": str(getattr(
+                                    cfg, "simple_gate_grouping",
+                                    "stage_chunks")),
+                                "epoch": epoch,
+                                "global_step": global_step,
+                                "bn_recalibration_batches_per_rank":
+                                    calibrated,
+                                "bn_recalibration_world_size":
+                                    distributed.get_world_size(),
+                            },
+                            group_checkpoint_path,
+                        )
+                        logging.info(
+                            "Saved recalibrated SimpleGate group %d "
+                            "checkpoint to %s",
+                            newly_completed_gates, group_checkpoint_path)
+                    if (distributed.is_available()
+                            and distributed.is_initialized()):
+                        distributed.barrier()
                 completed_simple_gate_groups = newly_completed_gates
         if herpn_group_schedule:
             epoch_blends = herpn_group_blends_at_epoch(
@@ -861,9 +1378,56 @@ def main(args):
                         herpn_bn_recalibration_batches)
                 recalibrate_herpn_batchnorm(
                     backbone, train_loader, herpn_bn_recalibration_batches,
-                    global_step)
+                    global_step,
+                    after_activation_name=(
+                        completed_names[-1]
+                        if layerwise_poly_enabled else None),
+                )
                 if cfg.dali:
                     train_loader.reset()
+                if layerwise_poly_enabled:
+                    # The next activation is measured only after the previous
+                    # one is fully polynomial and BN running statistics have
+                    # been refreshed. Its configured gap supplies local-fit
+                    # training before the next blend starts.
+                    calibrate_next_layerwise_poly()
+                if herpn_save_after_group and rank == 0:
+                    group_checkpoint_path = os.path.join(
+                        cfg.output,
+                        "model_herpn_group_"
+                        f"{newly_completed:02d}_bnrecalibrated.pt",
+                    )
+                    serialized_blends = {
+                        name: float(activation.blend.item())
+                        for name, activation
+                        in backbone.module.named_modules()
+                        if getattr(
+                            activation,
+                            "is_progressive_polynomial_activation",
+                            False)
+                    }
+                    atomic_torch_save(
+                        {
+                            "state_dict_backbone":
+                                backbone.module.state_dict(),
+                            "herpn_blends": serialized_blends,
+                            "herpn_group": newly_completed,
+                            "epoch": epoch,
+                            "global_step": global_step,
+                            "bn_recalibration_batches_per_rank":
+                                herpn_bn_recalibration_batches,
+                            "bn_recalibration_world_size":
+                                distributed.get_world_size(),
+                        },
+                        group_checkpoint_path,
+                    )
+                    logging.info(
+                        "Saved recalibrated HerPN group %d checkpoint to %s",
+                        newly_completed, group_checkpoint_path)
+                if (herpn_save_after_group
+                        and distributed.is_available()
+                        and distributed.is_initialized()):
+                    distributed.barrier()
                 completed_herpn_groups = newly_completed
         elif herpn_enabled and herpn_stage_epochs:
             epoch_herpn_progress = herpn_progress_at_epoch(
@@ -906,21 +1470,43 @@ def main(args):
                     scheduled_steps_per_epoch, 1)
                 backbone.module.set_herpn_progress(herpn_progress_at_epoch(
                     fractional_epoch, herpn_stage_epochs, herpn_transition_epochs))
+            effective_simple_gate_lr_scale = 1.0
             if simple_gate_schedule:
                 fractional_epoch = epoch + step_in_epoch / max(
                     scheduled_steps_per_epoch, 1)
+                current_gate_blends = simple_gate_blends_at_epoch(
+                    fractional_epoch, simple_gate_group_epochs,
+                    simple_gate_transition_epochs)
                 set_simple_gate_blends(
                     backbone.module,
-                    simple_gate_blends_at_epoch(
-                        fractional_epoch, simple_gate_group_epochs,
-                        simple_gate_transition_epochs),
-                )
+                    current_gate_blends)
+                if simple_gate_current_group_auxiliary:
+                    current_group = next(
+                        (index for index, blend in enumerate(
+                            current_gate_blends) if blend < 1.0),
+                        None,
+                    )
+                    backbone.module.set_simple_gate_auxiliary_groups(
+                        () if current_group is None else (current_group,))
+                if fractional_epoch >= simple_gate_group_epochs[0]:
+                    effective_simple_gate_lr_scale = (
+                        simple_gate_lr_multiplier)
+            batchnorm_snapshot = (
+                snapshot_batchnorm_running_stats(backbone.module)
+                if max_nonfinite_embedding_skips > 0 else None)
             backbone_output = backbone(img)
             if cryptoface_patch_training:
                 local_embeddings, patch_pred, patch_target = backbone_output
             else:
                 local_embeddings = backbone_output
-            if not torch.isfinite(local_embeddings).all():
+            embeddings_finite = torch.isfinite(local_embeddings).all()
+            finite_rank_count = embeddings_finite.to(dtype=torch.long)
+            if distributed.is_available() and distributed.is_initialized():
+                distributed.all_reduce(
+                    finite_rank_count, op=distributed.ReduceOp.SUM)
+            finite_rank_count = int(finite_rank_count.item())
+            if finite_rank_count != world_size:
+                nonfinite_embedding_skips += 1
                 gate_context = ""
                 if last_simple_gate_snapshot:
                     worst_name, worst_stats = max(
@@ -933,9 +1519,43 @@ def main(args):
                         f"product_absmax={worst_stats['product_absmax']:.6g}, "
                         f"product_p999={worst_stats['product_p999']:.6g}, "
                         f"blend={worst_stats.get('blend', float('nan')):.3f}")
-                raise FloatingPointError(
-                    f"Non-finite embeddings at global_step={global_step}"
-                    f"{gate_context}")
+                if (max_nonfinite_embedding_skips <= 0
+                        or nonfinite_embedding_skips
+                        > max_nonfinite_embedding_skips):
+                    raise FloatingPointError(
+                        f"Non-finite embeddings at global_step={global_step}; "
+                        f"finite_ranks={finite_rank_count}/{world_size}, "
+                        f"skip_count={nonfinite_embedding_skips}/"
+                        f"{max_nonfinite_embedding_skips}{gate_context}")
+                if rank == 0:
+                    logging.warning(
+                        "Skipping synchronized training batch at "
+                        "global_step=%d because embeddings were finite on "
+                        "%d/%d ranks; skip_count=%d/%d%s",
+                        global_step, finite_rank_count, world_size,
+                        nonfinite_embedding_skips,
+                        max_nonfinite_embedding_skips, gate_context)
+                opt.zero_grad()
+                if batchnorm_snapshot is not None:
+                    restore_batchnorm_running_stats(batchnorm_snapshot)
+                # The auxiliary SimpleGate tensors retain the current
+                # autograd graph. A skipped batch has no backward pass to
+                # release it, so clear those references before the next
+                # forward or two full graphs can overlap and exhaust VRAM.
+                clear_gate_cache = getattr(
+                    backbone.module,
+                    "clear_simple_gate_cached_tensors",
+                    None,
+                )
+                if clear_gate_cache is not None:
+                    clear_gate_cache()
+                del backbone_output, local_embeddings
+                torch.cuda.empty_cache()
+                if not lr_scheduler_step_per_epoch:
+                    lr_scheduler.step()
+                set_simple_gate_instrumentation(backbone.module, False)
+                continue
+            del batchnorm_snapshot
             if cryptoface_patch_training:
                 local_labels = local_labels.squeeze().long()
                 logits = module_partial_fc(local_embeddings, local_labels)
@@ -944,6 +1564,7 @@ def main(args):
                 loss = loss + float(getattr(cfg, "patch_cnn_jigsaw_weight", 0.005)) * loss_jigsaw
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
+            task_loss = loss
             range_penalty = local_embeddings.new_zeros(())
             distillation_loss = local_embeddings.new_zeros(())
             simple_gate_range_penalty = local_embeddings.new_zeros(())
@@ -999,7 +1620,9 @@ def main(args):
                             clipped_params, grad_clip, error_if_nonfinite=False
                         )
                     if getattr(cfg, "gradient_clip_type", "norm") == "value" or torch.isfinite(total_norm):
-                        amp.step(opt)
+                        with temporary_optimizer_lr_scale(
+                                opt, effective_simple_gate_lr_scale):
+                            amp.step(opt)
                     else:
                         logging.warning(
                             "Skipping optimizer step at global_step=%d due to non-finite grad norm: %s",
@@ -1016,7 +1639,9 @@ def main(args):
                         torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
                     else:
                         torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
-                    opt.step()
+                    with temporary_optimizer_lr_scale(
+                            opt, effective_simple_gate_lr_scale):
+                        opt.step()
                     opt.zero_grad()
             if not lr_scheduler_step_per_epoch:
                 lr_scheduler.step()
@@ -1034,6 +1659,8 @@ def main(args):
                     set_simple_gate_instrumentation(backbone.module, False)
                 if wandb_logger:
                     wandb_logger.log({
+                        'Loss/Task Loss': task_loss.item(),
+                        'Loss/Total Loss': loss.item(),
                         'Loss/Step Loss': loss.item(),
                         'Loss/Train Loss': loss_am.avg,
                         'Loss/HerPN Range Penalty': range_penalty.item(),
@@ -1059,6 +1686,10 @@ def main(args):
                 if (summary_writer is not None and herpn_enabled and
                         global_step % cfg.frequent == 0):
                     range_summary = backbone.module.herpn_range_summary()
+                    summary_writer.add_scalar(
+                        'Loss/Task Loss', task_loss.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Loss/Total Loss', loss.item(), global_step)
                     summary_writer.add_scalar(
                         'Loss/HerPN Range Penalty', range_penalty.item(), global_step)
                     summary_writer.add_scalar(
@@ -1100,7 +1731,11 @@ def main(args):
                     )
                     
                 loss_am.update(loss.item(), 1)
-                callback_logging(global_step, loss_am, epoch, cfg.fp16, lr_scheduler.get_last_lr()[0], amp)
+                callback_logging(
+                    global_step, loss_am, epoch, cfg.fp16,
+                    lr_scheduler.get_last_lr()[0]
+                    * effective_simple_gate_lr_scale,
+                    amp)
 
                 if global_step % cfg.verbose == 0 and global_step > 0:
                     if rank == 0 and getattr(cfg, "save_validation_snapshots", False):
@@ -1134,7 +1769,11 @@ def main(args):
                 "state_dict_backbone": backbone.module.state_dict(),
                 "state_dict_softmax_fc": module_partial_fc.state_dict(),
                 "state_optimizer": opt.state_dict(),
-                "state_lr_scheduler": lr_scheduler.state_dict()
+                "state_lr_scheduler": lr_scheduler.state_dict(),
+                "completed_simple_gate_groups": completed_simple_gate_groups,
+                "repbn_gate_recalibrated": repbn_gate_recalibrated,
+                "simple_gate_grouping": str(getattr(
+                    cfg, "simple_gate_grouping", "stage_chunks")),
             }
             atomic_torch_save(
                 checkpoint,
@@ -1216,9 +1855,7 @@ def main(args):
 
     if getattr(cfg, "final_verification_after_prepbn", False):
         if rank == 0:
-            logging.info(
-                "Running final verification with fully converted and "
-                "recalibrated RepBatchNorm")
+            logging.info("Running final verification with fully converted normalization")
         callback_verification(global_step, backbone.module)
 
     if rank == 0:
