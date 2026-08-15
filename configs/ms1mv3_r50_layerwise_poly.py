@@ -6,11 +6,12 @@ Approximation target for activation i and trained PReLU channel slope a_ic:
     z = x / S_i
     student_ic(x) = S_i * q_ic(z)
 
-``S_i`` is measured on the current partially converted eval graph over the
-complete distributed MS1Mv3 loader.  A 10% margin is added to the global
-input absolute maximum.  Exactly one activation converts at a time in forward
-order; after it completes, BatchNorm statistics are refreshed before measuring
-the next interval.
+``S_i`` is fitted from sampled 99.9th percentiles on the current partially
+converted eval graph. Disjoint holdout batches and the complete-loader maximum
+are tail checks, not clamps: calibration stops if they expose an unsafe range.
+A 10% margin is added to the robust estimate. Exactly one activation converts
+at a time in forward order; after it completes, globally synchronized
+BatchNorm statistics are refreshed before measuring the next interval.
 
 The default degree is 2 (one sequential ciphertext square). Set
 ``layerwise_poly_degree = 3`` for a two-level cubic comparison.
@@ -22,6 +23,9 @@ from easydict import EasyDict as edict
 config = edict()
 config.margin_list = (1.0, 0.5, 0.0)
 config.network = "r50_layerwise_poly"
+# Set True on the GPU server to recover from checkpoint_gpu_<rank>.pt. Legacy
+# theta2 checkpoints are migrated and their incompatible coefficient momentum
+# is cleared automatically; group-09 inference snapshots must not be resumed.
 config.resume = False
 config.output = "work_dirs/ms1mv3_r50_layerwise_poly_d2"
 config.embedding_size = 512
@@ -45,10 +49,21 @@ config.layerwise_poly_initial_scale = 1.0
 config.layerwise_poly_distill_eps = 1e-4
 
 # Zero means one complete representative-data pass on every distributed shard.
-# The global maximum is reduced across all four workers, then enlarged by 10%.
+# Fit batches use a bounded sample per activation tensor so quantile estimation
+# remains practical. Every twentieth batch is disjoint holdout data. The true
+# global maximum is retained for diagnostics and tail rejection.
 config.layerwise_poly_range_calibration_batches = 0
 config.layerwise_poly_range_margin = 1.1
 config.layerwise_poly_min_scale = 1e-3
+config.layerwise_poly_range_quantile = 0.999
+config.layerwise_poly_quantile_samples = 65536
+config.layerwise_poly_range_holdout_fraction = 0.05
+
+# Stop before a rare quadratic tail poisons the next public interval. These
+# checks run only during plaintext calibration and add no encrypted operation.
+config.layerwise_poly_max_tail_ratio = 8.0
+config.layerwise_poly_max_scale_growth = 16.0
+config.layerwise_poly_max_input_scale = 1e5
 
 # The trainer's existing progressive-polynomial protocol supplies task,
 # teacher-distillation, range-tail, finite-gradient, checkpoint, and BN-refresh

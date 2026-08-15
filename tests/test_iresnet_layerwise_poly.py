@@ -75,7 +75,7 @@ def test_normalized_polynomial_always_matches_prelu_at_interval_endpoints(degree
     activation = _activation(
         degree=degree, slopes=tuple(slopes), scale=6.0, blend=1.0).eval()
     with torch.no_grad():
-        activation.theta2.copy_(torch.tensor([0.7, -1.2]).reshape(2, 1, 1))
+        activation.beta2.copy_(torch.tensor([0.7, -1.2]).reshape(2, 1, 1))
         if activation.theta3 is not None:
             activation.theta3.copy_(
                 torch.tensor([-0.8, 1.4]).reshape(2, 1, 1))
@@ -91,7 +91,7 @@ def test_folded_polynomial_is_exact(degree):
     torch.manual_seed(7)
     activation = _activation(degree=degree, scale=4.5, blend=1.0).eval()
     with torch.no_grad():
-        activation.theta2.uniform_(-1.0, 0.2)
+        activation.beta2.uniform_(-1.0, 0.2)
         if activation.theta3 is not None:
             activation.theta3.uniform_(-0.3, 0.3)
     folded = activation.folded().eval()
@@ -128,9 +128,47 @@ def test_relative_distillation_updates_coefficients_but_not_input():
     assert torch.isfinite(loss)
     assert float(loss) > 0.0
     loss.backward()
-    assert activation.theta2.grad is not None
-    assert torch.isfinite(activation.theta2.grad).all()
+    assert activation.beta2.grad is not None
+    assert torch.isfinite(activation.beta2.grad).all()
     assert inputs.grad is None or torch.count_nonzero(inputs.grad) == 0
+
+
+def test_beta2_distillation_gradient_stays_bounded_at_extreme_scale():
+    activation = _activation(
+        degree=2, slopes=(0.1, 0.4), scale=1.0e12, blend=0.0).train()
+    inputs = torch.tensor(
+        [[[[-2.0, -0.5], [0.5, 2.0]],
+          [[-3.0, -1.0], [1.0, 3.0]]]],
+        dtype=torch.float32,
+    )
+    activation(inputs)
+    loss = activation.distillation_loss()
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert torch.isfinite(activation.beta2.grad).all()
+    assert float(activation.beta2.grad.abs().max()) < 100.0
+
+
+def test_legacy_theta2_checkpoint_migrates_exactly_to_beta2():
+    source = _activation(
+        degree=2, slopes=(0.1, 0.4), scale=7.25, blend=0.6).eval()
+    with torch.no_grad():
+        source.beta2.copy_(torch.tensor([0.7, -1.2]).reshape(2, 1, 1))
+    inputs = torch.linspace(-7.0, 7.0, 28).reshape(2, 2, 7, 1)
+    expected = source(inputs)
+
+    legacy = copy.deepcopy(source.state_dict())
+    slope = legacy["prelu.weight"].reshape(-1, 1, 1)
+    even = 0.5 * (1.0 - slope)
+    legacy["theta2"] = legacy.pop("beta2") / legacy["input_scale"] - even
+
+    restored = LayerwisePolynomialActivation(2, degree=2, blend=0.0).eval()
+    restored.load_state_dict(legacy, strict=True)
+
+    assert restored._loaded_legacy_theta2
+    assert torch.allclose(restored.beta2, source.beta2, rtol=1e-5, atol=1e-5)
+    assert torch.allclose(restored(inputs), expected, rtol=1e-5, atol=1e-5)
 
 
 def test_batchnorm_refresh_keeps_measured_upstream_prefix_fixed():
@@ -173,6 +211,11 @@ def test_r50_config_converts_every_activation_singly_in_forward_order():
     assert scheduled_order == expected_order
     assert cfg.layerwise_poly_range_calibration_batches == 0
     assert cfg.layerwise_poly_range_margin >= 1.0
+    assert 0.0 < cfg.layerwise_poly_range_quantile < 1.0
+    assert 0.0 < cfg.layerwise_poly_range_holdout_fraction < 0.5
+    assert cfg.layerwise_poly_max_tail_ratio > 1.0
+    assert cfg.layerwise_poly_max_scale_growth > 1.0
+    assert cfg.layerwise_poly_max_input_scale > 0.0
     assert all(
         right >= left + cfg.herpn_transition_epochs
         for left, right in zip(

@@ -244,6 +244,14 @@ def merge_cumulative_batchnorm_stats(batchnorm_state):
                 or submodule.running_var is None
                 or submodule.num_batches_tracked is None):
             continue
+        if isinstance(submodule, torch.nn.SyncBatchNorm):
+            # SyncBatchNorm has already used global batch moments on every
+            # forward. Preserve its batch count and make rank zero's identical
+            # buffers authoritative instead of summing num_batches_tracked.
+            distributed.broadcast(submodule.running_mean, src=0)
+            distributed.broadcast(submodule.running_var, src=0)
+            distributed.broadcast(submodule.num_batches_tracked, src=0)
+            continue
         local_batches = submodule.num_batches_tracked.detach().clone()
         total_batches = local_batches.clone()
         distributed.all_reduce(total_batches, op=distributed.ReduceOp.SUM)
@@ -470,6 +478,18 @@ def validate_herpn_conversion_groups(module, conversion_groups):
             f"Invalid HerPN conversion groups; missing={missing}, unknown={unknown}")
 
 
+def completed_herpn_groups_from_model(module, conversion_groups):
+    """Count the leading groups already fully blended in a loaded checkpoint."""
+    activations = dict(module.named_modules())
+    completed = 0
+    for group in conversion_groups:
+        if all(float(activations[name].blend.item()) >= 1.0 for name in group):
+            completed += 1
+        else:
+            break
+    return completed
+
+
 def atomic_torch_save(value, path):
     """Write a checkpoint completely before replacing an existing file."""
     temporary_path = path + ".tmp"
@@ -493,7 +513,10 @@ def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step
     try:
         for batch in train_loader:
             img = batch[0]
-            embeddings = backbone(img)
+            # Bypass DDP so broadcast_buffers cannot overwrite independently
+            # accumulated ordinary-BN statistics before every forward.
+            # SyncBatchNorm collectives still run through the wrapped module.
+            embeddings = module(img)
             if not torch.isfinite(embeddings).all():
                 raise FloatingPointError(
                     "Non-finite embeddings during HerPN BatchNorm recalibration "
@@ -506,17 +529,69 @@ def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step
         module.end_batchnorm_recalibration(state)
     if completed == 0:
         raise RuntimeError("HerPN BatchNorm recalibration received no batches")
+    merge_cumulative_batchnorm_stats(state["batchnorm"])
+    return completed
+
+
+def _sampled_activation_quantile(values, quantile, max_samples):
+    absolute = values.detach().float().abs().reshape(-1)
+    if quantile >= 1.0:
+        return absolute.amax()
+    if absolute.numel() > max_samples:
+        stride = math.ceil(absolute.numel() / max_samples)
+        absolute = absolute[::stride][:max_samples]
+    rank = max(1, math.ceil(quantile * absolute.numel()))
+    return absolute.kthvalue(rank).values
+
+
+def _global_range_source(local_absmax, local_source):
+    """Return diagnostics for the rank and activation coordinate owning max."""
+    device = local_absmax.device
+    rank_value = (
+        distributed.get_rank()
+        if distributed.is_available() and distributed.is_initialized()
+        else 0
+    )
+    coordinates = list(local_source.get("coordinates", ()))[:4]
+    coordinates.extend([-1] * (4 - len(coordinates)))
+    row = torch.tensor(
+        [
+            float(local_absmax.item()),
+            rank_value,
+            int(local_source.get("batch", -1)),
+            *coordinates,
+        ],
+        device=device,
+        dtype=torch.float64,
+    )
+    rows = [row]
+    if (distributed.is_available() and distributed.is_initialized()
+            and distributed.get_world_size() > 1):
+        rows = [torch.empty_like(row) for _ in range(distributed.get_world_size())]
+        distributed.all_gather(rows, row)
+    winner = max(rows, key=lambda item: (float(item[0]), -int(item[1])))
+    return {
+        "rank": int(winner[1].item()),
+        "batch": int(winner[2].item()),
+        "sample": int(winner[3].item()),
+        "channel": int(winner[4].item()),
+        "height": int(winner[5].item()),
+        "width": int(winner[6].item()),
+    }
 
 
 @torch.no_grad()
 def calibrate_layerwise_poly_input_scale(
         backbone, train_loader, activation_name, num_batches, margin,
-        min_scale, global_step, dali=False):
-    """Measure one activation's global input absmax on the current eval graph.
+        min_scale, global_step, dali=False, *, quantile=1.0,
+        quantile_samples=65536, holdout_fraction=0.0,
+        max_tail_ratio=0.0, max_scale_growth=0.0, max_input_scale=0.0):
+    """Fit a robust interval and reject unsafe tails on a disjoint holdout.
 
     ``num_batches=0`` consumes the complete representative loader shard on
-    every rank.  The maximum is reduced across ranks before applying the
-    configured safety margin, so every worker stores the same public scale.
+    every rank. Calibration batches provide sampled per-batch quantiles;
+    disjoint holdout batches and the full observed maximum are used only to
+    reject an unsafe interval. No inference-time clamping is introduced.
     """
     if num_batches < 0:
         raise ValueError("layerwise_poly_range_calibration_batches must be >= 0")
@@ -526,6 +601,20 @@ def calibrate_layerwise_poly_input_scale(
         raise ValueError("layerwise_poly_range_margin must be at least 1")
     if min_scale <= 0.0:
         raise ValueError("layerwise_poly_min_scale must be positive")
+    quantile = float(quantile)
+    holdout_fraction = float(holdout_fraction)
+    max_tail_ratio = float(max_tail_ratio)
+    max_scale_growth = float(max_scale_growth)
+    max_input_scale = float(max_input_scale)
+    if not 0.0 < quantile <= 1.0:
+        raise ValueError("layerwise_poly_range_quantile must be in (0, 1]")
+    if quantile_samples <= 0:
+        raise ValueError("layerwise_poly_quantile_samples must be positive")
+    if not 0.0 <= holdout_fraction < 0.5:
+        raise ValueError(
+            "layerwise_poly_range_holdout_fraction must be in [0, 0.5)")
+    if min(max_tail_ratio, max_scale_growth, max_input_scale) < 0.0:
+        raise ValueError("Layerwise polynomial safety limits must be non-negative")
 
     module = backbone.module
     activations = dict(module.named_modules())
@@ -536,7 +625,18 @@ def calibrate_layerwise_poly_input_scale(
 
     device = next(module.parameters()).device
     local_absmax = torch.zeros((), device=device, dtype=torch.float32)
+    local_calibration_absmax = torch.zeros_like(local_absmax)
+    local_holdout_absmax = torch.zeros_like(local_absmax)
+    local_quantile = torch.zeros_like(local_absmax)
+    local_source = {"batch": -1, "coordinates": ()}
     completed = 0
+    calibration_batches = 0
+    holdout_batches = 0
+    current_is_holdout = False
+    holdout_stride = (
+        max(2, round(1.0 / holdout_fraction))
+        if holdout_fraction > 0.0 else 0
+    )
 
     def capture_input(_, inputs):
         if not inputs or not torch.is_tensor(inputs[0]):
@@ -547,7 +647,26 @@ def calibrate_layerwise_poly_input_scale(
             raise FloatingPointError(
                 "Non-finite activation input during layerwise interval "
                 f"calibration for {activation_name} at global_step={global_step}")
-        local_absmax.copy_(torch.maximum(local_absmax, values.abs().amax()))
+        absolute = values.abs()
+        batch_absmax, flat_index = absolute.reshape(-1).max(dim=0)
+        if batch_absmax > local_absmax:
+            local_absmax.copy_(batch_absmax)
+            remaining = int(flat_index.item())
+            coordinates = [0] * values.ndim
+            for dimension in range(values.ndim - 1, -1, -1):
+                coordinates[dimension] = remaining % values.shape[dimension]
+                remaining //= values.shape[dimension]
+            local_source["batch"] = completed
+            local_source["coordinates"] = tuple(coordinates)
+        if current_is_holdout:
+            local_holdout_absmax.copy_(torch.maximum(
+                local_holdout_absmax, batch_absmax))
+        else:
+            local_calibration_absmax.copy_(torch.maximum(
+                local_calibration_absmax, batch_absmax))
+            batch_quantile = _sampled_activation_quantile(
+                values, quantile, int(quantile_samples))
+            local_quantile.copy_(torch.maximum(local_quantile, batch_quantile))
 
     training_states = [
         (submodule, submodule.training) for submodule in module.modules()
@@ -556,12 +675,18 @@ def calibrate_layerwise_poly_input_scale(
     module.eval()
     try:
         for img, _ in train_loader:
+            current_is_holdout = (
+                holdout_stride > 0 and completed % holdout_stride == holdout_stride - 1)
             embeddings = module(img)
             if not torch.isfinite(embeddings).all():
                 raise FloatingPointError(
                     "Non-finite embeddings during layerwise interval "
                     f"calibration for {activation_name} at "
                     f"global_step={global_step}, batch={completed}")
+            if current_is_holdout:
+                holdout_batches += 1
+            else:
+                calibration_batches += 1
             completed += 1
             if num_batches > 0 and completed >= num_batches:
                 break
@@ -575,18 +700,75 @@ def calibrate_layerwise_poly_input_scale(
     if completed == 0:
         raise RuntimeError(
             f"Interval calibration for {activation_name} received no batches")
+    if calibration_batches == 0:
+        raise RuntimeError(
+            f"Interval calibration for {activation_name} has no fit batches")
+    source = _global_range_source(local_absmax, local_source)
+    global_values = torch.stack((
+        local_absmax,
+        local_calibration_absmax,
+        local_holdout_absmax,
+        local_quantile,
+    ))
     if distributed.is_available() and distributed.is_initialized():
-        distributed.all_reduce(local_absmax, op=distributed.ReduceOp.MAX)
-    observed_absmax = float(local_absmax.item())
-    calibrated_scale = max(observed_absmax * margin, min_scale)
+        distributed.all_reduce(global_values, op=distributed.ReduceOp.MAX)
+    observed_absmax = float(global_values[0].item())
+    calibration_absmax = float(global_values[1].item())
+    holdout_absmax = float(global_values[2].item())
+    robust_absmax = float(global_values[3].item())
+    calibrated_scale = max(robust_absmax * margin, min_scale)
+
+    activation_names = list(module.layerwise_poly_activation_names())
+    activation_index = activation_names.index(activation_name)
+    previous_scale = None
+    if activation_index > 0:
+        previous = activations[activation_names[activation_index - 1]]
+        if getattr(previous, "_scale_is_calibrated", False):
+            previous_scale = float(previous.input_scale.item())
+    scale_growth = (
+        calibrated_scale / previous_scale
+        if previous_scale is not None and previous_scale > 0.0 else None
+    )
+    tail_ratio = observed_absmax / max(calibrated_scale, min_scale)
+    violations = []
+    if max_tail_ratio > 0.0 and tail_ratio > max_tail_ratio:
+        violations.append(
+            f"tail_ratio={tail_ratio:.7g}>{max_tail_ratio:.7g}")
+    if (max_scale_growth > 0.0 and scale_growth is not None
+            and scale_growth > max_scale_growth):
+        violations.append(
+            f"scale_growth={scale_growth:.7g}>{max_scale_growth:.7g}")
+    if max_input_scale > 0.0 and calibrated_scale > max_input_scale:
+        violations.append(
+            f"scale={calibrated_scale:.7g}>{max_input_scale:.7g}")
+    if violations:
+        raise FloatingPointError(
+            "Unsafe layerwise polynomial interval for "
+            f"{activation_name} at global_step={global_step}: "
+            + ", ".join(violations)
+            + f"; robust_q={quantile:.7g}, robust_absmax={robust_absmax:.7g}, "
+              f"calibration_absmax={calibration_absmax:.7g}, "
+              f"holdout_absmax={holdout_absmax:.7g}, "
+              f"observed_absmax={observed_absmax:.7g}, source={source}"
+        )
     module.set_layerwise_poly_input_scale(
         activation_name, calibrated_scale)
     return {
         "activation": activation_name,
         "observed_absmax": observed_absmax,
+        "calibration_absmax": calibration_absmax,
+        "holdout_absmax": holdout_absmax,
+        "robust_absmax": robust_absmax,
+        "quantile": quantile,
         "input_scale": calibrated_scale,
+        "previous_scale": previous_scale,
+        "scale_growth": scale_growth,
+        "tail_ratio": tail_ratio,
+        "source": source,
         "margin": margin,
         "batches_per_rank": completed,
+        "calibration_batches_per_rank": calibration_batches,
+        "holdout_batches_per_rank": holdout_batches,
     }
 
 
@@ -943,6 +1125,7 @@ def main(args):
     global_step = 0
     resumed_completed_simple_gate_groups = None
     resumed_repbn_gate_recalibrated = None
+    resumed_completed_herpn_groups = None
     if cfg.resume:
         dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
         start_epoch = dict_checkpoint["epoch"]
@@ -951,6 +1134,8 @@ def main(args):
             "completed_simple_gate_groups")
         resumed_repbn_gate_recalibrated = dict_checkpoint.get(
             "repbn_gate_recalibrated")
+        resumed_completed_herpn_groups = dict_checkpoint.get(
+            "completed_herpn_groups")
         checkpoint_gate_grouping = dict_checkpoint.get(
             "simple_gate_grouping")
         configured_gate_grouping = str(getattr(
@@ -965,6 +1150,15 @@ def main(args):
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
         opt.load_state_dict(dict_checkpoint["state_optimizer"])
         lr_scheduler.load_state_dict(dict_checkpoint["state_lr_scheduler"])
+        legacy_parameters = getattr(
+            backbone.module, "legacy_layerwise_poly_parameters", lambda: [])()
+        for parameter in legacy_parameters:
+            opt.state.pop(parameter, None)
+        if legacy_parameters and rank == 0:
+            logging.warning(
+                "Migrated %d legacy layerwise theta2 parameters to stable "
+                "beta2 coordinates; discarded their incompatible SGD state",
+                len(legacy_parameters))
         del dict_checkpoint
 
     for key, value in cfg.items():
@@ -1021,6 +1215,18 @@ def main(args):
         cfg, "layerwise_poly_range_margin", 1.1))
     layerwise_poly_min_scale = float(getattr(
         cfg, "layerwise_poly_min_scale", 1e-3))
+    layerwise_poly_range_quantile = float(getattr(
+        cfg, "layerwise_poly_range_quantile", 1.0))
+    layerwise_poly_quantile_samples = int(getattr(
+        cfg, "layerwise_poly_quantile_samples", 65536))
+    layerwise_poly_range_holdout_fraction = float(getattr(
+        cfg, "layerwise_poly_range_holdout_fraction", 0.0))
+    layerwise_poly_max_tail_ratio = float(getattr(
+        cfg, "layerwise_poly_max_tail_ratio", 0.0))
+    layerwise_poly_max_scale_growth = float(getattr(
+        cfg, "layerwise_poly_max_scale_growth", 0.0))
+    layerwise_poly_max_input_scale = float(getattr(
+        cfg, "layerwise_poly_max_input_scale", 0.0))
     if herpn_group_schedule:
         validate_herpn_conversion_groups(
             backbone.module, herpn_conversion_groups)
@@ -1061,10 +1267,33 @@ def main(args):
             raise ValueError("layerwise_poly_range_margin must be at least 1")
         if layerwise_poly_min_scale <= 0.0:
             raise ValueError("layerwise_poly_min_scale must be positive")
-    completed_herpn_groups = sum(
-        float(start_epoch) >= float(start) + herpn_transition_epochs
-        for start in herpn_group_epochs
-    ) if herpn_group_schedule else 0
+        if not 0.0 < layerwise_poly_range_quantile <= 1.0:
+            raise ValueError(
+                "layerwise_poly_range_quantile must be in (0, 1]")
+        if layerwise_poly_quantile_samples <= 0:
+            raise ValueError(
+                "layerwise_poly_quantile_samples must be positive")
+        if not 0.0 <= layerwise_poly_range_holdout_fraction < 0.5:
+            raise ValueError(
+                "layerwise_poly_range_holdout_fraction must be in [0, 0.5)")
+        if min(
+                layerwise_poly_max_tail_ratio,
+                layerwise_poly_max_scale_growth,
+                layerwise_poly_max_input_scale) < 0.0:
+            raise ValueError(
+                "Layerwise polynomial safety limits must be non-negative")
+    if herpn_group_schedule and cfg.resume:
+        completed_herpn_groups = (
+            int(resumed_completed_herpn_groups)
+            if resumed_completed_herpn_groups is not None
+            else completed_herpn_groups_from_model(
+                backbone.module, herpn_conversion_groups)
+        )
+    else:
+        completed_herpn_groups = sum(
+            float(start_epoch) >= float(start) + herpn_transition_epochs
+            for start in herpn_group_epochs
+        ) if herpn_group_schedule else 0
     completed_herpn_stages = int(math.floor(float(
         backbone.module.herpn_progress.item()) + 1e-6)
     ) if herpn_enabled and not herpn_group_schedule else 0
@@ -1200,16 +1429,31 @@ def main(args):
             layerwise_poly_min_scale,
             global_step,
             dali=cfg.dali,
+            quantile=layerwise_poly_range_quantile,
+            quantile_samples=layerwise_poly_quantile_samples,
+            holdout_fraction=layerwise_poly_range_holdout_fraction,
+            max_tail_ratio=layerwise_poly_max_tail_ratio,
+            max_scale_growth=layerwise_poly_max_scale_growth,
+            max_input_scale=layerwise_poly_max_input_scale,
         )
         if rank == 0:
             logging.info(
-                "Layerwise polynomial interval calibrated: %s observed "
-                "absmax=%.7g margin=%.4g scale=%.7g batches/rank=%d",
+                "Layerwise polynomial interval calibrated: %s robust "
+                "q=%.6g absmax=%.7g observed_absmax=%.7g tail_ratio=%.5g "
+                "margin=%.4g scale=%.7g scale_growth=%s batches/rank=%d "
+                "holdout/rank=%d max_source=%s",
                 result["activation"],
+                result["quantile"],
+                result["robust_absmax"],
                 result["observed_absmax"],
+                result["tail_ratio"],
                 result["margin"],
                 result["input_scale"],
+                (f'{result["scale_growth"]:.5g}'
+                 if result["scale_growth"] is not None else "n/a"),
                 result["batches_per_rank"],
+                result["holdout_batches_per_rank"],
+                result["source"],
             )
             if summary_writer is not None:
                 summary_writer.add_scalar(
@@ -1218,12 +1462,18 @@ def main(args):
                     result["input_scale"],
                     global_step,
                 )
+                summary_writer.add_scalar(
+                    "LayerwisePoly/TailRatio/"
+                    + result["activation"].replace(".", "/"),
+                    result["tail_ratio"],
+                    global_step,
+                )
         return result
 
-    # Profile the stem before its local-fit warmup. On resume, the calibrated
-    # buffers in the checkpoint make this select only the first unfinished
-    # activation (or do nothing after complete conversion).
-    if layerwise_poly_enabled:
+    # Profile the stem before its local-fit warmup. Resume checkpoints already
+    # contain every interval that was valid at their completed group boundary;
+    # the next interval is measured only when its pending group completes.
+    if layerwise_poly_enabled and not cfg.resume:
         if isinstance(layerwise_poly_range_loader, DataLoader):
             layerwise_poly_range_loader.sampler.set_epoch(start_epoch)
         calibrate_next_layerwise_poly()
@@ -1770,6 +2020,7 @@ def main(args):
                 "state_dict_softmax_fc": module_partial_fc.state_dict(),
                 "state_optimizer": opt.state_dict(),
                 "state_lr_scheduler": lr_scheduler.state_dict(),
+                "completed_herpn_groups": completed_herpn_groups,
                 "completed_simple_gate_groups": completed_simple_gate_groups,
                 "repbn_gate_recalibrated": repbn_gate_recalibrated,
                 "simple_gate_grouping": str(getattr(

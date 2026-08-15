@@ -8,11 +8,12 @@ For the trained channel-wise PReLU slope ``a`` the normalized target is
 The student is evaluated as ``S * q(x / S)`` and is constrained to agree
 with PReLU at both interval endpoints.  A degree-2 student is
 
-    q(z) = linear*z + even + theta2*(1 - z^2),
+    student(x) = linear*x + even*x^2/S + beta2*(1 - z^2),
 
-and the optional degree-3 term ``theta3*z*(1-z^2)`` also vanishes at the
-endpoints.  Thus coefficient learning cannot break ``q(1)=1`` or
-``q(-1)=-a``.  Once fully converted, the activation folds to plaintext
+and the optional degree-3 term ``theta3*x*(1-z^2)`` also vanishes at the
+endpoints.  ``beta2`` is an original-domain offset, so its gradient does not
+grow with the interval scale.  Thus coefficient learning cannot break the
+endpoint constraints.  Once fully converted, the activation folds to plaintext
 channel-wise coefficients for ``c0 + c1*x + c2*x^2 (+ c3*x^3)``.
 
 The scale is a public plaintext constant.  Degree 2 needs one sequential
@@ -90,10 +91,10 @@ class LayerwisePolynomialActivation(nn.Module):
         self.prelu = nn.PReLU(channels)
         self.prelu.weight.requires_grad = False
 
-        # theta2=-even initializes q(z)=linear*z+even*z^2, which is exact at
-        # z=-1, 0, 1 and is a stable starting approximation to the PReLU kink.
-        even = torch.full((channels, 1, 1), 0.375)
-        self.theta2 = nn.Parameter(-even)
+        # beta2=0 initializes linear*x + even*x^2/S. This is exact at
+        # x=-S, 0, S. Unlike the old normalized theta2, d(student)/d(beta2)
+        # is bounded by one inside the calibrated interval for every S.
+        self.beta2 = nn.Parameter(torch.zeros(channels, 1, 1))
         if self.degree == 3:
             self.theta3 = nn.Parameter(torch.zeros(channels, 1, 1))
         else:
@@ -113,6 +114,7 @@ class LayerwisePolynomialActivation(nn.Module):
         self._last_distillation_loss = None
         self._last_input_absmax = None
         self._last_outside_fraction = None
+        self._loaded_legacy_theta2 = False
         self.set_blend(blend)
 
     def set_blend(self, blend):
@@ -159,13 +161,25 @@ class LayerwisePolynomialActivation(nn.Module):
         if old_key in state_dict and teacher_key not in state_dict:
             state_dict[teacher_key] = state_dict.pop(old_key)
 
-        has_student_state = prefix + "theta2" in state_dict
-        if not has_student_state:
+        beta2_key = prefix + "beta2"
+        old_theta2_key = prefix + "theta2"
+        has_beta2_state = beta2_key in state_dict
+        has_legacy_theta2_state = old_theta2_key in state_dict
+        has_student_state = has_beta2_state or has_legacy_theta2_state
+        if has_legacy_theta2_state and not has_beta2_state:
             slope = state_dict.get(teacher_key, self.prelu.weight.detach())
+            scale = state_dict.get(prefix + "input_scale", self.input_scale)
             even = 0.5 * (1.0 - slope.detach().float()).reshape(-1, 1, 1)
-            state_dict[prefix + "theta2"] = -even
+            state_dict[beta2_key] = (
+                scale.detach().float() *
+                (even + state_dict.pop(old_theta2_key).detach().float())
+            )
+            self._loaded_legacy_theta2 = True
+        if not has_student_state:
+            state_dict[beta2_key] = torch.zeros_like(self.beta2.detach())
             if self.degree == 3:
-                state_dict[prefix + "theta3"] = torch.zeros_like(even)
+                state_dict[prefix + "theta3"] = torch.zeros_like(
+                    self.beta2.detach())
             # A baseline checkpoint has not profiled an interval yet.
             state_dict[prefix + "scale_calibrated"] = torch.tensor(False)
 
@@ -187,23 +201,27 @@ class LayerwisePolynomialActivation(nn.Module):
             if x.dtype in (torch.float16, torch.bfloat16)
             else x.dtype
         )
-        compute_x = x.detach() if detach_input else x
-        compute_x = compute_x.to(dtype=compute_dtype)
+        compute_x = (x.detach() if detach_input else x).to(dtype=compute_dtype)
         scale = self.input_scale.to(device=x.device, dtype=compute_dtype)
         z = compute_x / scale
         slope = self.prelu.weight.detach().reshape(1, -1, 1, 1).to(
             device=x.device, dtype=compute_dtype)
         linear = 0.5 * (1.0 + slope)
         even = 0.5 * (1.0 - slope)
-        endpoint_basis = 1.0 - z.square()
-        theta2 = self.theta2.reshape(1, -1, 1, 1).to(
+        square = compute_x.square()
+        endpoint_basis = 1.0 - square / scale.square()
+        beta2 = self.beta2.reshape(1, -1, 1, 1).to(
             device=x.device, dtype=compute_dtype)
-        normalized = linear * z + even + theta2 * endpoint_basis
+        student = (
+            linear * compute_x
+            + even * square / scale
+            + beta2 * endpoint_basis
+        )
         if self.theta3 is not None:
             theta3 = self.theta3.reshape(1, -1, 1, 1).to(
                 device=x.device, dtype=compute_dtype)
-            normalized = normalized + theta3 * z * endpoint_basis
-        return (scale * normalized).to(dtype=x.dtype)
+            student = student + theta3 * compute_x * endpoint_basis
+        return student.to(dtype=x.dtype)
 
     def forward(self, x):
         calibrated = self._scale_is_calibrated
@@ -262,14 +280,14 @@ class LayerwisePolynomialActivation(nn.Module):
     @torch.no_grad()
     def folded_coefficients(self):
         scale = self.input_scale.to(
-            device=self.theta2.device, dtype=self.theta2.dtype)
+            device=self.beta2.device, dtype=self.beta2.dtype)
         slope = self.prelu.weight.detach().reshape(-1, 1, 1).to(
-            device=self.theta2.device, dtype=self.theta2.dtype)
+            device=self.beta2.device, dtype=self.beta2.dtype)
         linear = 0.5 * (1.0 + slope)
         even = 0.5 * (1.0 - slope)
-        coefficient0 = scale * (even + self.theta2)
+        coefficient0 = self.beta2
         coefficient1 = linear
-        coefficient2 = -self.theta2 / scale
+        coefficient2 = even / scale - self.beta2 / scale.square()
         coefficients = [coefficient0, coefficient1, coefficient2]
         if self.theta3 is not None:
             coefficients[1] = coefficient1 + self.theta3
@@ -352,6 +370,14 @@ class IResNet(_ProgressiveIResNet):
         return [
             name for name, activation in self.named_progressive_activations()
             if not activation._scale_is_calibrated
+        ]
+
+    def legacy_layerwise_poly_parameters(self):
+        """Parameters whose legacy theta2 optimizer state must be discarded."""
+        return [
+            activation.beta2
+            for activation in self.progressive_activations()
+            if activation._loaded_legacy_theta2
         ]
 
     @torch.no_grad()
