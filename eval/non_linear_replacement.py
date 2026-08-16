@@ -167,11 +167,121 @@ def replace_resnet_activations_with_poly(module, input_scale=1.0):
     replaced = 0
     for name, child in module.named_children():
         if isinstance(child, torch.nn.PReLU):
-            setattr(module, name, PReLU_Approx(child.weight, input_scale=input_scale))
+            replacement = PReLU_Approx(
+                child.weight, input_scale=input_scale).to(
+                    device=child.weight.device, dtype=child.weight.dtype)
+            setattr(module, name, replacement)
             replaced += 1
         else:
             replaced += replace_resnet_activations_with_poly(child, input_scale=input_scale)
     return replaced
+
+
+def _prelu_modules(module):
+    return [
+        (name, child)
+        for name, child in module.named_modules()
+        if name and isinstance(child, torch.nn.PReLU)
+    ]
+
+
+def _replace_named_child(module, qualified_name, child):
+    parent_name, _, local_name = qualified_name.rpartition('.')
+    parent = module.get_submodule(parent_name) if parent_name else module
+    setattr(parent, local_name, child)
+
+
+def replace_resnet_activations_with_poly_scales(module, input_scales):
+    """Replace every PReLU using a fixed public scale keyed by module name."""
+    prelus = _prelu_modules(module)
+    expected_names = {name for name, _ in prelus}
+    supplied_names = set(input_scales)
+    missing = sorted(expected_names - supplied_names)
+    unknown = sorted(supplied_names - expected_names)
+    if missing or unknown:
+        raise ValueError(
+            'Per-layer input scales do not match the model PReLUs; '
+            'missing={}, unknown={}'.format(missing, unknown))
+
+    for name, prelu in prelus:
+        scale = float(input_scales[name])
+        if not torch.isfinite(torch.tensor(scale)) or scale <= 0.0:
+            raise ValueError(
+                'Input scale for {} must be finite and positive'.format(name))
+        replacement = PReLU_Approx(prelu.weight, scale).to(
+            device=prelu.weight.device, dtype=prelu.weight.dtype)
+        _replace_named_child(module, name, replacement)
+    return len(prelus)
+
+
+def calibrate_resnet_activations_with_poly(
+        module, calibration_inputs, scale_margin=2.0, min_input_scale=1e-3):
+    """Sequentially measure and replace PReLUs with fixed-scale polynomials.
+
+    The input of each activation is measured on the *partially converted*
+    graph, after all earlier PReLUs have already been replaced.  Calibration
+    is plaintext-only; the resulting ``input_scale`` buffers are fixed public
+    constants during inference.
+    """
+    scale_margin = float(scale_margin)
+    min_input_scale = float(min_input_scale)
+    if scale_margin <= 1.0:
+        raise ValueError('scale_margin must be greater than 1')
+    if min_input_scale <= 0.0:
+        raise ValueError('min_input_scale must be positive')
+    if not torch.is_tensor(calibration_inputs) or calibration_inputs.numel() == 0:
+        raise ValueError('calibration_inputs must be a non-empty tensor')
+    if not torch.isfinite(calibration_inputs).all():
+        raise FloatingPointError('Calibration inputs contain non-finite values')
+
+    prelu_names = [name for name, _ in _prelu_modules(module)]
+    diagnostics = []
+    was_training = module.training
+    module.eval()
+    try:
+        with torch.no_grad():
+            for name in prelu_names:
+                prelu = module.get_submodule(name)
+                observed = {}
+
+                def capture_input(_child, inputs):
+                    values = inputs[0]
+                    if not torch.isfinite(values).all():
+                        raise FloatingPointError(
+                            'Non-finite calibration input reached {}'.format(name))
+                    observed['absmax'] = float(values.detach().abs().max().item())
+
+                handle = prelu.register_forward_pre_hook(capture_input)
+                try:
+                    partial_output = module(calibration_inputs)
+                finally:
+                    handle.remove()
+                if not torch.isfinite(partial_output).all():
+                    raise FloatingPointError(
+                        'Partially converted model became non-finite before '
+                        '{} could be calibrated'.format(name))
+                if 'absmax' not in observed:
+                    raise RuntimeError(
+                        'PReLU {} was not executed during calibration'.format(name))
+
+                input_absmax = observed['absmax']
+                input_scale = max(input_absmax * scale_margin, min_input_scale)
+                replacement = PReLU_Approx(prelu.weight, input_scale).to(
+                    device=prelu.weight.device, dtype=prelu.weight.dtype)
+                _replace_named_child(module, name, replacement)
+                diagnostics.append({
+                    'module': name,
+                    'input_absmax': input_absmax,
+                    'input_scale': input_scale,
+                })
+
+            final_output = module(calibration_inputs)
+            if not torch.isfinite(final_output).all():
+                raise FloatingPointError(
+                    'Fully converted model is non-finite on calibration inputs')
+    finally:
+        module.train(was_training)
+    return diagnostics
 
 
 def replace_poolformer_gelu_with_thor(module):

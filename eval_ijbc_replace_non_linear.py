@@ -2,6 +2,7 @@
 
 import os
 import pickle
+import json
 
 import matplotlib
 import pandas as pd
@@ -18,8 +19,10 @@ from skimage import transform as trans
 from backbones import get_model, iresnet50
 from eval.activation_debug import ActivationDebugRecorder, write_activation_comparison_plot
 from eval.non_linear_replacement import (
+    calibrate_resnet_activations_with_poly,
     replace_poolformer_gelu_with_thor,
     replace_resnet_activations_with_poly,
+    replace_resnet_activations_with_poly_scales,
 )
 from sklearn.metrics import roc_curve, auc
 
@@ -63,8 +66,19 @@ parser.add_argument('--activation-debug-batches', default=10, type=int,
                     help='number of forward_db batches to record when activation debugging is enabled; <=0 records all batches')
 parser.add_argument('--skip-activation-plot', action='store_true',
                     help='skip writing the PreciseReLU alpha=10 vs trained PReLU comparison plot')
-parser.add_argument('--relu-poly-input-scale', default=8.0, type=float,
-                    help='scale s for approximating ReLU(x) as s * poly(x / s); choose s to cover activation inputs')
+parser.add_argument('--relu-poly-input-scale', default=32.0, type=float,
+                    help='single scale used only when --relu-poly-scale-mode=fixed')
+parser.add_argument('--relu-poly-scale-mode', choices=('layerwise', 'fixed'),
+                    default='layerwise',
+                    help='calibrate a fixed scale for each PReLU (default), or use one fixed scale for all PReLUs')
+parser.add_argument('--relu-poly-scale-margin', default=2.0, type=float,
+                    help='layerwise scale is the observed input absmax times this margin; must be >1')
+parser.add_argument('--relu-poly-min-scale', default=1e-3, type=float,
+                    help='minimum scale used by layerwise calibration')
+parser.add_argument('--relu-poly-calibration-samples', default=256, type=int,
+                    help='number of augmented image tensors from the first batch used for layerwise calibration; <=0 uses the whole batch')
+parser.add_argument('--relu-poly-layer-scales', default='', type=str,
+                    help='optional JSON produced by a previous run; loads its fixed per-layer scales and skips calibration')
 parser.add_argument('--max-images', default=0, type=int,
                     help='debug limiter: only evaluate the first N images when >0')
 args = parser.parse_args()
@@ -93,23 +107,41 @@ class Embedding(object):
         else:
             resnet = get_model(network, dropout=0, fp16=False).cuda()
         resnet.load_state_dict(weight)
+        self.resnet = resnet
+        self.poly_calibration_pending = False
+        self.scale_output_path = os.path.join(
+            result_dir, args.job, 'cheby_relu_layer_scales.json')
         global activation_plot_written
         save_path = os.path.join(result_dir, args.job)
         #if network == "r50" and not args.skip_activation_plot and not activation_plot_written:
         #    write_activation_comparison_plot(resnet, save_path, input_scale=args.relu_poly_input_scale)
         #    activation_plot_written = True
         if network == "r50":
-            replaced = replace_resnet_activations_with_poly(
-                resnet, input_scale=args.relu_poly_input_scale)
-            print("Replaced {} PReLU activations with slope-preserving precise polynomial PReLU "
-                  "for {} inference (input_scale={}).".format(
-                      replaced, network, args.relu_poly_input_scale))
+            if args.relu_poly_layer_scales:
+                with open(args.relu_poly_layer_scales) as scale_file:
+                    scale_data = json.load(scale_file)
+                input_scales = scale_data.get('scales', scale_data)
+                replaced = replace_resnet_activations_with_poly_scales(
+                    resnet, input_scales)
+                print("Loaded fixed per-layer ChebyReLU scales from {} and "
+                      "replaced {} PReLUs.".format(
+                          args.relu_poly_layer_scales, replaced))
+            elif args.relu_poly_scale_mode == 'fixed':
+                replaced = replace_resnet_activations_with_poly(
+                    resnet, input_scale=args.relu_poly_input_scale)
+                print("Replaced {} PReLU activations with one fixed-scale "
+                      "polynomial PReLU for {} inference (input_scale={}).".format(
+                          replaced, network, args.relu_poly_input_scale))
+            else:
+                self.poly_calibration_pending = True
+                print("Deferring PReLU replacement until the first image batch "
+                      "can calibrate fixed per-layer ChebyReLU scales.")
         elif network.startswith("poolformer"):
             replaced = replace_poolformer_gelu_with_thor(resnet)
             print("Replaced {} GELU activations with THOR polynomial GELU for {} inference.".format(
                 replaced, network))
         self.activation_recorder = None
-        if args.activation_debug_dir:
+        if args.activation_debug_dir and not self.poly_calibration_pending:
             self.activation_recorder = ActivationDebugRecorder(
                 resnet, args.activation_debug_dir, args.activation_debug_batches)
         model = torch.nn.DataParallel(resnet)
@@ -158,11 +190,51 @@ class Embedding(object):
     def forward_db(self, batch_data):
         imgs = torch.Tensor(batch_data).cuda()
         imgs.div_(255).sub_(0.5).div_(0.5)
+        if self.poly_calibration_pending:
+            calibration_samples = args.relu_poly_calibration_samples
+            calibration_imgs = (
+                imgs if calibration_samples <= 0
+                else imgs[:min(calibration_samples, imgs.shape[0])]
+            )
+            diagnostics = calibrate_resnet_activations_with_poly(
+                self.resnet,
+                calibration_imgs,
+                scale_margin=args.relu_poly_scale_margin,
+                min_input_scale=args.relu_poly_min_scale,
+            )
+            self.poly_calibration_pending = False
+            os.makedirs(os.path.dirname(self.scale_output_path), exist_ok=True)
+            scale_data = {
+                'approximation_target': 'trained PReLU on each calibrated symmetric interval [-scale, scale]',
+                'scale_margin': args.relu_poly_scale_margin,
+                'calibration_samples': int(calibration_imgs.shape[0]),
+                'scales': {
+                    item['module']: item['input_scale'] for item in diagnostics
+                },
+                'observed_input_absmax': {
+                    item['module']: item['input_absmax'] for item in diagnostics
+                },
+            }
+            with open(self.scale_output_path, 'w') as scale_file:
+                json.dump(scale_data, scale_file, indent=2, sort_keys=True)
+            print("Calibrated {} fixed per-layer ChebyReLU scales and saved "
+                  "them to {}.".format(len(diagnostics), self.scale_output_path))
+            for item in diagnostics:
+                print("  {}: absmax={:.7g}, scale={:.7g}".format(
+                    item['module'], item['input_absmax'], item['input_scale']))
+            if args.activation_debug_dir:
+                self.activation_recorder = ActivationDebugRecorder(
+                    self.resnet, args.activation_debug_dir,
+                    args.activation_debug_batches)
         feat = self.model(imgs)
+        if not torch.isfinite(feat).all():
+            raise FloatingPointError(
+                'Non-finite embedding after ChebyReLU conversion. Increase '
+                '--relu-poly-scale-margin or calibrate with more samples.')
         if self.activation_recorder is not None:
             self.activation_recorder.write_model_output_stats(feat)
             self.activation_recorder.step()
-        feat = feat.reshape([self.batch_size, 2 * feat.shape[1]])
+        feat = feat.reshape([batch_data.shape[0] // 2, 2 * feat.shape[1]])
         return feat.cpu().numpy()
 
 
@@ -266,13 +338,12 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
                                          batch_size][:] = embedding.forward_db(batch_data)
             batch += 1
         score = float(name_lmk_score[-1])
-        if  np.all(np.isfinite(score)):
+        if not np.isfinite(score):
             raise ValueError('Non-finite faceness scores found for image {}: {}'.format(name_lmk_score[0], name_lmk_score[-1]))
         faceness_scores.append(name_lmk_score[-1])
 
     if rare_size > 0:
         batch_data = np.empty((2 * rare_size, 3, 112, 112))
-        embedding = Embedding(model_path, data_shape, rare_size)
         for img_index, each_line in enumerate(files[len(files) - rare_size:]):
             name_lmk_score = each_line.strip().split(' ')
             img_name = os.path.join(img_path, name_lmk_score[0])
@@ -288,6 +359,11 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
                 img_feats[len(files) -
                           rare_size:][:] = embedding.forward_db(batch_data)
                 batch += 1
+            score = float(name_lmk_score[-1])
+            if not np.isfinite(score):
+                raise ValueError(
+                    'Non-finite faceness scores found for image {}: {}'.format(
+                        name_lmk_score[0], name_lmk_score[-1]))
             faceness_scores.append(name_lmk_score[-1])
     faceness_scores = np.array(faceness_scores).astype(np.float32)
     img_feats = replace_nonfinite('img_feats', img_feats)
@@ -583,4 +659,3 @@ plt.title('ROC on IJB')
 plt.legend(loc="lower right")
 fig.savefig(os.path.join(save_path, '%s.pdf' % target.lower()))
 print(tpr_fpr_table)
-
