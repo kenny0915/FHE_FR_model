@@ -305,7 +305,8 @@ def recalibrate_prepbn_batchnorm(backbone, train_loader, num_epochs, start_epoch
 
 @torch.no_grad()
 def calibrate_affine_normalization(backbone, train_loader, num_batches,
-                                   ridge=1e-6, dali=False):
+                                   ridge=1e-6, dali=False,
+                                   group_index=None):
     """Fit fixed channel affine maps to the warm-start LayerNorm outputs."""
     if num_batches <= 0:
         raise ValueError("affine_calibration_batches must be positive")
@@ -316,11 +317,14 @@ def calibrate_affine_normalization(backbone, train_loader, num_batches,
             "Affine calibration requested for a backbone without calibration hooks")
 
     was_training = backbone.training
+    device = next(backbone.parameters()).device
     backbone.eval()
-    begin()
+    begin(group_index=group_index)
     completed = 0
     try:
         for img, _ in train_loader:
+            if img.device != device:
+                img = img.to(device=device, non_blocking=True)
             embeddings = backbone(img)
             if not torch.isfinite(embeddings).all():
                 raise FloatingPointError(
@@ -984,6 +988,21 @@ def main(args):
         cfg.seed,
         cfg.num_workers
     )
+    affine_calibration_loader = train_loader
+    if (cfg.network.startswith("poolformer_fully_gated_affine")
+            and not cfg.dali):
+        # DataLoaderX owns a background prefetch thread which cannot be safely
+        # abandoned after a short calibration pass.  Use a regular loader so
+        # each per-group iterator shuts its workers down when calibration ends.
+        affine_calibration_loader = DataLoader(
+            dataset=train_loader.dataset,
+            batch_size=cfg.batch_size,
+            sampler=train_loader.sampler,
+            num_workers=cfg.num_workers,
+            pin_memory=True,
+            drop_last=True,
+            worker_init_fn=train_loader.worker_init_fn,
+        )
     layerwise_poly_range_loader = train_loader
     if (cfg.network.endswith("_layerwise_poly") and not cfg.dali):
         # Training drops the final incomplete batch. Interval calibration must
@@ -1068,6 +1087,11 @@ def main(args):
                 cfg, "repbn_bn_momentum", 0.1)),
             repbn_eta_init=float(getattr(cfg, "repbn_eta_init", 0.0)),
         )
+    if cfg.network.startswith("poolformer_fully_gated_affine"):
+        model_kwargs.update(
+            affine_blocks_per_group=int(getattr(
+                cfg, "affine_blocks_per_group", 1)),
+        )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
     backbone_init = getattr(cfg, "backbone_init", "")
@@ -1091,7 +1115,7 @@ def main(args):
     if affine_calibration_batches > 0 and not cfg.resume:
         completed, diagnostics = calibrate_affine_normalization(
             backbone,
-            train_loader,
+            affine_calibration_loader,
             affine_calibration_batches,
             ridge=float(getattr(cfg, "affine_calibration_ridge", 1e-6)),
             dali=cfg.dali,
@@ -1313,6 +1337,8 @@ def main(args):
     global_step = 0
     resumed_completed_simple_gate_groups = None
     resumed_repbn_gate_recalibrated = None
+    resumed_affine_group_epochs = None
+    resumed_affine_group_names = None
     resumed_completed_herpn_groups = None
     resumed_herpn_conversion_groups = None
     if cfg.resume:
@@ -1323,6 +1349,10 @@ def main(args):
             "completed_simple_gate_groups")
         resumed_repbn_gate_recalibrated = dict_checkpoint.get(
             "repbn_gate_recalibrated")
+        resumed_affine_group_epochs = dict_checkpoint.get(
+            "affine_group_epochs")
+        resumed_affine_group_names = dict_checkpoint.get(
+            "affine_group_names")
         resumed_completed_herpn_groups = dict_checkpoint.get(
             "completed_herpn_groups")
         resumed_herpn_conversion_groups = dict_checkpoint.get(
@@ -1509,6 +1539,54 @@ def main(args):
     max_steps_per_epoch = int(getattr(cfg, "max_steps_per_epoch", 0))
     scheduled_steps_per_epoch = (
         max_steps_per_epoch if max_steps_per_epoch > 0 else steps_per_epoch)
+    affine_group_epochs = tuple(getattr(
+        cfg, "affine_group_epochs", ()))
+    affine_group_transition_epochs = float(getattr(
+        cfg, "affine_group_transition_epochs", 1.0))
+    affine_group_calibration_batches = int(getattr(
+        cfg, "affine_group_calibration_batches", 0))
+    affine_group_schedule = bool(
+        affine_group_epochs
+        and hasattr(backbone.module, "set_affine_group_blends"))
+    if affine_group_schedule:
+        affine_group_names = backbone.module.affine_group_names()
+        if len(affine_group_epochs) != len(affine_group_names):
+            raise ValueError(
+                "affine_group_epochs must contain one start for each affine "
+                f"group ({len(affine_group_names)}), got "
+                f"{len(affine_group_epochs)}")
+        if affine_group_calibration_batches <= 0:
+            raise ValueError(
+                "Grouped affine conversion requires positive "
+                "affine_group_calibration_batches")
+        if resumed_affine_group_epochs is not None:
+            checkpoint_epochs = tuple(resumed_affine_group_epochs)
+            if checkpoint_epochs != affine_group_epochs:
+                raise ValueError(
+                    "Resume checkpoint affine group epochs do not match the "
+                    f"config: checkpoint={checkpoint_epochs}, "
+                    f"config={affine_group_epochs}")
+        if resumed_affine_group_names is not None:
+            checkpoint_names = tuple(
+                tuple(group) for group in resumed_affine_group_names)
+            if checkpoint_names != affine_group_names:
+                raise ValueError(
+                    "Resume checkpoint affine groups do not match the model")
+        if prepbn_decay_steps > 0:
+            raise ValueError(
+                "Grouped affine conversion cannot also use the global "
+                "prepbn decay schedule; set prepbn_decay_steps=0")
+        final_affine_blends = simple_gate_blends_at_epoch(
+            cfg.num_epoch, affine_group_epochs,
+            affine_group_transition_epochs)
+        if (getattr(cfg, "affine_group_require_full_conversion", True)
+                and min(final_affine_blends, default=0.0) < 1.0):
+            raise ValueError(
+                "Affine group schedule does not finish before training ends")
+        backbone.module.set_affine_group_blends(
+            simple_gate_blends_at_epoch(
+                start_epoch, affine_group_epochs,
+                affine_group_transition_epochs))
     simple_gate_stats_interval = int(getattr(
         cfg, "simple_gate_stats_interval", 0))
     simple_gate_enabled = hasattr(
@@ -1704,6 +1782,47 @@ def main(args):
 
         if isinstance(train_loader, DataLoader):
             train_loader.sampler.set_epoch(epoch)
+        if affine_group_schedule:
+            epoch_affine_blends = simple_gate_blends_at_epoch(
+                epoch, affine_group_epochs,
+                affine_group_transition_epochs)
+            backbone.module.set_affine_group_blends(epoch_affine_blends)
+            starting_groups = [
+                index for index, start in enumerate(affine_group_epochs)
+                if abs(float(epoch) - float(start)) < 1e-9
+            ]
+            if len(starting_groups) > 1:
+                raise RuntimeError(
+                    "Only one affine group may start in an epoch because each "
+                    "group requires current-distribution calibration")
+            if starting_groups:
+                group_index = starting_groups[0]
+                completed, diagnostics = calibrate_affine_normalization(
+                    backbone.module,
+                    affine_calibration_loader,
+                    affine_group_calibration_batches,
+                    ridge=float(getattr(
+                        cfg, "affine_calibration_ridge", 1e-6)),
+                    dali=cfg.dali,
+                    group_index=group_index,
+                )
+                if rank == 0:
+                    worst = max(
+                        diagnostics,
+                        key=lambda item: item["relative_rmse_max"])
+                    logging.info(
+                        "Calibrated affine group %d/%d (%s) with %d batches "
+                        "per rank; worst=%s relative_rmse_max=%.6g "
+                        "scale_absmax=%.6g bias_absmax=%.6g",
+                        group_index + 1,
+                        len(affine_group_names),
+                        ", ".join(affine_group_names[group_index]),
+                        completed,
+                        worst["name"],
+                        worst["relative_rmse_max"],
+                        max(item["scale_absmax"] for item in diagnostics),
+                        max(item["bias_absmax"] for item in diagnostics),
+                    )
         if (simple_gate_schedule and not repbn_gate_recalibrated
                 and prepbn_transition_complete(global_step, prepbn_decay_steps)):
             # Freeze the normalization graph at pure RepBN and evaluate it
@@ -1941,7 +2060,18 @@ def main(args):
             if max_steps_per_epoch > 0 and step_in_epoch >= max_steps_per_epoch:
                 break
             global_step += 1
-            set_prepbn_progress(backbone.module, global_step, prepbn_decay_steps)
+            if affine_group_schedule:
+                fractional_epoch = epoch + step_in_epoch / max(
+                    scheduled_steps_per_epoch, 1)
+                backbone.module.set_affine_group_blends(
+                    simple_gate_blends_at_epoch(
+                        fractional_epoch,
+                        affine_group_epochs,
+                        affine_group_transition_epochs,
+                    ))
+            else:
+                set_prepbn_progress(
+                    backbone.module, global_step, prepbn_decay_steps)
             capture_simple_gate_stats = (
                 simple_gate_enabled
                 and simple_gate_stats_interval > 0
@@ -2276,6 +2406,19 @@ def main(args):
                         min(global_step / prepbn_decay_steps, 1.0),
                         global_step,
                     )
+                if (summary_writer is not None and affine_group_schedule
+                        and global_step % cfg.frequent == 0):
+                    current_affine_blends = simple_gate_blends_at_epoch(
+                        epoch + step_in_epoch / max(
+                            scheduled_steps_per_epoch, 1),
+                        affine_group_epochs,
+                        affine_group_transition_epochs,
+                    )
+                    summary_writer.add_scalar(
+                        "AffineNorm/ConvertedGroups",
+                        sum(current_affine_blends),
+                        global_step,
+                    )
                     
                 loss_am.update(loss.item(), 1)
                 callback_logging(
@@ -2324,6 +2467,9 @@ def main(args):
                 "repbn_gate_recalibrated": repbn_gate_recalibrated,
                 "simple_gate_grouping": str(getattr(
                     cfg, "simple_gate_grouping", "stage_chunks")),
+                "affine_group_epochs": affine_group_epochs,
+                "affine_group_names": (
+                    affine_group_names if affine_group_schedule else ()),
             }
             atomic_torch_save(
                 checkpoint,
@@ -2356,6 +2502,9 @@ def main(args):
     if simple_gate_schedule:
         set_simple_gate_blends(
             backbone.module, (1.0,) * len(simple_gate_group_epochs))
+    if affine_group_schedule:
+        backbone.module.set_affine_group_blends(
+            (1.0,) * len(affine_group_epochs))
 
     prepbn_bn_stat_epochs = int(getattr(cfg, "prepbn_bn_stat_epochs", 0))
     if prepbn_bn_stat_epochs > 0:

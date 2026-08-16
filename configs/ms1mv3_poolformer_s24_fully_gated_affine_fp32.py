@@ -1,12 +1,14 @@
-"""Fine-tune fully gated PoolFormer-S24 from LayerNorm to fixed affine maps.
+"""Groupwise fine-tune PoolFormer-S24 from LayerNorm to fixed affine maps.
 
-The accepted LayerNorm checkpoint is loaded exactly.  Before optimization,
-200 representative batches fit ``a_c*x_c+b_c`` to every one of the 49
-LayerNorm outputs by per-channel least squares.  The LayerNorm teacher then
-decays over eight epochs, followed by four epochs using only the fixed affine
-student.  At inference these affine maps contain only plaintext per-channel
-scales and biases and can be folded into adjacent linear operations where the
-graph layout permits.
+The all-at-once conversion is numerically unsafe for this quadratic backbone:
+small errors at all 49 sites compound through 24 sequential SimpleGates.  This
+recipe converts one block at a time in forward order.  Before each group
+starts, representative inputs refit only that group's affine maps against the
+current upstream graph.  Later LayerNorms remain active as stability barriers.
+
+Twenty-five groups transition for one epoch each, followed by two pure-affine
+fine-tuning epochs.  At inference the affine maps contain only plaintext
+per-channel scales and biases.
 
 The 24 SimpleGates are unchanged and remain exact degree-2 products.
 """
@@ -18,7 +20,7 @@ config = edict()
 config.margin_list = (1.0, 0.0, 0.4)
 config.network = "poolformer_fully_gated_affine_s24"
 config.resume = False
-config.output = "work_dirs/ms1mv3_poolformer_s24_fully_gated_affine_fp32"
+config.output = "work_dirs/ms1mv3_poolformer_s24_fully_gated_affine_grouped_fp32"
 config.embedding_size = 512
 config.sample_rate = 1.0
 
@@ -26,15 +28,22 @@ config.sample_rate = 1.0
 config.backbone_init = (
     "work_dirs/ms1mv3_poolformer_s24_fully_gated_fp32/model.pt")
 
-# Fit each affine student to its LayerNorm teacher before the transition.
-# With four GPUs and batch_size=128, 200 batches cover about 102k faces.
-config.affine_calibration_batches = 200
+# One block per group prevents an affine-driven residual shift from entering a
+# second affine SimpleGate before a still-exact downstream LayerNorm can bound
+# its branch. The 24 blocks plus final norm give 25 groups.
+# Each group is refit after all preceding groups have reached pure affine.
+config.affine_blocks_per_group = 1
+config.affine_group_epochs = tuple(range(25))
+config.affine_group_transition_epochs = 1.0
+config.affine_group_calibration_batches = 50
+config.affine_group_require_full_conversion = True
+config.affine_calibration_batches = 0
 config.affine_calibration_ridge = 1e-6
 
-# Generic progressive-normalization hooks drive LN weight from one to zero.
-config.prepbn_decay_epochs = 8
-config.prepbn_require_full_transition = True
-config.validate_after_prepbn_transition = True
+# Disable the old global schedule; group blends are updated independently.
+config.prepbn_decay_steps = 0
+config.prepbn_require_full_transition = False
+config.validate_after_prepbn_transition = False
 config.prepbn_bn_stat_epochs = 0
 config.final_verification_after_prepbn = True
 
@@ -46,12 +55,12 @@ config.check_finite_grads = True
 config.fail_on_nonfinite_val = True
 
 config.optimizer = "adamw"
-config.lr = 1e-4
+config.lr = 5e-5
 config.weight_decay = 0.001
 config.momentum = 0.9
 config.batch_size = 128
 config.warmup_epoch = 0
-config.num_epoch = 12
+config.num_epoch = 27
 
 # The head still contains BatchNorm, so preserve the established synchronized
 # training behavior.  The 49 converted backbone normalization sites do not.
