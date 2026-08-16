@@ -460,6 +460,43 @@ def herpn_group_blends_at_epoch(epoch_value, conversion_groups, group_epochs,
     return blends
 
 
+def layerwise_poly_group_phase_at_epoch(epoch_value, conversion_groups,
+                                         group_epochs, transition_epochs):
+    """Return ``(phase, group_index)`` for grouped polynomial training."""
+    groups = tuple(tuple(group) for group in conversion_groups)
+    starts = tuple(float(value) for value in group_epochs)
+    transition_epochs = float(transition_epochs)
+    if len(groups) != len(starts):
+        raise ValueError(
+            "herpn_conversion_groups and herpn_group_epochs must have equal length")
+    value = float(epoch_value)
+    for group_index, start in enumerate(starts):
+        if value < start:
+            return "local_fit", group_index
+        if value < start + transition_epochs:
+            return "blend", group_index
+    return "final_finetune", None
+
+
+def retain_only_layerwise_poly_group_gradients(module, activation_names):
+    """Freeze the backbone for local fit without changing the DDP graph."""
+    selected = getattr(module, "layerwise_poly_parameters", None)
+    if selected is None:
+        raise ValueError("Backbone does not expose layerwise polynomial parameters")
+    allowed = {id(parameter) for parameter in selected(activation_names)}
+    retained = 0
+    cleared = 0
+    for parameter in module.parameters():
+        if parameter.grad is None:
+            continue
+        if id(parameter) in allowed:
+            retained += 1
+        else:
+            parameter.grad = None
+            cleared += 1
+    return retained, cleared
+
+
 def validate_herpn_conversion_groups(module, conversion_groups):
     expected = {
         name for name, submodule in module.named_modules()
@@ -467,6 +504,8 @@ def validate_herpn_conversion_groups(module, conversion_groups):
             or getattr(
                 submodule, "is_progressive_polynomial_activation", False))
     }
+    if any(not group for group in conversion_groups):
+        raise ValueError("HerPN conversion groups must not be empty")
     scheduled = {name for group in conversion_groups for name in group}
     count = sum(len(group) for group in conversion_groups)
     if count != len(scheduled):
@@ -581,17 +620,17 @@ def _global_range_source(local_absmax, local_source):
 
 
 @torch.no_grad()
-def calibrate_layerwise_poly_input_scale(
-        backbone, train_loader, activation_name, num_batches, margin,
+def calibrate_layerwise_poly_input_scales(
+        backbone, train_loader, activation_names, num_batches, margin,
         min_scale, global_step, dali=False, *, quantile=1.0,
         quantile_samples=65536, holdout_fraction=0.0,
         max_tail_ratio=0.0, max_scale_growth=0.0, max_input_scale=0.0):
-    """Fit a robust interval and reject unsafe tails on a disjoint holdout.
+    """Fit separate intervals for one activation group in one loader pass.
 
-    ``num_batches=0`` consumes the complete representative loader shard on
-    every rank. Calibration batches provide sampled per-batch quantiles;
-    disjoint holdout batches and the full observed maximum are used only to
-    reject an unsafe interval. No inference-time clamping is introduced.
+    All requested activations are observed on the same current eval graph.
+    Scale updates are atomic: if any member violates a safety limit, no member
+    of the group is marked calibrated. ``num_batches=0`` consumes the complete
+    representative loader shard on every rank.
     """
     if num_batches < 0:
         raise ValueError("layerwise_poly_range_calibration_batches must be >= 0")
@@ -617,18 +656,41 @@ def calibrate_layerwise_poly_input_scale(
         raise ValueError("Layerwise polynomial safety limits must be non-negative")
 
     module = backbone.module
+    activation_names = tuple(activation_names)
+    if not activation_names:
+        raise ValueError("Layerwise polynomial calibration group is empty")
+    if len(set(activation_names)) != len(activation_names):
+        raise ValueError("Layerwise polynomial calibration names must be unique")
     activations = dict(module.named_modules())
-    activation = activations.get(activation_name)
-    if not getattr(activation, "is_layerwise_rescaled_polynomial", False):
+    model_order = list(module.layerwise_poly_activation_names())
+    try:
+        requested_indices = [model_order.index(name) for name in activation_names]
+    except ValueError as error:
         raise ValueError(
-            f"Unknown layerwise polynomial activation: {activation_name}")
+            f"Unknown layerwise polynomial activation in {activation_names}") from error
+    if requested_indices != sorted(requested_indices):
+        raise ValueError(
+            "Layerwise polynomial calibration group must follow model order")
+    for activation_name in activation_names:
+        activation = activations[activation_name]
+        if not getattr(activation, "is_layerwise_rescaled_polynomial", False):
+            raise ValueError(
+                f"Unknown layerwise polynomial activation: {activation_name}")
+        if getattr(activation, "_scale_is_calibrated", False):
+            raise RuntimeError(
+                f"Activation interval is already calibrated: {activation_name}")
 
     device = next(module.parameters()).device
-    local_absmax = torch.zeros((), device=device, dtype=torch.float32)
-    local_calibration_absmax = torch.zeros_like(local_absmax)
-    local_holdout_absmax = torch.zeros_like(local_absmax)
-    local_quantile = torch.zeros_like(local_absmax)
-    local_source = {"batch": -1, "coordinates": ()}
+    local = {}
+    for activation_name in activation_names:
+        absmax = torch.zeros((), device=device, dtype=torch.float32)
+        local[activation_name] = {
+            "absmax": absmax,
+            "calibration_absmax": torch.zeros_like(absmax),
+            "holdout_absmax": torch.zeros_like(absmax),
+            "quantile": torch.zeros_like(absmax),
+            "source": {"batch": -1, "coordinates": ()},
+        }
     completed = 0
     calibration_batches = 0
     holdout_batches = 0
@@ -638,40 +700,50 @@ def calibrate_layerwise_poly_input_scale(
         if holdout_fraction > 0.0 else 0
     )
 
-    def capture_input(_, inputs):
-        if not inputs or not torch.is_tensor(inputs[0]):
-            raise RuntimeError(
-                f"Activation {activation_name} received no tensor input")
-        values = inputs[0].detach().float()
-        if not torch.isfinite(values).all():
-            raise FloatingPointError(
-                "Non-finite activation input during layerwise interval "
-                f"calibration for {activation_name} at global_step={global_step}")
-        absolute = values.abs()
-        batch_absmax, flat_index = absolute.reshape(-1).max(dim=0)
-        if batch_absmax > local_absmax:
-            local_absmax.copy_(batch_absmax)
-            remaining = int(flat_index.item())
-            coordinates = [0] * values.ndim
-            for dimension in range(values.ndim - 1, -1, -1):
-                coordinates[dimension] = remaining % values.shape[dimension]
-                remaining //= values.shape[dimension]
-            local_source["batch"] = completed
-            local_source["coordinates"] = tuple(coordinates)
-        if current_is_holdout:
-            local_holdout_absmax.copy_(torch.maximum(
-                local_holdout_absmax, batch_absmax))
-        else:
-            local_calibration_absmax.copy_(torch.maximum(
-                local_calibration_absmax, batch_absmax))
-            batch_quantile = _sampled_activation_quantile(
-                values, quantile, int(quantile_samples))
-            local_quantile.copy_(torch.maximum(local_quantile, batch_quantile))
+    def make_capture_input(activation_name):
+        state = local[activation_name]
+
+        def capture_input(_, inputs):
+            if not inputs or not torch.is_tensor(inputs[0]):
+                raise RuntimeError(
+                    f"Activation {activation_name} received no tensor input")
+            values = inputs[0].detach().float()
+            if not torch.isfinite(values).all():
+                raise FloatingPointError(
+                    "Non-finite activation input during layerwise interval "
+                    f"calibration for {activation_name} at "
+                    f"global_step={global_step}")
+            absolute = values.abs()
+            batch_absmax, flat_index = absolute.reshape(-1).max(dim=0)
+            if batch_absmax > state["absmax"]:
+                state["absmax"].copy_(batch_absmax)
+                remaining = int(flat_index.item())
+                coordinates = [0] * values.ndim
+                for dimension in range(values.ndim - 1, -1, -1):
+                    coordinates[dimension] = remaining % values.shape[dimension]
+                    remaining //= values.shape[dimension]
+                state["source"]["batch"] = completed
+                state["source"]["coordinates"] = tuple(coordinates)
+            if current_is_holdout:
+                state["holdout_absmax"].copy_(torch.maximum(
+                    state["holdout_absmax"], batch_absmax))
+            else:
+                state["calibration_absmax"].copy_(torch.maximum(
+                    state["calibration_absmax"], batch_absmax))
+                batch_quantile = _sampled_activation_quantile(
+                    values, quantile, int(quantile_samples))
+                state["quantile"].copy_(torch.maximum(
+                    state["quantile"], batch_quantile))
+
+        return capture_input
 
     training_states = [
         (submodule, submodule.training) for submodule in module.modules()
     ]
-    handle = activation.register_forward_pre_hook(capture_input)
+    handles = [
+        activations[name].register_forward_pre_hook(make_capture_input(name))
+        for name in activation_names
+    ]
     module.eval()
     try:
         for img, _ in train_loader:
@@ -681,7 +753,7 @@ def calibrate_layerwise_poly_input_scale(
             if not torch.isfinite(embeddings).all():
                 raise FloatingPointError(
                     "Non-finite embeddings during layerwise interval "
-                    f"calibration for {activation_name} at "
+                    f"calibration for group {activation_names} at "
                     f"global_step={global_step}, batch={completed}")
             if current_is_holdout:
                 holdout_batches += 1
@@ -691,7 +763,8 @@ def calibrate_layerwise_poly_input_scale(
             if num_batches > 0 and completed >= num_batches:
                 break
     finally:
-        handle.remove()
+        for handle in handles:
+            handle.remove()
         for submodule, was_training in training_states:
             submodule.train(was_training)
         if dali:
@@ -699,77 +772,108 @@ def calibrate_layerwise_poly_input_scale(
 
     if completed == 0:
         raise RuntimeError(
-            f"Interval calibration for {activation_name} received no batches")
+            f"Interval calibration for {activation_names} received no batches")
     if calibration_batches == 0:
         raise RuntimeError(
-            f"Interval calibration for {activation_name} has no fit batches")
-    source = _global_range_source(local_absmax, local_source)
-    global_values = torch.stack((
-        local_absmax,
-        local_calibration_absmax,
-        local_holdout_absmax,
-        local_quantile,
-    ))
-    if distributed.is_available() and distributed.is_initialized():
-        distributed.all_reduce(global_values, op=distributed.ReduceOp.MAX)
-    observed_absmax = float(global_values[0].item())
-    calibration_absmax = float(global_values[1].item())
-    holdout_absmax = float(global_values[2].item())
-    robust_absmax = float(global_values[3].item())
-    calibrated_scale = max(robust_absmax * margin, min_scale)
+            f"Interval calibration for {activation_names} has no fit batches")
 
-    activation_names = list(module.layerwise_poly_activation_names())
-    activation_index = activation_names.index(activation_name)
-    previous_scale = None
-    if activation_index > 0:
-        previous = activations[activation_names[activation_index - 1]]
-        if getattr(previous, "_scale_is_calibrated", False):
-            previous_scale = float(previous.input_scale.item())
-    scale_growth = (
-        calibrated_scale / previous_scale
-        if previous_scale is not None and previous_scale > 0.0 else None
-    )
-    tail_ratio = observed_absmax / max(calibrated_scale, min_scale)
-    violations = []
-    if max_tail_ratio > 0.0 and tail_ratio > max_tail_ratio:
-        violations.append(
-            f"tail_ratio={tail_ratio:.7g}>{max_tail_ratio:.7g}")
-    if (max_scale_growth > 0.0 and scale_growth is not None
-            and scale_growth > max_scale_growth):
-        violations.append(
-            f"scale_growth={scale_growth:.7g}>{max_scale_growth:.7g}")
-    if max_input_scale > 0.0 and calibrated_scale > max_input_scale:
-        violations.append(
-            f"scale={calibrated_scale:.7g}>{max_input_scale:.7g}")
-    if violations:
-        raise FloatingPointError(
-            "Unsafe layerwise polynomial interval for "
-            f"{activation_name} at global_step={global_step}: "
-            + ", ".join(violations)
-            + f"; robust_q={quantile:.7g}, robust_absmax={robust_absmax:.7g}, "
-              f"calibration_absmax={calibration_absmax:.7g}, "
-              f"holdout_absmax={holdout_absmax:.7g}, "
-              f"observed_absmax={observed_absmax:.7g}, source={source}"
+    results = []
+    proposed_scales = {}
+    unsafe = []
+    for activation_name in activation_names:
+        state = local[activation_name]
+        source = _global_range_source(state["absmax"], state["source"])
+        global_values = torch.stack((
+            state["absmax"],
+            state["calibration_absmax"],
+            state["holdout_absmax"],
+            state["quantile"],
+        ))
+        if distributed.is_available() and distributed.is_initialized():
+            distributed.all_reduce(global_values, op=distributed.ReduceOp.MAX)
+        observed_absmax = float(global_values[0].item())
+        calibration_absmax = float(global_values[1].item())
+        holdout_absmax = float(global_values[2].item())
+        robust_absmax = float(global_values[3].item())
+        calibrated_scale = max(robust_absmax * margin, min_scale)
+
+        activation_index = model_order.index(activation_name)
+        previous_scale = None
+        if activation_index > 0:
+            previous_name = model_order[activation_index - 1]
+            if previous_name in proposed_scales:
+                previous_scale = proposed_scales[previous_name]
+            else:
+                previous = activations[previous_name]
+                if getattr(previous, "_scale_is_calibrated", False):
+                    previous_scale = float(previous.input_scale.item())
+        scale_growth = (
+            calibrated_scale / previous_scale
+            if previous_scale is not None and previous_scale > 0.0 else None
         )
-    module.set_layerwise_poly_input_scale(
-        activation_name, calibrated_scale)
-    return {
-        "activation": activation_name,
-        "observed_absmax": observed_absmax,
-        "calibration_absmax": calibration_absmax,
-        "holdout_absmax": holdout_absmax,
-        "robust_absmax": robust_absmax,
-        "quantile": quantile,
-        "input_scale": calibrated_scale,
-        "previous_scale": previous_scale,
-        "scale_growth": scale_growth,
-        "tail_ratio": tail_ratio,
-        "source": source,
-        "margin": margin,
-        "batches_per_rank": completed,
-        "calibration_batches_per_rank": calibration_batches,
-        "holdout_batches_per_rank": holdout_batches,
-    }
+        tail_ratio = observed_absmax / max(calibrated_scale, min_scale)
+        violations = []
+        if max_tail_ratio > 0.0 and tail_ratio > max_tail_ratio:
+            violations.append(
+                f"tail_ratio={tail_ratio:.7g}>{max_tail_ratio:.7g}")
+        if (max_scale_growth > 0.0 and scale_growth is not None
+                and scale_growth > max_scale_growth):
+            violations.append(
+                f"scale_growth={scale_growth:.7g}>{max_scale_growth:.7g}")
+        if max_input_scale > 0.0 and calibrated_scale > max_input_scale:
+            violations.append(
+                f"scale={calibrated_scale:.7g}>{max_input_scale:.7g}")
+        result = {
+            "activation": activation_name,
+            "observed_absmax": observed_absmax,
+            "calibration_absmax": calibration_absmax,
+            "holdout_absmax": holdout_absmax,
+            "robust_absmax": robust_absmax,
+            "quantile": quantile,
+            "input_scale": calibrated_scale,
+            "previous_scale": previous_scale,
+            "scale_growth": scale_growth,
+            "tail_ratio": tail_ratio,
+            "source": source,
+            "margin": margin,
+            "batches_per_rank": completed,
+            "calibration_batches_per_rank": calibration_batches,
+            "holdout_batches_per_rank": holdout_batches,
+        }
+        results.append(result)
+        proposed_scales[activation_name] = calibrated_scale
+        if violations:
+            unsafe.append((result, violations))
+
+    if unsafe:
+        details = []
+        for result, violations in unsafe:
+            details.append(
+                f'{result["activation"]}: ' + ", ".join(violations)
+                + f'; robust_q={quantile:.7g}, '
+                  f'robust_absmax={result["robust_absmax"]:.7g}, '
+                  f'calibration_absmax={result["calibration_absmax"]:.7g}, '
+                  f'holdout_absmax={result["holdout_absmax"]:.7g}, '
+                  f'observed_absmax={result["observed_absmax"]:.7g}, '
+                  f'source={result["source"]}')
+        raise FloatingPointError(
+            "Unsafe layerwise polynomial interval group at "
+            f"global_step={global_step}: " + " | ".join(details))
+
+    for result in results:
+        module.set_layerwise_poly_input_scale(
+            result["activation"], result["input_scale"])
+    return results
+
+
+@torch.no_grad()
+def calibrate_layerwise_poly_input_scale(
+        backbone, train_loader, activation_name, num_batches, margin,
+        min_scale, global_step, dali=False, **kwargs):
+    """Backward-compatible single-activation calibration wrapper."""
+    return calibrate_layerwise_poly_input_scales(
+        backbone, train_loader, (activation_name,), num_batches, margin,
+        min_scale, global_step, dali=dali, **kwargs)[0]
 
 
 @torch.no_grad()
@@ -1030,6 +1134,19 @@ def main(args):
         raise ValueError("patch_cnn_training='cryptoface' matches the CryptoFace single-GPU training loop; use one process.")
 
     margin_loss = build_margin_loss(cfg)
+    use_layerwise_staged_optimizer = bool(getattr(
+        cfg, "layerwise_poly_staged_training", False))
+    layerwise_parameter_getter = (
+        getattr(backbone.module, "layerwise_poly_parameters", None)
+        if use_layerwise_staged_optimizer else None
+    )
+    layerwise_poly_parameters = (
+        list(layerwise_parameter_getter())
+        if layerwise_parameter_getter is not None else []
+    )
+    layerwise_poly_parameter_ids = {
+        id(parameter) for parameter in layerwise_poly_parameters
+    }
 
     if cryptoface_patch_training:
         module_partial_fc = CryptoFaceArcFaceHead(
@@ -1041,8 +1158,24 @@ def main(args):
         criterion = nn.CrossEntropyLoss()
         opt = torch.optim.SGD(
             params=[
-                {"params": [module_partial_fc.kernel], "weight_decay": cfg.weight_decay},
-                {"params": backbone.parameters()},
+                {
+                    "params": [module_partial_fc.kernel],
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "classifier",
+                },
+                {
+                    "params": [
+                        parameter for parameter in backbone.parameters()
+                        if (parameter.requires_grad
+                            and id(parameter) not in layerwise_poly_parameter_ids)
+                    ],
+                    "scope": "backbone",
+                },
+                *([{
+                    "params": layerwise_poly_parameters,
+                    "weight_decay": 0.0,
+                    "scope": "layerwise_poly",
+                }] if layerwise_poly_parameters else []),
             ],
             lr=cfg.lr,
             momentum=cfg.momentum,
@@ -1056,12 +1189,34 @@ def main(args):
         if getattr(cfg, "selective_weight_decay", False):
             decay_params, no_decay_params = split_weight_decay_parameters(
                 backbone)
+            decay_params = [
+                parameter for parameter in decay_params
+                if id(parameter) not in layerwise_poly_parameter_ids
+            ]
+            no_decay_params = [
+                parameter for parameter in no_decay_params
+                if id(parameter) not in layerwise_poly_parameter_ids
+            ]
             parameter_groups = [
-                {"params": decay_params, "weight_decay": cfg.weight_decay},
-                {"params": no_decay_params, "weight_decay": 0.0},
+                {
+                    "params": decay_params,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "backbone",
+                },
+                {
+                    "params": no_decay_params,
+                    "weight_decay": 0.0,
+                    "scope": "backbone",
+                },
+                *([{
+                    "params": layerwise_poly_parameters,
+                    "weight_decay": 0.0,
+                    "scope": "layerwise_poly",
+                }] if layerwise_poly_parameters else []),
                 {
                     "params": module_partial_fc.parameters(),
                     "weight_decay": cfg.weight_decay,
+                    "scope": "classifier",
                 },
             ]
             logging.info(
@@ -1070,8 +1225,23 @@ def main(args):
                 len(decay_params), len(no_decay_params))
         else:
             parameter_groups = [
-                {"params": backbone.parameters()},
-                {"params": module_partial_fc.parameters()},
+                {
+                    "params": [
+                        parameter for parameter in backbone.parameters()
+                        if (parameter.requires_grad
+                            and id(parameter) not in layerwise_poly_parameter_ids)
+                    ],
+                    "scope": "backbone",
+                },
+                *([{
+                    "params": layerwise_poly_parameters,
+                    "weight_decay": 0.0,
+                    "scope": "layerwise_poly",
+                }] if layerwise_poly_parameters else []),
+                {
+                    "params": module_partial_fc.parameters(),
+                    "scope": "classifier",
+                },
             ]
         opt = torch.optim.SGD(
             params=parameter_groups,
@@ -1087,7 +1257,25 @@ def main(args):
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
         opt = torch.optim.AdamW(
-            params=[{"params": backbone.parameters()}, {"params": module_partial_fc.parameters()}],
+            params=[
+                {
+                    "params": [
+                        parameter for parameter in backbone.parameters()
+                        if (parameter.requires_grad
+                            and id(parameter) not in layerwise_poly_parameter_ids)
+                    ],
+                    "scope": "backbone",
+                },
+                *([{
+                    "params": layerwise_poly_parameters,
+                    "weight_decay": 0.0,
+                    "scope": "layerwise_poly",
+                }] if layerwise_poly_parameters else []),
+                {
+                    "params": module_partial_fc.parameters(),
+                    "scope": "classifier",
+                },
+            ],
             lr=cfg.lr, weight_decay=cfg.weight_decay)
     else:
         raise
@@ -1126,6 +1314,7 @@ def main(args):
     resumed_completed_simple_gate_groups = None
     resumed_repbn_gate_recalibrated = None
     resumed_completed_herpn_groups = None
+    resumed_herpn_conversion_groups = None
     if cfg.resume:
         dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
         start_epoch = dict_checkpoint["epoch"]
@@ -1136,6 +1325,8 @@ def main(args):
             "repbn_gate_recalibrated")
         resumed_completed_herpn_groups = dict_checkpoint.get(
             "completed_herpn_groups")
+        resumed_herpn_conversion_groups = dict_checkpoint.get(
+            "herpn_conversion_groups")
         checkpoint_gate_grouping = dict_checkpoint.get(
             "simple_gate_grouping")
         configured_gate_grouping = str(getattr(
@@ -1227,9 +1418,30 @@ def main(args):
         cfg, "layerwise_poly_max_scale_growth", 0.0))
     layerwise_poly_max_input_scale = float(getattr(
         cfg, "layerwise_poly_max_input_scale", 0.0))
+    layerwise_poly_staged_training = bool(getattr(
+        cfg, "layerwise_poly_staged_training", False))
+    layerwise_poly_freeze_backbone_during_local_fit = bool(getattr(
+        cfg, "layerwise_poly_freeze_backbone_during_local_fit", False))
+    layerwise_poly_blend_backbone_lr_scale = float(getattr(
+        cfg, "layerwise_poly_blend_backbone_lr_scale", 1.0))
+    layerwise_poly_final_backbone_lr_scale = float(getattr(
+        cfg, "layerwise_poly_final_backbone_lr_scale", 1.0))
+    if min(
+            layerwise_poly_blend_backbone_lr_scale,
+            layerwise_poly_final_backbone_lr_scale) <= 0.0:
+        raise ValueError(
+            "Layerwise polynomial backbone LR scales must be positive")
     if herpn_group_schedule:
         validate_herpn_conversion_groups(
             backbone.module, herpn_conversion_groups)
+        if resumed_herpn_conversion_groups is not None:
+            checkpoint_groups = tuple(
+                tuple(group) for group in resumed_herpn_conversion_groups)
+            if checkpoint_groups != herpn_conversion_groups:
+                raise ValueError(
+                    "Resume checkpoint HerPN conversion groups do not match "
+                    f"the config: checkpoint={checkpoint_groups}, "
+                    f"config={herpn_conversion_groups}")
         final_blends = herpn_group_blends_at_epoch(
             cfg.num_epoch, herpn_conversion_groups, herpn_group_epochs,
             herpn_transition_epochs)
@@ -1253,9 +1465,6 @@ def main(args):
             backbone.module.layerwise_poly_activation_names())
         configured_order = tuple(
             name for group in herpn_conversion_groups for name in group)
-        if any(len(group) != 1 for group in herpn_conversion_groups):
-            raise ValueError(
-                "Layerwise polynomial intervals require one activation per group")
         if configured_order != expected_order:
             raise ValueError(
                 "Layerwise polynomial activations must convert in forward order; "
@@ -1414,16 +1623,25 @@ def main(args):
     validate_after_prepbn_transition = bool(getattr(
         cfg, "validate_after_prepbn_transition", False))
 
-    def calibrate_next_layerwise_poly():
+    def calibrate_next_layerwise_poly_group():
         if not layerwise_poly_enabled:
-            return None
-        pending = backbone.module.uncalibrated_layerwise_poly_names()
+            return []
+        pending = set(backbone.module.uncalibrated_layerwise_poly_names())
         if not pending:
-            return None
-        result = calibrate_layerwise_poly_input_scale(
+            return []
+        target_names = None
+        for group in herpn_conversion_groups:
+            uncalibrated = tuple(name for name in group if name in pending)
+            if uncalibrated:
+                target_names = uncalibrated
+                break
+        if not target_names:
+            raise RuntimeError(
+                f"Unscheduled layerwise polynomial activations: {sorted(pending)}")
+        results = calibrate_layerwise_poly_input_scales(
             backbone,
             layerwise_poly_range_loader,
-            pending[0],
+            target_names,
             layerwise_poly_range_batches,
             layerwise_poly_range_margin,
             layerwise_poly_min_scale,
@@ -1438,45 +1656,49 @@ def main(args):
         )
         if rank == 0:
             logging.info(
-                "Layerwise polynomial interval calibrated: %s robust "
-                "q=%.6g absmax=%.7g observed_absmax=%.7g tail_ratio=%.5g "
-                "margin=%.4g scale=%.7g scale_growth=%s batches/rank=%d "
-                "holdout/rank=%d max_source=%s",
-                result["activation"],
-                result["quantile"],
-                result["robust_absmax"],
-                result["observed_absmax"],
-                result["tail_ratio"],
-                result["margin"],
-                result["input_scale"],
-                (f'{result["scale_growth"]:.5g}'
-                 if result["scale_growth"] is not None else "n/a"),
-                result["batches_per_rank"],
-                result["holdout_batches_per_rank"],
-                result["source"],
-            )
-            if summary_writer is not None:
-                summary_writer.add_scalar(
-                    "LayerwisePoly/InputScale/"
-                    + result["activation"].replace(".", "/"),
-                    result["input_scale"],
-                    global_step,
-                )
-                summary_writer.add_scalar(
-                    "LayerwisePoly/TailRatio/"
-                    + result["activation"].replace(".", "/"),
+                "Layerwise polynomial group calibrated in one pass: %s",
+                ", ".join(target_names))
+            for result in results:
+                logging.info(
+                    "Layerwise polynomial interval calibrated: %s robust "
+                    "q=%.6g absmax=%.7g observed_absmax=%.7g "
+                    "tail_ratio=%.5g margin=%.4g scale=%.7g "
+                    "scale_growth=%s batches/rank=%d holdout/rank=%d "
+                    "max_source=%s",
+                    result["activation"],
+                    result["quantile"],
+                    result["robust_absmax"],
+                    result["observed_absmax"],
                     result["tail_ratio"],
-                    global_step,
+                    result["margin"],
+                    result["input_scale"],
+                    (f'{result["scale_growth"]:.5g}'
+                     if result["scale_growth"] is not None else "n/a"),
+                    result["batches_per_rank"],
+                    result["holdout_batches_per_rank"],
+                    result["source"],
                 )
-        return result
+                if summary_writer is not None:
+                    summary_writer.add_scalar(
+                        "LayerwisePoly/InputScale/"
+                        + result["activation"].replace(".", "/"),
+                        result["input_scale"],
+                        global_step,
+                    )
+                    summary_writer.add_scalar(
+                        "LayerwisePoly/TailRatio/"
+                        + result["activation"].replace(".", "/"),
+                        result["tail_ratio"],
+                        global_step,
+                    )
+        return results
 
-    # Profile the stem before its local-fit warmup. Resume checkpoints already
-    # contain every interval that was valid at their completed group boundary;
-    # the next interval is measured only when its pending group completes.
+    # Profile the first complete group before local-fit warmup. Resume
+    # checkpoints contain intervals valid at their completed group boundary.
     if layerwise_poly_enabled and not cfg.resume:
         if isinstance(layerwise_poly_range_loader, DataLoader):
             layerwise_poly_range_loader.sampler.set_epoch(start_epoch)
-        calibrate_next_layerwise_poly()
+        calibrate_next_layerwise_poly_group()
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
@@ -1630,17 +1852,19 @@ def main(args):
                     backbone, train_loader, herpn_bn_recalibration_batches,
                     global_step,
                     after_activation_name=(
-                        completed_names[-1]
+                        # A multi-activation group changes every BN downstream
+                        # of its earliest member, not only BNs after the last.
+                        completed_names[0]
                         if layerwise_poly_enabled else None),
                 )
                 if cfg.dali:
                     train_loader.reset()
                 if layerwise_poly_enabled:
-                    # The next activation is measured only after the previous
-                    # one is fully polynomial and BN running statistics have
+                    # The next group is measured only after the previous group
+                    # is fully polynomial and downstream BN statistics have
                     # been refreshed. Its configured gap supplies local-fit
                     # training before the next blend starts.
-                    calibrate_next_layerwise_poly()
+                    calibrate_next_layerwise_poly_group()
                 if herpn_save_after_group and rank == 0:
                     group_checkpoint_path = os.path.join(
                         cfg.output,
@@ -1662,6 +1886,8 @@ def main(args):
                                 backbone.module.state_dict(),
                             "herpn_blends": serialized_blends,
                             "herpn_group": newly_completed,
+                            "herpn_conversion_groups":
+                                herpn_conversion_groups,
                             "epoch": epoch,
                             "global_step": global_step,
                             "bn_recalibration_batches_per_rank":
@@ -1694,6 +1920,23 @@ def main(args):
                 if cfg.dali:
                     train_loader.reset()
                 completed_herpn_stages = newly_completed
+        if layerwise_poly_staged_training and rank == 0:
+            phase, active_group_index = layerwise_poly_group_phase_at_epoch(
+                epoch, herpn_conversion_groups, herpn_group_epochs,
+                herpn_transition_epochs)
+            active_names = (
+                herpn_conversion_groups[active_group_index]
+                if active_group_index is not None else ())
+            logging.info(
+                "Layerwise polynomial phase=%s active_group=%s "
+                "backbone_lr_scale=%.4g",
+                phase,
+                ", ".join(active_names) if active_names else "all",
+                (layerwise_poly_blend_backbone_lr_scale
+                 if phase == "blend" else
+                 layerwise_poly_final_backbone_lr_scale
+                 if phase == "final_finetune" else 0.0),
+            )
         for step_in_epoch, (img, local_labels) in enumerate(train_loader):
             if max_steps_per_epoch > 0 and step_in_epoch >= max_steps_per_epoch:
                 break
@@ -1709,12 +1952,34 @@ def main(args):
                 capture_simple_gate_stats,
                 gradient_scale=float(amp.get_scale()) if cfg.fp16 else 1.0,
             )
+            layerwise_training_phase = None
+            active_layerwise_group = ()
+            effective_layerwise_backbone_lr_scale = 1.0
             if herpn_group_schedule:
                 fractional_epoch = epoch + step_in_epoch / max(
                     scheduled_steps_per_epoch, 1)
                 backbone.module.set_herpn_blends(herpn_group_blends_at_epoch(
                     fractional_epoch, herpn_conversion_groups,
                     herpn_group_epochs, herpn_transition_epochs))
+                if layerwise_poly_staged_training:
+                    phase, active_group_index = (
+                        layerwise_poly_group_phase_at_epoch(
+                            fractional_epoch,
+                            herpn_conversion_groups,
+                            herpn_group_epochs,
+                            herpn_transition_epochs,
+                        )
+                    )
+                    layerwise_training_phase = phase
+                    if active_group_index is not None:
+                        active_layerwise_group = herpn_conversion_groups[
+                            active_group_index]
+                    if phase == "blend":
+                        effective_layerwise_backbone_lr_scale = (
+                            layerwise_poly_blend_backbone_lr_scale)
+                    elif phase == "final_finetune":
+                        effective_layerwise_backbone_lr_scale = (
+                            layerwise_poly_final_backbone_lr_scale)
             elif herpn_enabled and herpn_stage_epochs:
                 fractional_epoch = epoch + step_in_epoch / max(
                     scheduled_steps_per_epoch, 1)
@@ -1827,7 +2092,17 @@ def main(args):
                     )
                 loss = loss + herpn_range_loss_weight * range_penalty
             if herpn_enabled and herpn_distill_loss_weight > 0:
-                distillation_loss = backbone.module.herpn_distillation_loss()
+                distillation_names = (
+                    active_layerwise_group
+                    if (layerwise_training_phase == "local_fit"
+                        and layerwise_poly_freeze_backbone_during_local_fit)
+                    else None
+                )
+                distillation_loss = (
+                    backbone.module.herpn_distillation_loss(distillation_names)
+                    if distillation_names is not None
+                    else backbone.module.herpn_distillation_loss()
+                )
                 if not torch.isfinite(distillation_loss):
                     raise FloatingPointError(
                         f"Non-finite HerPN distillation loss at global_step={global_step}"
@@ -1859,6 +2134,10 @@ def main(args):
                 amp.scale(loss).backward()
                 if global_step % cfg.gradient_acc == 0:
                     amp.unscale_(opt)
+                    if (layerwise_training_phase == "local_fit"
+                            and layerwise_poly_freeze_backbone_during_local_fit):
+                        retain_only_layerwise_poly_group_gradients(
+                            backbone.module, active_layerwise_group)
                     if getattr(cfg, "check_finite_grads", False):
                         check_finite_gradients(backbone, "backbone", global_step)
                         check_finite_gradients(module_partial_fc, "partial_fc", global_step)
@@ -1872,7 +2151,14 @@ def main(args):
                     if getattr(cfg, "gradient_clip_type", "norm") == "value" or torch.isfinite(total_norm):
                         with temporary_optimizer_lr_scale(
                                 opt, effective_simple_gate_lr_scale):
-                            amp.step(opt)
+                            if layerwise_poly_staged_training:
+                                with temporary_optimizer_lr_scale(
+                                        opt,
+                                        effective_layerwise_backbone_lr_scale,
+                                        scope="backbone"):
+                                    amp.step(opt)
+                            else:
+                                amp.step(opt)
                     else:
                         logging.warning(
                             "Skipping optimizer step at global_step=%d due to non-finite grad norm: %s",
@@ -1883,6 +2169,10 @@ def main(args):
             else:
                 loss.backward()
                 if global_step % cfg.gradient_acc == 0:
+                    if (layerwise_training_phase == "local_fit"
+                            and layerwise_poly_freeze_backbone_during_local_fit):
+                        retain_only_layerwise_poly_group_gradients(
+                            backbone.module, active_layerwise_group)
                     check_finite_gradients(backbone, "backbone", global_step)
                     check_finite_gradients(module_partial_fc, "partial_fc", global_step)
                     if getattr(cfg, "gradient_clip_type", "norm") == "value":
@@ -1891,7 +2181,14 @@ def main(args):
                         torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
                     with temporary_optimizer_lr_scale(
                             opt, effective_simple_gate_lr_scale):
-                        opt.step()
+                        if layerwise_poly_staged_training:
+                            with temporary_optimizer_lr_scale(
+                                    opt,
+                                    effective_layerwise_backbone_lr_scale,
+                                    scope="backbone"):
+                                opt.step()
+                        else:
+                            opt.step()
                     opt.zero_grad()
             if not lr_scheduler_step_per_epoch:
                 lr_scheduler.step()
@@ -1984,7 +2281,8 @@ def main(args):
                 callback_logging(
                     global_step, loss_am, epoch, cfg.fp16,
                     lr_scheduler.get_last_lr()[0]
-                    * effective_simple_gate_lr_scale,
+                    * effective_simple_gate_lr_scale
+                    * effective_layerwise_backbone_lr_scale,
                     amp)
 
                 if global_step % cfg.verbose == 0 and global_step > 0:
@@ -2021,6 +2319,7 @@ def main(args):
                 "state_optimizer": opt.state_dict(),
                 "state_lr_scheduler": lr_scheduler.state_dict(),
                 "completed_herpn_groups": completed_herpn_groups,
+                "herpn_conversion_groups": herpn_conversion_groups,
                 "completed_simple_gate_groups": completed_simple_gate_groups,
                 "repbn_gate_recalibrated": repbn_gate_recalibrated,
                 "simple_gate_grouping": str(getattr(

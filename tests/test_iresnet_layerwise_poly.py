@@ -189,6 +189,25 @@ def test_batchnorm_refresh_keeps_measured_upstream_prefix_fixed():
     assert model.training
 
 
+def test_polynomial_parameter_selection_is_group_local():
+    model = get_model(
+        "r18_layerwise_poly", dropout=0, fp16=False,
+        layerwise_poly_degree=3).train()
+    names = model.layerwise_poly_activation_names()
+    selected = model.layerwise_poly_parameters(names[:2])
+    expected = []
+    activations = dict(model.named_progressive_activations())
+    for name in names[:2]:
+        expected.extend([
+            activations[name].beta2,
+            activations[name].theta3,
+        ])
+
+    assert {id(parameter) for parameter in selected} == {
+        id(parameter) for parameter in expected}
+    assert len(selected) == 4
+
+
 def test_r50_config_converts_every_activation_singly_in_forward_order():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_layerwise_poly.py")
@@ -224,3 +243,35 @@ def test_r50_config_converts_every_activation_singly_in_forward_order():
     final_conversion_epoch = (
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
     assert cfg.num_epoch - final_conversion_epoch == 4
+
+
+def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4.py")
+    model = get_model(
+        cfg.network,
+        dropout=0,
+        fp16=False,
+        layerwise_poly_degree=cfg.layerwise_poly_degree,
+        layerwise_poly_initial_scale=cfg.layerwise_poly_initial_scale,
+        layerwise_poly_distill_eps=cfg.layerwise_poly_distill_eps,
+        layerwise_poly_progress=cfg.herpn_initial_progress,
+    )
+    expected_order = model.layerwise_poly_activation_names()
+    scheduled_order = [
+        name for group in cfg.herpn_conversion_groups for name in group
+    ]
+
+    assert scheduled_order == expected_order
+    assert [len(group) for group in cfg.herpn_conversion_groups] == [
+        4, 4, 4, 4, 4, 2, 3]
+    assert max(map(len, cfg.herpn_conversion_groups)) == 4
+    assert cfg.layerwise_poly_staged_training
+    assert cfg.layerwise_poly_freeze_backbone_during_local_fit
+    assert cfg.layerwise_poly_blend_backbone_lr_scale == pytest.approx(0.1)
+    assert cfg.layerwise_poly_final_backbone_lr_scale == pytest.approx(0.1)
+    assert cfg.layerwise_poly_range_margin == pytest.approx(1.5)
+    assert cfg.herpn_bn_recalibration_batches == 1000
+    final_conversion_epoch = (
+        cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
+    assert cfg.num_epoch - final_conversion_epoch == 7

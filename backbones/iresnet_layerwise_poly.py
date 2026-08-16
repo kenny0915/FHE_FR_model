@@ -372,6 +372,28 @@ class IResNet(_ProgressiveIResNet):
             if not activation._scale_is_calibrated
         ]
 
+    def layerwise_poly_parameters(self, activation_names=None):
+        """Return trainable polynomial coefficients for selected activations."""
+        selected = (
+            None if activation_names is None else set(activation_names)
+        )
+        parameters = []
+        for name, activation in self.named_progressive_activations():
+            if selected is not None and name not in selected:
+                continue
+            parameters.append(activation.beta2)
+            if activation.theta3 is not None:
+                parameters.append(activation.theta3)
+        if selected is not None:
+            known = {
+                name for name, _ in self.named_progressive_activations()
+            }
+            unknown = sorted(selected.difference(known))
+            if unknown:
+                raise ValueError(
+                    f"Unknown layerwise polynomial activations: {unknown}")
+        return parameters
+
     def legacy_layerwise_poly_parameters(self):
         """Parameters whose legacy theta2 optimizer state must be discarded."""
         return [
@@ -404,11 +426,15 @@ class IResNet(_ProgressiveIResNet):
             return next(self.parameters()).new_zeros(())
         return torch.stack(penalties).mean()
 
-    def herpn_distillation_loss(self):
+    def herpn_distillation_loss(self, activation_names=None):
+        selected = (
+            None if activation_names is None else set(activation_names)
+        )
         losses = [
             activation.distillation_loss()
-            for activation in self.progressive_activations()
-            if activation._scale_is_calibrated
+            for name, activation in self.named_progressive_activations()
+            if (selected is None or name in selected)
+            and activation._scale_is_calibrated
             and activation.distillation_loss() is not None
         ]
         if not losses:

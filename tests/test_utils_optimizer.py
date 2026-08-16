@@ -20,6 +20,26 @@ def test_temporary_optimizer_lr_scale_restores_scheduler_lr():
     assert optimizer.param_groups[0]["lr"] == pytest.approx(0.2)
 
 
+def test_temporary_optimizer_lr_scale_can_target_one_scope():
+    backbone = torch.nn.Parameter(torch.tensor(1.0))
+    polynomial = torch.nn.Parameter(torch.tensor(1.0))
+    classifier = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.SGD([
+        {"params": [backbone], "lr": 0.2, "scope": "backbone"},
+        {"params": [polynomial], "lr": 0.2, "scope": "layerwise_poly"},
+        {"params": [classifier], "lr": 0.2, "scope": "classifier"},
+    ])
+
+    with temporary_optimizer_lr_scale(
+            optimizer, 0.1, scope="backbone"):
+        assert optimizer.param_groups[0]["lr"] == pytest.approx(0.02)
+        assert optimizer.param_groups[1]["lr"] == pytest.approx(0.2)
+        assert optimizer.param_groups[2]["lr"] == pytest.approx(0.2)
+
+    assert [group["lr"] for group in optimizer.param_groups] == pytest.approx(
+        [0.2, 0.2, 0.2])
+
+
 def test_gradient_clip_scope_can_isolate_backbone_from_classifier():
     backbone = torch.nn.Linear(3, 2)
     classifier = torch.nn.Linear(2, 5)

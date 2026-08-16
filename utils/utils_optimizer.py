@@ -15,18 +15,30 @@ _NORMALIZATION_TYPES = (
 
 
 @contextmanager
-def temporary_optimizer_lr_scale(optimizer, scale):
-    """Apply an LR multiplier to one optimizer step without affecting its scheduler."""
+def temporary_optimizer_lr_scale(optimizer, scale, scope=None):
+    """Apply a temporary LR multiplier without changing scheduler state.
+
+    When ``scope`` is provided, only parameter groups whose ``scope`` metadata
+    matches are scaled.  This lets progressive-polynomial training slow the
+    backbone while keeping the current activation coefficients and classifier
+    at their scheduled learning rates.
+    """
     scale = float(scale)
     if scale <= 0.0:
         raise ValueError("optimizer LR scale must be positive")
-    original_lrs = [group["lr"] for group in optimizer.param_groups]
+    selected = [
+        group for group in optimizer.param_groups
+        if scope is None or group.get("scope") == scope
+    ]
+    if scope is not None and not selected:
+        raise ValueError(f"optimizer has no parameter groups for scope {scope!r}")
+    original_lrs = [group["lr"] for group in selected]
     try:
-        for group, original_lr in zip(optimizer.param_groups, original_lrs):
+        for group, original_lr in zip(selected, original_lrs):
             group["lr"] = original_lr * scale
         yield
     finally:
-        for group, original_lr in zip(optimizer.param_groups, original_lrs):
+        for group, original_lr in zip(selected, original_lrs):
             group["lr"] = original_lr
 
 
