@@ -68,6 +68,8 @@ parser.add_argument('--skip-activation-plot', action='store_true',
                     help='skip writing the PreciseReLU alpha=10 vs trained PReLU comparison plot')
 parser.add_argument('--relu-poly-input-scale', default=32.0, type=float,
                     help='single scale used only when --relu-poly-scale-mode=fixed')
+parser.add_argument('--relu-poly-degree', choices=(4, 8), default=4, type=int,
+                    help='ChebyReLU polynomial degree; degree 4 has multiplicative depth 2 and degree 8 has depth 3')
 parser.add_argument('--relu-poly-scale-mode', choices=('layerwise', 'fixed'),
                     default='layerwise',
                     help='calibrate a fixed scale for each PReLU (default), or use one fixed scale for all PReLUs')
@@ -92,6 +94,11 @@ use_norm_score = True  # if Ture, TestMode(N1)
 use_detector_score = True  # if Ture, TestMode(D1)
 use_flip_test = True  # if Ture, TestMode(F1)
 job = args.job
+output_job = (
+    '{}_cheby_degree{}'.format(job, args.relu_poly_degree)
+    if args.network in ('r50', 'iresnet50') and args.relu_poly_degree != 4
+    else job
+)
 batch_size = args.batch_size
 activation_plot_written = False
 
@@ -110,9 +117,11 @@ class Embedding(object):
         self.resnet = resnet
         self.poly_calibration_pending = False
         self.scale_output_path = os.path.join(
-            result_dir, args.job, 'cheby_relu_layer_scales.json')
+            result_dir, output_job,
+            'cheby_relu_degree{}_layer_scales.json'.format(
+                args.relu_poly_degree))
         global activation_plot_written
-        save_path = os.path.join(result_dir, args.job)
+        save_path = os.path.join(result_dir, output_job)
         #if network == "r50" and not args.skip_activation_plot and not activation_plot_written:
         #    write_activation_comparison_plot(resnet, save_path, input_scale=args.relu_poly_input_scale)
         #    activation_plot_written = True
@@ -120,22 +129,34 @@ class Embedding(object):
             if args.relu_poly_layer_scales:
                 with open(args.relu_poly_layer_scales) as scale_file:
                     scale_data = json.load(scale_file)
+                saved_degree = int(scale_data.get('polynomial_degree', 4))
+                if saved_degree != args.relu_poly_degree:
+                    raise ValueError(
+                        'Scale file polynomial degree {} does not match '
+                        '--relu-poly-degree {}'.format(
+                            saved_degree, args.relu_poly_degree))
                 input_scales = scale_data.get('scales', scale_data)
                 replaced = replace_resnet_activations_with_poly_scales(
-                    resnet, input_scales)
-                print("Loaded fixed per-layer ChebyReLU scales from {} and "
-                      "replaced {} PReLUs.".format(
+                    resnet, input_scales,
+                    polynomial_degree=args.relu_poly_degree)
+                print("Loaded fixed per-layer degree-{} ChebyReLU scales from "
+                      "{} and replaced {} PReLUs.".format(
+                          args.relu_poly_degree,
                           args.relu_poly_layer_scales, replaced))
             elif args.relu_poly_scale_mode == 'fixed':
                 replaced = replace_resnet_activations_with_poly(
-                    resnet, input_scale=args.relu_poly_input_scale)
+                    resnet, input_scale=args.relu_poly_input_scale,
+                    polynomial_degree=args.relu_poly_degree)
                 print("Replaced {} PReLU activations with one fixed-scale "
-                      "polynomial PReLU for {} inference (input_scale={}).".format(
-                          replaced, network, args.relu_poly_input_scale))
+                      "degree-{} polynomial PReLU for {} inference "
+                      "(input_scale={}).".format(
+                          replaced, args.relu_poly_degree, network,
+                          args.relu_poly_input_scale))
             else:
                 self.poly_calibration_pending = True
                 print("Deferring PReLU replacement until the first image batch "
-                      "can calibrate fixed per-layer ChebyReLU scales.")
+                      "can calibrate fixed per-layer degree-{} ChebyReLU "
+                      "scales.".format(args.relu_poly_degree))
         elif network.startswith("poolformer"):
             replaced = replace_poolformer_gelu_with_thor(resnet)
             print("Replaced {} GELU activations with THOR polynomial GELU for {} inference.".format(
@@ -201,11 +222,15 @@ class Embedding(object):
                 calibration_imgs,
                 scale_margin=args.relu_poly_scale_margin,
                 min_input_scale=args.relu_poly_min_scale,
+                polynomial_degree=args.relu_poly_degree,
             )
             self.poly_calibration_pending = False
             os.makedirs(os.path.dirname(self.scale_output_path), exist_ok=True)
             scale_data = {
                 'approximation_target': 'trained PReLU on each calibrated symmetric interval [-scale, scale]',
+                'polynomial_degree': args.relu_poly_degree,
+                'multiplicative_depth': (
+                    2 if args.relu_poly_degree == 4 else 3),
                 'scale_margin': args.relu_poly_scale_margin,
                 'calibration_samples': int(calibration_imgs.shape[0]),
                 'scales': {
@@ -217,8 +242,10 @@ class Embedding(object):
             }
             with open(self.scale_output_path, 'w') as scale_file:
                 json.dump(scale_data, scale_file, indent=2, sort_keys=True)
-            print("Calibrated {} fixed per-layer ChebyReLU scales and saved "
-                  "them to {}.".format(len(diagnostics), self.scale_output_path))
+            print("Calibrated {} fixed per-layer degree-{} ChebyReLU scales "
+                  "and saved them to {}.".format(
+                      len(diagnostics), args.relu_poly_degree,
+                      self.scale_output_path))
             for item in diagnostics:
                 print("  {}: absmax={:.7g}, scale={:.7g}".format(
                     item['module'], item['input_absmax'], item['input_scale']))
@@ -602,7 +629,7 @@ stop = timeit.default_timer()
 print('Time: %.2f s. ' % (stop - start))
 
 # In[ ]:
-save_path = os.path.join(result_dir, args.job)
+save_path = os.path.join(result_dir, output_job)
 # save_path = result_dir + '/%s_result' % target
 
 if not os.path.exists(save_path):

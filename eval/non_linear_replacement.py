@@ -60,17 +60,42 @@ class THORPolynomialGELU(torch.nn.Module):
 
 
 class ChebyReLU(torch.nn.Module):
-    _NORMALIZED_POWER_COEFFS = (1.05146222424, -0.581234022404)
+    """Zero-preserving polynomial approximation to ReLU on ``[-scale, scale]``.
 
-    def __init__(self, input_scale=8.0):
+    For ``z = x / scale``, both variants have the normalized form
+
+        q(z) = 0.5*z + c2*z^2 + c4*z^4 (+ c6*z^6 + c8*z^8).
+
+    Degree 8 uses a constrained minimax fit to ReLU on ``[-1, 1]``.  Its
+    normalized maximum absolute error is about 0.02798, versus about 0.06159
+    for the retained degree-4 approximation.  The degree-8 power schedule has
+    multiplicative depth 3: z2, z4, then z6/z8 in parallel.
+    """
+    _NORMALIZED_POWER_COEFFS = {
+        4: (1.05146222424, -0.581234022404),
+        8: (
+            2.3251649858241135,
+            -7.139218135121423,
+            9.889731805079089,
+            -4.603662092314254,
+        ),
+    }
+
+    def __init__(self, input_scale=8.0, degree=4):
         super().__init__()
         if input_scale <= 0:
             raise ValueError('input_scale must be positive')
+        if degree not in self._NORMALIZED_POWER_COEFFS:
+            raise ValueError('ChebyReLU degree must be 4 or 8')
+        self.degree = int(degree)
+        self.multiplicative_depth = 2 if self.degree == 4 else 3
         self.register_buffer(
             'input_scale', torch.tensor(float(input_scale), dtype=torch.float32))
         self.register_buffer(
             'normalized_power_coeffs',
-            torch.tensor(self._NORMALIZED_POWER_COEFFS, dtype=torch.float32))
+            torch.tensor(
+                self._NORMALIZED_POWER_COEFFS[self.degree],
+                dtype=torch.float32))
 
     def forward(self, x):
         compute_dtype = (
@@ -87,6 +112,14 @@ class ChebyReLU(torch.nn.Module):
         z_squared = z * z
         z_fourth = z_squared * z_squared
         even_part = coefficients[0] * z_squared + coefficients[1] * z_fourth
+        if self.degree == 8:
+            z_sixth = z_fourth * z_squared
+            z_eighth = z_fourth * z_fourth
+            even_part = (
+                even_part
+                + coefficients[2] * z_sixth
+                + coefficients[3] * z_eighth
+            )
         out = 0.5 * compute_x + scale * even_part
         return out.to(dtype=x.dtype)
 
@@ -143,11 +176,12 @@ class PreciseReLUAlpha10(torch.nn.Module):
 
 
 class PReLU_Approx(torch.nn.Module):
-    def __init__(self, slope, input_scale=1.0):
+    def __init__(self, slope, input_scale=1.0, polynomial_degree=4):
         super().__init__()
         slope = slope.detach().clone().float().reshape(-1)
         # self.relu = PreciseReLUAlpha10(input_scale=input_scale)
-        self.relu = ChebyReLU(input_scale=input_scale)
+        self.relu = ChebyReLU(
+            input_scale=input_scale, degree=polynomial_degree)
         self.register_buffer("slope", slope)
 
     def _slope_for(self, x):
@@ -163,17 +197,21 @@ class PReLU_Approx(torch.nn.Module):
         return slope * x + (1 - slope) * self.relu(x)
 
 
-def replace_resnet_activations_with_poly(module, input_scale=1.0):
+def replace_resnet_activations_with_poly(
+        module, input_scale=1.0, polynomial_degree=4):
     replaced = 0
     for name, child in module.named_children():
         if isinstance(child, torch.nn.PReLU):
             replacement = PReLU_Approx(
-                child.weight, input_scale=input_scale).to(
+                child.weight, input_scale=input_scale,
+                polynomial_degree=polynomial_degree).to(
                     device=child.weight.device, dtype=child.weight.dtype)
             setattr(module, name, replacement)
             replaced += 1
         else:
-            replaced += replace_resnet_activations_with_poly(child, input_scale=input_scale)
+            replaced += replace_resnet_activations_with_poly(
+                child, input_scale=input_scale,
+                polynomial_degree=polynomial_degree)
     return replaced
 
 
@@ -191,7 +229,8 @@ def _replace_named_child(module, qualified_name, child):
     setattr(parent, local_name, child)
 
 
-def replace_resnet_activations_with_poly_scales(module, input_scales):
+def replace_resnet_activations_with_poly_scales(
+        module, input_scales, polynomial_degree=4):
     """Replace every PReLU using a fixed public scale keyed by module name."""
     prelus = _prelu_modules(module)
     expected_names = {name for name, _ in prelus}
@@ -208,14 +247,16 @@ def replace_resnet_activations_with_poly_scales(module, input_scales):
         if not torch.isfinite(torch.tensor(scale)) or scale <= 0.0:
             raise ValueError(
                 'Input scale for {} must be finite and positive'.format(name))
-        replacement = PReLU_Approx(prelu.weight, scale).to(
+        replacement = PReLU_Approx(
+            prelu.weight, scale, polynomial_degree=polynomial_degree).to(
             device=prelu.weight.device, dtype=prelu.weight.dtype)
         _replace_named_child(module, name, replacement)
     return len(prelus)
 
 
 def calibrate_resnet_activations_with_poly(
-        module, calibration_inputs, scale_margin=2.0, min_input_scale=1e-3):
+        module, calibration_inputs, scale_margin=2.0, min_input_scale=1e-3,
+        polynomial_degree=4):
     """Sequentially measure and replace PReLUs with fixed-scale polynomials.
 
     The input of each activation is measured on the *partially converted*
@@ -229,6 +270,8 @@ def calibrate_resnet_activations_with_poly(
         raise ValueError('scale_margin must be greater than 1')
     if min_input_scale <= 0.0:
         raise ValueError('min_input_scale must be positive')
+    if polynomial_degree not in ChebyReLU._NORMALIZED_POWER_COEFFS:
+        raise ValueError('polynomial_degree must be 4 or 8')
     if not torch.is_tensor(calibration_inputs) or calibration_inputs.numel() == 0:
         raise ValueError('calibration_inputs must be a non-empty tensor')
     if not torch.isfinite(calibration_inputs).all():
@@ -266,7 +309,9 @@ def calibrate_resnet_activations_with_poly(
 
                 input_absmax = observed['absmax']
                 input_scale = max(input_absmax * scale_margin, min_input_scale)
-                replacement = PReLU_Approx(prelu.weight, input_scale).to(
+                replacement = PReLU_Approx(
+                    prelu.weight, input_scale,
+                    polynomial_degree=polynomial_degree).to(
                     device=prelu.weight.device, dtype=prelu.weight.dtype)
                 _replace_named_child(module, name, replacement)
                 diagnostics.append({

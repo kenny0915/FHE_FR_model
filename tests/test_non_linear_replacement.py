@@ -2,6 +2,7 @@ import unittest
 import torch
 
 from eval.non_linear_replacement import (
+    ChebyReLU,
     PReLU_Approx,
     calibrate_resnet_activations_with_poly,
     replace_resnet_activations_with_poly,
@@ -23,12 +24,24 @@ class SmallPReLUModel(torch.nn.Module):
 
 
 class NonLinearReplacementTest(unittest.TestCase):
+    def test_degree8_is_more_precise_on_the_normalized_interval(self):
+        inputs = torch.linspace(-1.0, 1.0, 20001, dtype=torch.float64)
+        target = torch.relu(inputs)
+        degree4 = ChebyReLU(input_scale=1.0, degree=4)(inputs)
+        degree8 = ChebyReLU(input_scale=1.0, degree=8)(inputs)
+
+        degree4_error = float((degree4 - target).abs().max())
+        degree8_error = float((degree8 - target).abs().max())
+        self.assertLess(degree8_error, 0.0281)
+        self.assertLess(degree8_error, degree4_error / 2.0)
+        self.assertEqual(ChebyReLU(1.0, degree=8).multiplicative_depth, 3)
+
     def test_layerwise_calibration_uses_partially_converted_input_ranges(self):
         model = SmallPReLUModel().eval()
         inputs = torch.tensor([[2.0, -1.0], [-0.5, 1.5]])
 
         diagnostics = calibrate_resnet_activations_with_poly(
-            model, inputs, scale_margin=2.0)
+            model, inputs, scale_margin=2.0, polynomial_degree=8)
 
         self.assertEqual(
             [item['module'] for item in diagnostics], ['first', 'second'])
@@ -37,6 +50,10 @@ class NonLinearReplacementTest(unittest.TestCase):
             diagnostics[1]['input_absmax'], diagnostics[0]['input_absmax'])
         self.assertTrue(all(
             isinstance(module, PReLU_Approx)
+            for module in (model.first, model.second)
+        ))
+        self.assertTrue(all(
+            module.relu.degree == 8
             for module in (model.first, model.second)
         ))
         self.assertTrue(torch.isfinite(model(inputs)).all())
