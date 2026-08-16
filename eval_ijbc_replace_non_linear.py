@@ -68,8 +68,9 @@ parser.add_argument('--skip-activation-plot', action='store_true',
                     help='skip writing the PreciseReLU alpha=10 vs trained PReLU comparison plot')
 parser.add_argument('--relu-poly-input-scale', default=32.0, type=float,
                     help='single scale used only when --relu-poly-scale-mode=fixed')
-parser.add_argument('--relu-poly-degree', choices=(4, 8), default=4, type=int,
-                    help='ChebyReLU polynomial degree; degree 4 has multiplicative depth 2 and degree 8 has depth 3')
+parser.add_argument('--relu-poly-degree', choices=(4, 8, 16), default=4,
+                    type=int,
+                    help='ChebyReLU polynomial degree; degrees 4, 8, and 16 have multiplicative depths 2, 3, and 4')
 parser.add_argument('--relu-poly-scale-mode', choices=('layerwise', 'fixed'),
                     default='layerwise',
                     help='calibrate a fixed scale for each PReLU (default), or use one fixed scale for all PReLUs')
@@ -79,6 +80,8 @@ parser.add_argument('--relu-poly-min-scale', default=1e-3, type=float,
                     help='minimum scale used by layerwise calibration')
 parser.add_argument('--relu-poly-calibration-samples', default=256, type=int,
                     help='number of augmented image tensors from the first batch used for layerwise calibration; <=0 uses the whole batch')
+parser.add_argument('--relu-poly-forward-chunk-size', default=0, type=int,
+                    help='internal inference chunk size; <=0 uses 128 tensors for degree 16 and the full batch otherwise')
 parser.add_argument('--relu-poly-layer-scales', default='', type=str,
                     help='optional JSON produced by a previous run; loads its fixed per-layer scales and skips calibration')
 parser.add_argument('--max-images', default=0, type=int,
@@ -229,8 +232,8 @@ class Embedding(object):
             scale_data = {
                 'approximation_target': 'trained PReLU on each calibrated symmetric interval [-scale, scale]',
                 'polynomial_degree': args.relu_poly_degree,
-                'multiplicative_depth': (
-                    2 if args.relu_poly_degree == 4 else 3),
+                'multiplicative_depth': {4: 2, 8: 3, 16: 4}[
+                    args.relu_poly_degree],
                 'scale_margin': args.relu_poly_scale_margin,
                 'calibration_samples': int(calibration_imgs.shape[0]),
                 'scales': {
@@ -253,7 +256,17 @@ class Embedding(object):
                 self.activation_recorder = ActivationDebugRecorder(
                     self.resnet, args.activation_debug_dir,
                     args.activation_debug_batches)
-        feat = self.model(imgs)
+        forward_chunk_size = args.relu_poly_forward_chunk_size
+        if forward_chunk_size <= 0:
+            forward_chunk_size = (
+                128 if args.relu_poly_degree == 16 else imgs.shape[0])
+        if forward_chunk_size < imgs.shape[0]:
+            feat = torch.cat([
+                self.model(imgs[start:start + forward_chunk_size])
+                for start in range(0, imgs.shape[0], forward_chunk_size)
+            ], dim=0)
+        else:
+            feat = self.model(imgs)
         if not torch.isfinite(feat).all():
             raise FloatingPointError(
                 'Non-finite embedding after ChebyReLU conversion. Increase '

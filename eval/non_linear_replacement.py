@@ -64,12 +64,13 @@ class ChebyReLU(torch.nn.Module):
 
     For ``z = x / scale``, both variants have the normalized form
 
-        q(z) = 0.5*z + c2*z^2 + c4*z^4 (+ c6*z^6 + c8*z^8).
+        q(z) = 0.5*z + sum(c_2k * z^(2k)), 1 <= k <= degree/2.
 
-    Degree 8 uses a constrained minimax fit to ReLU on ``[-1, 1]``.  Its
-    normalized maximum absolute error is about 0.02798, versus about 0.06159
-    for the retained degree-4 approximation.  The degree-8 power schedule has
-    multiplicative depth 3: z2, z4, then z6/z8 in parallel.
+    Degrees 8 and 16 use constrained minimax fits to ReLU on ``[-1, 1]``.
+    Their normalized maximum absolute errors are about 0.02798 and 0.01406,
+    respectively, versus about 0.06159 for the retained degree-4
+    approximation.  Balanced power schedules keep multiplicative depth at 2,
+    3, and 4 for degrees 4, 8, and 16.
     """
     _NORMALIZED_POWER_COEFFS = {
         4: (1.05146222424, -0.581234022404),
@@ -79,16 +80,27 @@ class ChebyReLU(torch.nn.Module):
             9.889731805079089,
             -4.603662092314254,
         ),
+        16: (
+            4.637380568115935,
+            -59.60499617236257,
+            412.04080125849953,
+            -1505.0765135944926,
+            3072.4113964565195,
+            -3524.8808527426254,
+            2123.263135406183,
+            -522.3044135526843,
+        ),
     }
+    _MULTIPLICATIVE_DEPTHS = {4: 2, 8: 3, 16: 4}
 
     def __init__(self, input_scale=8.0, degree=4):
         super().__init__()
         if input_scale <= 0:
             raise ValueError('input_scale must be positive')
         if degree not in self._NORMALIZED_POWER_COEFFS:
-            raise ValueError('ChebyReLU degree must be 4 or 8')
+            raise ValueError('ChebyReLU degree must be 4, 8, or 16')
         self.degree = int(degree)
-        self.multiplicative_depth = 2 if self.degree == 4 else 3
+        self.multiplicative_depth = self._MULTIPLICATIVE_DEPTHS[self.degree]
         self.register_buffer(
             'input_scale', torch.tensor(float(input_scale), dtype=torch.float32))
         self.register_buffer(
@@ -112,13 +124,25 @@ class ChebyReLU(torch.nn.Module):
         z_squared = z * z
         z_fourth = z_squared * z_squared
         even_part = coefficients[0] * z_squared + coefficients[1] * z_fourth
-        if self.degree == 8:
+        if self.degree >= 8:
             z_sixth = z_fourth * z_squared
             z_eighth = z_fourth * z_fourth
             even_part = (
                 even_part
                 + coefficients[2] * z_sixth
                 + coefficients[3] * z_eighth
+            )
+        if self.degree == 16:
+            z_tenth = z_eighth * z_squared
+            z_twelfth = z_eighth * z_fourth
+            z_fourteenth = z_eighth * z_sixth
+            z_sixteenth = z_eighth * z_eighth
+            even_part = (
+                even_part
+                + coefficients[4] * z_tenth
+                + coefficients[5] * z_twelfth
+                + coefficients[6] * z_fourteenth
+                + coefficients[7] * z_sixteenth
             )
         out = 0.5 * compute_x + scale * even_part
         return out.to(dtype=x.dtype)
@@ -271,7 +295,7 @@ def calibrate_resnet_activations_with_poly(
     if min_input_scale <= 0.0:
         raise ValueError('min_input_scale must be positive')
     if polynomial_degree not in ChebyReLU._NORMALIZED_POWER_COEFFS:
-        raise ValueError('polynomial_degree must be 4 or 8')
+        raise ValueError('polynomial_degree must be 4, 8, or 16')
     if not torch.is_tensor(calibration_inputs) or calibration_inputs.numel() == 0:
         raise ValueError('calibration_inputs must be a non-empty tensor')
     if not torch.isfinite(calibration_inputs).all():
