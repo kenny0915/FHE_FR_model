@@ -1039,6 +1039,17 @@ def main(args):
         if cfg.network.endswith("_prelu_herpn"):
             model_kwargs["prelu_herpn_distill_eps"] = float(getattr(
                 cfg, "prelu_herpn_distill_eps", 1e-4))
+    if (cfg.network.startswith("r")
+            and cfg.network.endswith("_herpn_residual_scale")):
+        model_kwargs.update(
+            herpn_range_limit=float(getattr(
+                cfg, "herpn_range_limit", 6.0)),
+            herpn_bn_eps=float(getattr(cfg, "herpn_bn_eps", 1e-4)),
+            residual_scale_init=float(getattr(
+                cfg, "residual_scale_init", 1.0 / math.sqrt(24.0))),
+            residual_scale_trainable=bool(getattr(
+                cfg, "residual_scale_trainable", True)),
+        )
     if cfg.network.startswith("r") and cfg.network.endswith("_quadratic"):
         model_kwargs.update(
             quadratic_input_scale=float(getattr(
@@ -2399,6 +2410,14 @@ def main(args):
                     summary_writer.add_scalar(
                         'HerPN/Outside Range Fraction',
                         float(range_summary['outside_fraction'].item()), global_step)
+                    residual_summary_fn = getattr(
+                        backbone.module, "residual_scale_summary", None)
+                    if residual_summary_fn is not None:
+                        residual_summary = residual_summary_fn()
+                        for name, value in residual_summary.items():
+                            summary_writer.add_scalar(
+                                "ResidualScale/" + name.capitalize(),
+                                float(value.item()), global_step)
                 if (summary_writer is not None and simple_gate_progressive
                         and global_step % cfg.frequent == 0):
                     summary_writer.add_scalar(

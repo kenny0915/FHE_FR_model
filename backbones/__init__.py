@@ -63,6 +63,19 @@ def get_iresnet_layerwise_poly(depth, pretrained=False, progress=True, **kwargs)
     return factory(pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_iresnet_herpn_residual_scale(
+        depth, pretrained=False, progress=True, **kwargs):
+    from . import iresnet_herpn_residual_scale
+    factory = {
+        18: iresnet_herpn_residual_scale.iresnet18,
+        34: iresnet_herpn_residual_scale.iresnet34,
+        50: iresnet_herpn_residual_scale.iresnet50,
+        100: iresnet_herpn_residual_scale.iresnet100,
+        200: iresnet_herpn_residual_scale.iresnet200,
+    }[depth]
+    return factory(pretrained=pretrained, progress=progress, **kwargs)
+
+
 def get_mbf_no_relu(fp16=False, num_features=512, blocks=(1, 4, 6, 2), scale=2):
     from .mobilefacenet_no_relu import get_mbf as _get_mbf_no_relu
     return _get_mbf_no_relu(
@@ -85,7 +98,17 @@ def get_mbf_large_no_relu(fp16=False, num_features=512, blocks=(2, 8, 12, 4), sc
 
 def get_model(name, **kwargs):
     # no-ReLU / FHE-friendly CryptoFace polynomial variants
-    if name in ("r18_no_relu",):
+    if name in ("r18_herpn_residual_scale",):
+        return get_iresnet_herpn_residual_scale(18, False, **kwargs)
+    elif name in ("r34_herpn_residual_scale",):
+        return get_iresnet_herpn_residual_scale(34, False, **kwargs)
+    elif name in ("r50_herpn_residual_scale",):
+        return get_iresnet_herpn_residual_scale(50, False, **kwargs)
+    elif name in ("r100_herpn_residual_scale",):
+        return get_iresnet_herpn_residual_scale(100, False, **kwargs)
+    elif name in ("r200_herpn_residual_scale",):
+        return get_iresnet_herpn_residual_scale(200, False, **kwargs)
+    elif name in ("r18_no_relu",):
         return iresnet18_no_relu(False, **kwargs)
     elif name in ("r34_no_relu",):
         return iresnet34_no_relu(False, **kwargs)

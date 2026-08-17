@@ -33,6 +33,11 @@ Examples:
   LayerNorm, exact `C -> 2C -> gate -> C` expansion, and zero residual scales.
   This variant retains non-FHE LayerNorm to isolate gate-training stability.
 - `ms1mv3_r50_no_relu`: train an R50 variant with ReLU/PReLU removed or replaced.
+- `ms1mv3_r50_herpn_residual_scale`: train IResNet50 from scratch with pure
+  degree-2 HerPN activations and one learnable residual scalar per block,
+  initialized to `1/sqrt(24)`. This recipe has no PReLU teacher or
+  distillation path; its public scales and HerPN normalization fold into the
+  FHE inference graph.
 
 Keep names short but specific enough to identify the dataset, backbone, and main experimental change.
 
