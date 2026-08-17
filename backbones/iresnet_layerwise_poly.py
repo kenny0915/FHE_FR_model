@@ -16,8 +16,16 @@ grow with the interval scale.  Thus coefficient learning cannot break the
 endpoint constraints.  Once fully converted, the activation folds to plaintext
 channel-wise coefficients for ``c0 + c1*x + c2*x^2 (+ c3*x^3)``.
 
-The scale is a public plaintext constant.  Degree 2 needs one sequential
-ciphertext-ciphertext multiplication; degree 3 needs two.
+Degree 8 initializes from the fixed zero-preserving ChebyReLU approximation
+
+    0.5*z + c2*z^2 + c4*z^4 + c6*z^6 + c8*z^8,
+
+composed with the frozen PReLU slope. Four channel-wise residual amplitudes
+start at zero and can be distilled without changing that initialization.
+
+The scale is a public plaintext constant. Degree 2 needs one sequential
+ciphertext-ciphertext multiplication, degree 3 needs two, and the balanced
+degree-8 power schedule has multiplicative depth three.
 """
 
 import torch
@@ -37,6 +45,12 @@ __all__ = [
 ]
 
 _STAGE_NAMES = ("stem", "layer1", "layer2", "layer3", "layer4")
+_CHEBY8_EVEN_COEFFICIENTS = (
+    2.3251649858241135,
+    -7.139218135121423,
+    9.889731805079089,
+    -4.603662092314254,
+)
 
 
 class FoldedLayerwisePolynomial(nn.Module):
@@ -44,8 +58,9 @@ class FoldedLayerwisePolynomial(nn.Module):
 
     def __init__(self, coefficients):
         super().__init__()
-        if len(coefficients) not in (3, 4):
-            raise ValueError("Only degree-2 and degree-3 polynomials are supported")
+        if len(coefficients) not in (3, 4, 9):
+            raise ValueError(
+                "Only degree-2, degree-3, and degree-8 polynomials are supported")
         self.degree = len(coefficients) - 1
         for index, coefficient in enumerate(coefficients):
             self.register_buffer(
@@ -58,6 +73,23 @@ class FoldedLayerwisePolynomial(nn.Module):
             else x.dtype
         )
         compute_x = x.to(dtype=compute_dtype)
+        if self.degree == 8:
+            coefficients = [
+                getattr(self, f"coefficient{index}").to(
+                    device=x.device, dtype=compute_dtype)
+                for index in range(9)
+            ]
+            square = compute_x.square()
+            fourth = square.square()
+            sixth = fourth * square
+            eighth = fourth.square()
+            output = coefficients[0] + coefficients[1] * compute_x
+            output = output + coefficients[2] * square
+            output = output + coefficients[4] * fourth
+            output = output + coefficients[6] * sixth
+            output = output + coefficients[8] * eighth
+            return output.to(dtype=x.dtype)
+
         output = getattr(self, f"coefficient{self.degree}").to(
             device=x.device, dtype=compute_dtype)
         for index in range(self.degree - 1, -1, -1):
@@ -79,8 +111,8 @@ class LayerwisePolynomialActivation(nn.Module):
         super().__init__()
         if channels <= 0:
             raise ValueError("channels must be positive")
-        if degree not in (2, 3):
-            raise ValueError("layerwise polynomial degree must be 2 or 3")
+        if degree not in (2, 3, 8):
+            raise ValueError("layerwise polynomial degree must be 2, 3, or 8")
         if initial_scale <= 0:
             raise ValueError("initial_scale must be positive")
         if distill_eps <= 0:
@@ -91,14 +123,26 @@ class LayerwisePolynomialActivation(nn.Module):
         self.prelu = nn.PReLU(channels)
         self.prelu.weight.requires_grad = False
 
-        # beta2=0 initializes linear*x + even*x^2/S. This is exact at
-        # x=-S, 0, S. Unlike the old normalized theta2, d(student)/d(beta2)
-        # is bounded by one inside the calibrated interval for every S.
-        self.beta2 = nn.Parameter(torch.zeros(channels, 1, 1))
-        if self.degree == 3:
-            self.theta3 = nn.Parameter(torch.zeros(channels, 1, 1))
-        else:
+        if self.degree == 8:
+            self.register_parameter("beta2", None)
             self.register_parameter("theta3", None)
+            self.cheby_residuals = nn.Parameter(
+                torch.zeros(4, channels, 1, 1))
+            self.register_buffer(
+                "cheby_even_coefficients",
+                torch.tensor(_CHEBY8_EVEN_COEFFICIENTS, dtype=torch.float32))
+        else:
+            # beta2=0 initializes linear*x + even*x^2/S. This is exact at
+            # x=-S, 0, S. Unlike the old normalized theta2,
+            # d(student)/d(beta2) is bounded by one inside the calibrated
+            # interval for every S.
+            self.beta2 = nn.Parameter(torch.zeros(channels, 1, 1))
+            if self.degree == 3:
+                self.theta3 = nn.Parameter(torch.zeros(channels, 1, 1))
+            else:
+                self.register_parameter("theta3", None)
+            self.register_parameter("cheby_residuals", None)
+            self.register_buffer("cheby_even_coefficients", None)
 
         self.register_buffer(
             "input_scale", torch.tensor(float(initial_scale), dtype=torch.float32))
@@ -161,6 +205,24 @@ class LayerwisePolynomialActivation(nn.Module):
         if old_key in state_dict and teacher_key not in state_dict:
             state_dict[teacher_key] = state_dict.pop(old_key)
 
+        if self.degree == 8:
+            residual_key = prefix + "cheby_residuals"
+            has_student_state = residual_key in state_dict
+            if not has_student_state:
+                state_dict[residual_key] = torch.zeros_like(
+                    self.cheby_residuals.detach())
+                state_dict[prefix + "scale_calibrated"] = torch.tensor(False)
+                for local_key, value in self.state_dict().items():
+                    full_key = prefix + local_key
+                    if full_key not in state_dict:
+                        state_dict[full_key] = value.detach()
+            super()._load_from_state_dict(
+                state_dict, prefix, local_metadata, strict,
+                missing_keys, unexpected_keys, error_msgs)
+            self._blend = float(self.blend.item())
+            self._scale_is_calibrated = bool(self.scale_calibrated.item())
+            return
+
         beta2_key = prefix + "beta2"
         old_theta2_key = prefix + "theta2"
         has_beta2_state = beta2_key in state_dict
@@ -207,6 +269,24 @@ class LayerwisePolynomialActivation(nn.Module):
         slope = self.prelu.weight.detach().reshape(1, -1, 1, 1).to(
             device=x.device, dtype=compute_dtype)
         linear = 0.5 * (1.0 + slope)
+        if self.degree == 8:
+            squared = z.square()
+            fourth = squared.square()
+            sixth = fourth * squared
+            eighth = fourth.square()
+            powers = (squared, fourth, sixth, eighth)
+            coefficients = self.cheby_even_coefficients.to(
+                device=x.device, dtype=compute_dtype).reshape(4, 1, 1, 1)
+            base_amplitudes = (
+                scale * (1.0 - slope) * coefficients)
+            residuals = self.cheby_residuals.to(
+                device=x.device, dtype=compute_dtype)
+            student = linear * compute_x
+            for index, power in enumerate(powers):
+                amplitude = base_amplitudes[index] + residuals[index]
+                student = student + amplitude * power
+            return student.to(dtype=x.dtype)
+
         even = 0.5 * (1.0 - slope)
         square = compute_x.square()
         endpoint_basis = 1.0 - square / scale.square()
@@ -279,11 +359,28 @@ class LayerwisePolynomialActivation(nn.Module):
 
     @torch.no_grad()
     def folded_coefficients(self):
+        parameter = (
+            self.cheby_residuals if self.degree == 8 else self.beta2)
         scale = self.input_scale.to(
-            device=self.beta2.device, dtype=self.beta2.dtype)
+            device=parameter.device, dtype=parameter.dtype)
         slope = self.prelu.weight.detach().reshape(-1, 1, 1).to(
-            device=self.beta2.device, dtype=self.beta2.dtype)
+            device=parameter.device, dtype=parameter.dtype)
         linear = 0.5 * (1.0 + slope)
+        if self.degree == 8:
+            normalized = self.cheby_even_coefficients.to(
+                device=parameter.device, dtype=parameter.dtype).reshape(
+                    4, 1, 1, 1)
+            amplitudes = (
+                scale * (1.0 - slope) * normalized
+                + self.cheby_residuals)
+            zero = torch.zeros_like(linear)
+            coefficients = [zero, linear]
+            for index, power in enumerate((2, 4, 6, 8)):
+                while len(coefficients) < power:
+                    coefficients.append(zero)
+                coefficients.append(amplitudes[index] / scale.pow(power))
+            return tuple(coefficients)
+
         even = 0.5 * (1.0 - slope)
         coefficient0 = self.beta2
         coefficient1 = linear
@@ -381,9 +478,12 @@ class IResNet(_ProgressiveIResNet):
         for name, activation in self.named_progressive_activations():
             if selected is not None and name not in selected:
                 continue
-            parameters.append(activation.beta2)
-            if activation.theta3 is not None:
-                parameters.append(activation.theta3)
+            if activation.degree == 8:
+                parameters.append(activation.cheby_residuals)
+            else:
+                parameters.append(activation.beta2)
+                if activation.theta3 is not None:
+                    parameters.append(activation.theta3)
         if selected is not None:
             known = {
                 name for name, _ in self.named_progressive_activations()
@@ -399,8 +499,30 @@ class IResNet(_ProgressiveIResNet):
         return [
             activation.beta2
             for activation in self.progressive_activations()
-            if activation._loaded_legacy_theta2
+            if activation.beta2 is not None
+            and activation._loaded_legacy_theta2
         ]
+
+    @torch.no_grad()
+    def load_layerwise_poly_input_scales(self, scale_data):
+        """Load an exact named scale mapping and validate its polynomial degree."""
+        saved_degree = int(scale_data.get("polynomial_degree", self.layerwise_poly_degree))
+        if saved_degree != self.layerwise_poly_degree:
+            raise ValueError(
+                "Scale data polynomial degree {} does not match model degree {}".format(
+                    saved_degree, self.layerwise_poly_degree))
+        scales = scale_data.get("scales", scale_data)
+        expected = set(self.layerwise_poly_activation_names())
+        supplied = set(scales)
+        missing = sorted(expected.difference(supplied))
+        unknown = sorted(supplied.difference(expected))
+        if missing or unknown:
+            raise ValueError(
+                "Layerwise scale names do not match model activations; "
+                "missing={}, unknown={}".format(missing, unknown))
+        for name in self.layerwise_poly_activation_names():
+            self.set_layerwise_poly_input_scale(name, float(scales[name]))
+        return len(scales)
 
     @torch.no_grad()
     def set_layerwise_poly_input_scale(self, name, scale):

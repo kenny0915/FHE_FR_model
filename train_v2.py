@@ -1110,6 +1110,21 @@ def main(args):
                 float(getattr(cfg, "herpn_initial_progress", 0.0)))
         logging.info("Initialized backbone from %s", backbone_init)
         del init_checkpoint
+    layerwise_poly_scale_file = getattr(
+        cfg, "layerwise_poly_scale_file", "")
+    if layerwise_poly_scale_file and not cfg.resume:
+        scale_loader = getattr(
+            backbone, "load_layerwise_poly_input_scales", None)
+        if scale_loader is None:
+            raise ValueError(
+                "layerwise_poly_scale_file requires a layerwise polynomial "
+                "backbone")
+        with open(layerwise_poly_scale_file) as scale_handle:
+            scale_data = json.load(scale_handle)
+        loaded_scale_count = scale_loader(scale_data)
+        logging.info(
+            "Loaded %d fixed layerwise polynomial input scales from %s",
+            loaded_scale_count, layerwise_poly_scale_file)
     affine_calibration_batches = int(getattr(
         cfg, "affine_calibration_batches", 0))
     if affine_calibration_batches > 0 and not cfg.resume:
@@ -2260,8 +2275,12 @@ def main(args):
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
 
+            backward_loss = loss
+            if (cfg.gradient_acc > 1
+                    and getattr(cfg, "normalize_gradient_accumulation", False)):
+                backward_loss = loss / cfg.gradient_acc
             if cfg.fp16:
-                amp.scale(loss).backward()
+                amp.scale(backward_loss).backward()
                 if global_step % cfg.gradient_acc == 0:
                     amp.unscale_(opt)
                     if (layerwise_training_phase == "local_fit"
@@ -2297,7 +2316,7 @@ def main(args):
                     amp.update()
                     opt.zero_grad()
             else:
-                loss.backward()
+                backward_loss.backward()
                 if global_step % cfg.gradient_acc == 0:
                     if (layerwise_training_phase == "local_fit"
                             and layerwise_poly_freeze_backbone_during_local_fit):

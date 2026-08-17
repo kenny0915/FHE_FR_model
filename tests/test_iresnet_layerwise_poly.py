@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import json
 import sys
 import types
 
@@ -13,6 +14,7 @@ from backbones.iresnet_layerwise_poly import (
     FoldedLayerwisePolynomial,
     LayerwisePolynomialActivation,
 )
+from eval.non_linear_replacement import PReLU_Approx
 
 
 class _EasyDict(dict):
@@ -150,6 +152,46 @@ def test_beta2_distillation_gradient_stays_bounded_at_extreme_scale():
     assert float(activation.beta2.grad.abs().max()) < 100.0
 
 
+def test_degree8_initializes_from_eval_chebyrelu_and_folds_exactly():
+    slopes = torch.tensor([0.1, 0.4])
+    activation = _activation(
+        degree=8, slopes=tuple(slopes), scale=6.0, blend=1.0).eval()
+    evaluation = PReLU_Approx(
+        slopes, input_scale=6.0, polynomial_degree=8).eval()
+    inputs = torch.linspace(-6.0, 6.0, 192).reshape(2, 2, 4, 12)
+
+    expected = evaluation(inputs)
+    actual = activation(inputs)
+    folded = activation.folded().eval()(inputs)
+
+    assert torch.allclose(actual, expected, rtol=1e-5, atol=5e-6)
+    assert torch.allclose(folded, actual, rtol=1e-5, atol=5e-6)
+    assert torch.count_nonzero(activation.cheby_residuals) == 0
+
+
+def test_degree8_baseline_load_and_named_scale_initialization_are_exact():
+    baseline = get_model("r18", dropout=0, fp16=False).eval()
+    polynomial = get_model(
+        "r18_layerwise_poly", dropout=0, fp16=False,
+        layerwise_poly_degree=8, layerwise_poly_progress=0.0).eval()
+    polynomial.load_state_dict(copy.deepcopy(baseline.state_dict()), strict=True)
+    scales = {
+        name: float(index + 1)
+        for index, name in enumerate(polynomial.layerwise_poly_activation_names())
+    }
+
+    loaded = polynomial.load_layerwise_poly_input_scales({
+        "polynomial_degree": 8,
+        "scales": scales,
+    })
+    inputs = torch.randn(1, 3, 112, 112)
+
+    assert loaded == len(scales)
+    assert not polynomial.uncalibrated_layerwise_poly_names()
+    assert torch.equal(polynomial(inputs), baseline(inputs))
+    assert len(polynomial.layerwise_poly_parameters()) == len(scales)
+
+
 def test_legacy_theta2_checkpoint_migrates_exactly_to_beta2():
     source = _activation(
         degree=2, slopes=(0.1, 0.4), scale=7.25, blend=0.6).eval()
@@ -275,3 +317,39 @@ def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
     final_conversion_epoch = (
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
     assert cfg.num_epoch - final_conversion_epoch == 7
+
+
+def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_cheby8_finetune.py")
+    model = get_model(
+        cfg.network,
+        dropout=0,
+        fp16=False,
+        layerwise_poly_degree=cfg.layerwise_poly_degree,
+        layerwise_poly_initial_scale=cfg.layerwise_poly_initial_scale,
+        layerwise_poly_distill_eps=cfg.layerwise_poly_distill_eps,
+        layerwise_poly_progress=cfg.herpn_initial_progress,
+    )
+    with open(cfg.layerwise_poly_scale_file) as scale_handle:
+        scale_data = json.load(scale_handle)
+    loaded = model.load_layerwise_poly_input_scales(scale_data)
+    expected_order = model.layerwise_poly_activation_names()
+    scheduled_order = [
+        name for group in cfg.herpn_conversion_groups for name in group]
+
+    assert cfg.backbone_init == "work_dirs/ms1mv3_r50/model.pt"
+    assert cfg.layerwise_poly_degree == 8
+    assert scale_data["polynomial_degree"] == 8
+    assert loaded == 25
+    assert scheduled_order == expected_order
+    assert max(map(len, cfg.herpn_conversion_groups)) == 4
+    assert len(cfg.herpn_conversion_groups) == 12
+    assert cfg.layerwise_poly_staged_training
+    assert cfg.layerwise_poly_freeze_backbone_during_local_fit
+    assert cfg.fp16 is False
+    assert cfg.gradient_acc == 4
+    assert cfg.normalize_gradient_accumulation
+    final_conversion_epoch = (
+        cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
+    assert cfg.num_epoch - final_conversion_epoch == 8
