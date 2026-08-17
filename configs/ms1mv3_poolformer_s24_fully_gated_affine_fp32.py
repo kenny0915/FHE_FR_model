@@ -17,7 +17,7 @@ from easydict import EasyDict as edict
 config = edict()
 config.margin_list = (1.0, 0.0, 0.4)
 config.network = "poolformer_fully_gated_affine_s24"
-config.resume = False
+config.resume = True
 config.output = "work_dirs/ms1mv3_poolformer_s24_fully_gated_affine_fp32"
 config.embedding_size = 512
 config.sample_rate = 1.0

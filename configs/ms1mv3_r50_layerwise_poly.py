@@ -26,7 +26,7 @@ config.network = "r50_layerwise_poly"
 # Set True on the GPU server to recover from checkpoint_gpu_<rank>.pt. Legacy
 # theta2 checkpoints are migrated and their incompatible coefficient momentum
 # is cleared automatically; group-09 inference snapshots must not be resumed.
-config.resume = False
+config.resume = True
 config.output = "work_dirs/ms1mv3_r50_layerwise_poly_d2"
 config.embedding_size = 512
 config.sample_rate = 1.0
@@ -53,7 +53,7 @@ config.layerwise_poly_distill_eps = 1e-4
 # remains practical. Every twentieth batch is disjoint holdout data. The true
 # global maximum is retained for diagnostics and tail rejection.
 config.layerwise_poly_range_calibration_batches = 0
-config.layerwise_poly_range_margin = 1.1
+config.layerwise_poly_range_margin = 1.5
 config.layerwise_poly_min_scale = 1e-3
 config.layerwise_poly_range_quantile = 0.999
 config.layerwise_poly_quantile_samples = 65536
