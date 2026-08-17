@@ -142,6 +142,16 @@ def test_gamma_zero_keeps_teacher_in_training_graph_only():
     assert module.affine.weight.grad is not None
 
 
+def test_gamma_one_keeps_future_affine_student_in_training_graph():
+    module = ProgressiveAffineNorm2d(8)
+    module.train()
+    module(torch.randn(2, 8, 4, 4)).square().mean().backward()
+
+    assert module.ln.weight.grad is not None
+    assert module.affine.weight.grad is not None
+    assert torch.count_nonzero(module.affine.weight.grad) == 0
+
+
 def test_folding_removes_all_layernorm_teachers_without_output_change():
     model = _small_affine().eval()
     for module in model.affine_norm_modules():
@@ -170,3 +180,52 @@ def test_registered_s24_has_49_affine_sites_and_unchanged_gates():
     assert len(model.affine_norm_modules()) == 49
     assert sum(isinstance(module, SimpleGate)
                for module in model.modules()) == 24
+
+
+def test_s24_affine_groups_are_forward_ordered_and_independent():
+    model = get_model(
+        "poolformer_fully_gated_affine_s24",
+        num_features=32,
+        fp16=False,
+        affine_blocks_per_group=1,
+    )
+    groups = model.affine_group_names()
+
+    assert len(groups) == 25
+    assert groups[0] == (
+        "network.0.0.norm1", "network.0.0.norm2",
+    )
+    assert groups[-1] == ("norm",)
+
+    blends = (1.0, 0.5) + (0.0,) * 23
+    model.set_affine_group_blends(blends)
+    modules = dict(model.named_modules())
+    assert modules[groups[0][0]]._gamma == 0.0
+    assert modules[groups[1][0]]._gamma == 0.5
+    assert modules[groups[2][0]]._gamma == 1.0
+
+
+def test_token_mixer_norm_bias_is_fixed_to_zero():
+    model = _small_affine()
+    first_block = model.network[0][0]
+
+    assert first_block.norm1.force_zero_bias
+    assert not first_block.norm1.affine.bias.requires_grad
+    assert first_block.norm2.affine.bias.requires_grad
+
+
+def test_group_calibration_updates_only_requested_group():
+    torch.manual_seed(31)
+    model = _small_affine().eval()
+    final_weight_before = model.norm.affine.weight.detach().clone()
+    model.begin_affine_calibration(group_index=0)
+    with torch.no_grad():
+        model(torch.randn(3, 3, 16, 16))
+    diagnostics = model.finish_affine_calibration(
+        ridge=1e-6, distributed=False)
+
+    assert {item["name"] for item in diagnostics} == {
+        "network.0.0.norm1", "network.0.0.norm2"}
+    assert torch.equal(model.network[0][0].norm1.affine.bias,
+                       torch.zeros_like(model.network[0][0].norm1.affine.bias))
+    assert torch.equal(model.norm.affine.weight, final_weight_before)

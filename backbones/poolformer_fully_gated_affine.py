@@ -45,6 +45,7 @@ class ProgressiveAffineNorm2d(nn.Module):
         self.register_buffer("gamma", torch.ones(1))
         self._gamma = 1.0
         self._collect_calibration = False
+        self.force_zero_bias = False
 
         # Float64 accumulation keeps the centered least-squares calculation
         # stable when a site has a large number of spatial samples.
@@ -66,6 +67,12 @@ class ProgressiveAffineNorm2d(nn.Module):
             gamma = min(1.0, max(0.0, gamma))
         self._gamma = gamma
         self.gamma.fill_(gamma)
+
+    def set_blend(self, blend):
+        """Set affine-student blend, where zero is LN and one is affine."""
+        blend = min(1.0, max(0.0, float(blend)))
+        self._gamma = 1.0 - blend
+        self.gamma.fill_(self._gamma)
 
     def _load_from_state_dict(self, *args, **kwargs):
         super()._load_from_state_dict(*args, **kwargs)
@@ -125,6 +132,11 @@ class ProgressiveAffineNorm2d(nn.Module):
         denominator = centered_xx + float(ridge) * count
         scale = centered_xy / denominator.clamp_min(torch.finfo(torch.float64).tiny)
         bias = mean_y - scale * mean_x
+        if self.force_zero_bias:
+            # norm1 is followed by Pooling(y) - y.  Its per-channel constant
+            # bias cancels exactly, so retaining a poorly conditioned fitted
+            # bias only wastes dynamic range.
+            bias.zero_()
         self.affine.weight.copy_(scale.to(self.affine.weight))
         self.affine.bias.copy_(bias.to(self.affine.bias))
 
@@ -156,11 +168,13 @@ class ProgressiveAffineNorm2d(nn.Module):
         teacher = self.ln(x)
         if self._collect_calibration:
             self._accumulate_calibration(x, teacher)
-        if self._gamma >= 1.0:
+        if self._gamma >= 1.0 and not self.training:
             return teacher
 
         student = self.affine(x)
-        # Keep the teacher parameters in DDP's training graph at gamma zero.
+        # Keep both paths in DDP's training graph at the blend endpoints. This
+        # is required by groupwise conversion, where later affine students are
+        # initially inactive and become trainable in later epochs.
         gamma = self.gamma.to(dtype=x.dtype)
         return gamma * teacher + (1.0 - gamma) * student
 
@@ -168,9 +182,14 @@ class ProgressiveAffineNorm2d(nn.Module):
 class AffineFullyGatedPoolFormer(FullyGatedPoolFormer):
     """Fully gated PoolFormer with all LayerNorm sites under affine conversion."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, affine_blocks_per_group=1, **kwargs):
         super().__init__(*args, **kwargs)
         self._replace_layer_norms(self)
+        if int(affine_blocks_per_group) <= 0:
+            raise ValueError("affine_blocks_per_group must be positive")
+        self.affine_blocks_per_group = int(affine_blocks_per_group)
+        self._affine_groups = self._build_affine_groups()
+        self._calibrating_affine_modules = ()
 
     @classmethod
     def _replace_layer_norms(cls, parent):
@@ -191,15 +210,62 @@ class AffineFullyGatedPoolFormer(FullyGatedPoolFormer):
             if isinstance(module, ProgressiveAffineNorm2d)
         )
 
-    def begin_affine_calibration(self):
-        for module in self.affine_norm_modules():
+    def _build_affine_groups(self):
+        """Group norm sites in forward order, keeping each group local."""
+        groups = []
+        for stage in self.network:
+            blocks = [
+                block for block in stage.children()
+                if (hasattr(block, "norm1")
+                    and isinstance(block.norm1, ProgressiveAffineNorm2d))
+            ]
+            for start in range(0, len(blocks), self.affine_blocks_per_group):
+                modules = []
+                for block in blocks[start:start + self.affine_blocks_per_group]:
+                    block.norm1.force_zero_bias = True
+                    block.norm1.affine.bias.requires_grad_(False)
+                    modules.extend((block.norm1, block.norm2))
+                groups.append(tuple(modules))
+        if not isinstance(self.norm, ProgressiveAffineNorm2d):
+            raise RuntimeError("Final PoolFormer normalization was not replaced")
+        groups.append((self.norm,))
+        return tuple(groups)
+
+    def affine_group_names(self):
+        module_names = {id(module): name for name, module in self.named_modules()}
+        return tuple(
+            tuple(module_names[id(module)] for module in group)
+            for group in self._affine_groups
+        )
+
+    def set_affine_group_blends(self, blends):
+        if len(blends) != len(self._affine_groups):
+            raise ValueError(
+                f"Expected {len(self._affine_groups)} affine group blends, "
+                f"got {len(blends)}")
+        for blend, group in zip(blends, self._affine_groups):
+            for module in group:
+                module.set_blend(blend)
+
+    def begin_affine_calibration(self, group_index=None):
+        modules = (
+            self.affine_norm_modules()
+            if group_index is None else self._affine_groups[int(group_index)]
+        )
+        self._calibrating_affine_modules = tuple(modules)
+        for module in modules:
             module.begin_calibration()
 
     def finish_affine_calibration(self, ridge=1e-6, distributed=True):
-        return tuple(
-            module.finish_calibration(ridge=ridge, distributed=distributed)
-            for module in self.affine_norm_modules()
-        )
+        module_names = {id(module): name for name, module in self.named_modules()}
+        diagnostics = []
+        for module in self._calibrating_affine_modules:
+            result = module.finish_calibration(
+                ridge=ridge, distributed=distributed)
+            result["name"] = module_names[id(module)]
+            diagnostics.append(result)
+        self._calibrating_affine_modules = ()
+        return tuple(diagnostics)
 
     def fold_affine_norms_for_inference(self):
         """Remove the LayerNorm teachers from a fully converted eval model."""

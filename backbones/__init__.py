@@ -360,6 +360,8 @@ def get_model(name, **kwargs):
             num_classes=kwargs.get("num_features", 512),
             face_embedding=True,
             fp16=kwargs.get("fp16", False),
+            affine_blocks_per_group=kwargs.get(
+                "affine_blocks_per_group", 1),
         )
 
     elif name == "vit_t":
