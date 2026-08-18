@@ -38,6 +38,10 @@ Examples:
   initialized to `1/sqrt(24)`. This recipe has no PReLU teacher or
   distillation path; its public scales and HerPN normalization fold into the
   FHE inference graph.
+- `ms1mv3_iresnet_nf12_fp32`: train a 12-block normalization-free IResNet
+  whose bounded quadratic branches start exactly linear. It uses SWS during
+  training, one ciphertext product per block, and a frozen R50 embedding
+  teacher; all SWS/scalar/head-normalization state folds for deployment.
 
 Keep names short but specific enough to identify the dataset, backbone, and main experimental change.
 

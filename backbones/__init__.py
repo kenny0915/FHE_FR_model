@@ -382,6 +382,28 @@ def get_model(name, **kwargs):
             range_sample_size=kwargs.get("nf_range_sample_size", 16384),
         )
 
+    elif name in ("iresnet_nf8", "iresnet_nf12"):
+        from .iresnet_nf import iresnet_nf8, iresnet_nf12
+        factory = {
+            "iresnet_nf8": iresnet_nf8,
+            "iresnet_nf12": iresnet_nf12,
+        }[name]
+        return factory(
+            pretrained=False,
+            num_classes=kwargs.get("num_features", 512),
+            face_embedding=True,
+            fp16=kwargs.get("fp16", False),
+            ws_eps=kwargs.get("nf_ws_eps", 1e-4),
+            alpha_init=kwargs.get("nf_alpha_init", 0.05),
+            alpha_max=kwargs.get("nf_alpha_max", 0.2),
+            input_gain_init=kwargs.get("nf_input_gain_init", 1.0),
+            quadratic_scale_max=kwargs.get(
+                "nf_quadratic_scale_max",
+                kwargs.get("nf_modulator_scale_max", 0.25)),
+            range_limit=kwargs.get("nf_range_limit", 6.0),
+            range_sample_size=kwargs.get("nf_range_sample_size", 16384),
+        )
+
     elif name == "poolformer_fully_gated_prepbn_s24":
         from .poolformer_fully_gated_prepbn import (
             poolformer_fully_gated_prepbn_s24,

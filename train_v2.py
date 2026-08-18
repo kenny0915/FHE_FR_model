@@ -1170,7 +1170,7 @@ def main(args):
             affine_blocks_per_group=int(getattr(
                 cfg, "affine_blocks_per_group", 1)),
         )
-    if cfg.network.startswith("poolformer_nf"):
+    if cfg.network.startswith(("poolformer_nf", "iresnet_nf")):
         model_kwargs.update(
             nf_ws_eps=float(getattr(cfg, "nf_ws_eps", 1e-4)),
             nf_tau_init=float(getattr(cfg, "nf_tau_init", 0.1)),
@@ -1180,6 +1180,9 @@ def main(args):
                 cfg, "nf_input_gain_init", 1.0)),
             nf_modulator_scale_max=float(getattr(
                 cfg, "nf_modulator_scale_max", 0.25)),
+            nf_quadratic_scale_max=float(getattr(
+                cfg, "nf_quadratic_scale_max",
+                getattr(cfg, "nf_modulator_scale_max", 0.25))),
             nf_range_limit=float(getattr(cfg, "nf_range_limit", 6.0)),
             nf_range_sample_size=int(getattr(
                 cfg, "nf_range_sample_size", 16384)),
