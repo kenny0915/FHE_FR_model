@@ -429,9 +429,13 @@ def get_model(name, **kwargs):
             quadratic_scale_max=kwargs.get(
                 "nf_quadratic_scale_max",
                 kwargs.get("nf_modulator_scale_max", 0.1)),
+            modulation_input_bound=kwargs.get(
+                "nf_modulation_input_bound", 6.0),
             learnable_ws_gain=kwargs.get("nf_learnable_ws_gain", False),
             range_limit=kwargs.get("nf_range_limit", 6.0),
             range_sample_size=kwargs.get("nf_range_sample_size", 16384),
+            initial_modulation_progress=kwargs.get(
+                "nf_initial_modulation_progress", 1.0),
         )
 
     elif name == "poolformer_fully_gated_prepbn_s24":

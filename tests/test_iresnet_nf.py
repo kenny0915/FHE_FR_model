@@ -57,9 +57,32 @@ def test_quadratic_is_exactly_linear_at_initialization_and_scales_are_bounded():
     rho, alpha = block.residual_coefficients()
     assert alpha.item() == pytest.approx(0.02, abs=1e-6)
     assert 0.0 < alpha.item() < 0.1
-    assert rho.square().add(alpha.square()).item() == pytest.approx(
+    assert rho.add(alpha).item() == pytest.approx(
         1.0, abs=1e-6)
     assert torch.isfinite(outputs).all()
+
+
+def test_quadratic_modulation_uses_explicit_interval_and_progress():
+    block = NormFreeResidualBlock(
+        8, 8, quadratic_scale_max=0.1,
+        modulation_input_bound=5.0,
+        initial_modulation_progress=0.0,
+    )
+    with torch.no_grad():
+        block.quadratic_scale.raw.fill_(0.4)
+    assert block.modulation_coefficient().item() == pytest.approx(0.0)
+
+    block.set_modulation_progress(0.5)
+    expected = block.quadratic_scale().item() * 0.5 / 5.0
+    assert block.modulation_coefficient().item() == pytest.approx(expected)
+
+
+def test_model_can_enable_quadratic_blocks_in_reverse_order():
+    model = _tiny_model()
+    model.set_nf_modulation_progresses((0.1, 0.2, 0.3, 0.4), order="reverse")
+    assert model.nf_modulation_group_count() == 4
+    assert [block.modulation_progress.item() for block in model.nf_blocks()] == (
+        pytest.approx([0.4, 0.3, 0.2, 0.1]))
 
 
 def test_stage_downsampling_matches_iresnet_112_to_7_topology():
@@ -130,5 +153,9 @@ def test_nf12_training_config_uses_r50_teacher_and_stable_recipe():
     assert cfg.nf_range_loss_weight > 0.0
     assert cfg.nf_alpha_init < cfg.nf_alpha_max
     assert cfg.nf_quadratic_scale_max <= 0.1
+    assert cfg.nf_modulation_input_bound == pytest.approx(cfg.nf_range_limit)
+    assert cfg.nf_initial_modulation_progress == 0.0
+    assert len(cfg.nf_modulation_group_epochs) == 12
     assert not cfg.nf_learnable_ws_gain
     assert cfg.gradient_clip_scope == "backbone"
+    assert cfg.stable_gradient_clip

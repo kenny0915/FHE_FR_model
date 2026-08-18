@@ -4,7 +4,7 @@ Each residual block is linear at initialization and introduces exactly one
 ciphertext-ciphertext product along its encrypted path::
 
     u = Wu(s * x)
-    v = 1 + beta * Wv(s * x)
+    v = 1 + beta * Wv(s * x) / R
     y = rho * shortcut(x) + alpha * Wo(u * v)
 
 Scaled weight standardization (SWS) and bounded scalar parameterizations are
@@ -42,8 +42,10 @@ class NormFreeResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, ws_eps=1e-4,
                  alpha_init=0.02, alpha_max=0.1, input_gain_init=1.0,
                  input_gain_min=0.5, input_gain_max=2.0,
-                 quadratic_scale_max=0.1, range_limit=6.0,
-                 range_sample_size=16384, learnable_ws_gain=False):
+                 quadratic_scale_max=0.1, modulation_input_bound=6.0,
+                 range_limit=6.0, range_sample_size=16384,
+                 initial_modulation_progress=1.0,
+                 learnable_ws_gain=False):
         super().__init__()
         if stride not in (1, 2):
             raise ValueError("NormFreeResidualBlock stride must be 1 or 2")
@@ -51,9 +53,15 @@ class NormFreeResidualBlock(nn.Module):
             raise ValueError("range_limit must be positive")
         if range_sample_size <= 0:
             raise ValueError("range_sample_size must be positive")
+        if modulation_input_bound <= 0.0:
+            raise ValueError("modulation_input_bound must be positive")
+        if not 0.0 <= initial_modulation_progress <= 1.0:
+            raise ValueError(
+                "initial_modulation_progress must be in [0, 1]")
 
         self.range_limit = float(range_limit)
         self.range_sample_size = int(range_sample_size)
+        self.modulation_input_bound = float(modulation_input_bound)
         self.input_gain = BoundedScalar(
             input_gain_init, input_gain_min, input_gain_max)
         self.quadratic_scale = SymmetricBoundedScalar(
@@ -83,11 +91,33 @@ class NormFreeResidualBlock(nn.Module):
         self._last_range_tensors = None
         self.deploy = False
         self.register_buffer("deploy_rho", torch.tensor(1.0), persistent=True)
+        self.register_buffer(
+            "modulation_progress",
+            torch.tensor(float(initial_modulation_progress)),
+            persistent=True,
+        )
 
     def residual_coefficients(self):
         alpha = self.alpha()
-        rho = torch.sqrt(torch.clamp(1.0 - alpha.square(), min=0.0))
+        # Convex mixing bounds the amplification of positively correlated
+        # shortcut and branch signals. Energy-preserving sqrt(1-alpha^2)
+        # still has rho + alpha > 1 and caused range drift across 12 blocks.
+        rho = 1.0 - alpha
         return rho, alpha
+
+    def set_modulation_progress(self, progress):
+        progress = float(progress)
+        if not 0.0 <= progress <= 1.0:
+            raise ValueError("modulation progress must be in [0, 1]")
+        self.modulation_progress.fill_(progress)
+
+    def modulation_coefficient(self):
+        """Return beta/R for the explicit operand-v target interval [-R, R]."""
+        return (
+            self.quadratic_scale()
+            * self.modulation_progress
+            / self.modulation_input_bound
+        )
 
     def set_range_tracking(self, enabled=True):
         self.range_tracking = bool(enabled)
@@ -101,8 +131,8 @@ class NormFreeResidualBlock(nn.Module):
         scaled = self.input_gain().to(dtype=x.dtype) * x
         operand_u = self.conv_u(scaled)
         operand_v = self.conv_v(scaled)
-        beta = self.quadratic_scale().to(dtype=x.dtype)
-        modulator = 1.0 + beta * operand_v
+        modulation = self.modulation_coefficient().to(dtype=x.dtype)
+        modulator = 1.0 + modulation * operand_v
         product = operand_u * modulator
         branch = self.conv_out(product)
         shortcut = self.projection(x)
@@ -186,6 +216,8 @@ class NormFreeResidualBlock(nn.Module):
             "rho": rho.detach(),
             "input_gain": self.input_gain().detach(),
             "quadratic_scale": self.quadratic_scale().detach(),
+            "modulation_progress": self.modulation_progress.detach(),
+            "effective_modulation": self.modulation_coefficient().detach(),
         })
         return summary
 
@@ -195,11 +227,11 @@ class NormFreeResidualBlock(nn.Module):
             return self
         with torch.no_grad():
             input_gain = float(self.input_gain().item())
-            beta = float(self.quadratic_scale().item())
+            modulation = float(self.modulation_coefficient().item())
             rho, alpha = self.residual_coefficients()
             self.conv_u = self.conv_u.to_conv2d(input_scale=input_gain)
             self.conv_v = self.conv_v.to_conv2d(
-                input_scale=input_gain, output_scale=beta)
+                input_scale=input_gain, output_scale=modulation)
             self.conv_out = self.conv_out.to_conv2d(
                 output_scale=float(alpha.item()))
             if isinstance(self.projection, ScaledWSConv2d):
@@ -224,7 +256,9 @@ class NormFreeIResNet(nn.Module):
                  ws_eps=1e-4, alpha_init=0.02, alpha_max=0.1,
                  input_gain_init=1.0, input_gain_min=0.5,
                  input_gain_max=2.0, quadratic_scale_max=0.1,
+                 modulation_input_bound=6.0,
                  range_limit=6.0, range_sample_size=16384,
+                 initial_modulation_progress=1.0,
                  learnable_ws_gain=False, **kwargs):
         super().__init__()
         del kwargs
@@ -258,8 +292,10 @@ class NormFreeIResNet(nn.Module):
                     input_gain_min=input_gain_min,
                     input_gain_max=input_gain_max,
                     quadratic_scale_max=quadratic_scale_max,
+                    modulation_input_bound=modulation_input_bound,
                     range_limit=range_limit,
                     range_sample_size=range_sample_size,
+                    initial_modulation_progress=initial_modulation_progress,
                     learnable_ws_gain=learnable_ws_gain,
                 ))
                 in_channels = out_channels
@@ -293,6 +329,23 @@ class NormFreeIResNet(nn.Module):
     def set_nf_range_tracking(self, enabled=True):
         for block in self.nf_blocks():
             block.set_range_tracking(enabled)
+
+    def set_nf_modulation_progresses(self, progresses, order="forward"):
+        blocks = self.nf_blocks()
+        progresses = tuple(float(value) for value in progresses)
+        if len(progresses) != len(blocks):
+            raise ValueError(
+                f"Expected {len(blocks)} modulation progresses, got "
+                f"{len(progresses)}")
+        if order == "reverse":
+            blocks = list(reversed(blocks))
+        elif order != "forward":
+            raise ValueError("NF modulation order must be 'forward' or 'reverse'")
+        for block, progress in zip(blocks, progresses):
+            block.set_modulation_progress(progress)
+
+    def nf_modulation_group_count(self):
+        return len(self.nf_blocks())
 
     def clear_nf_cached_tensors(self):
         for block in self.nf_blocks():

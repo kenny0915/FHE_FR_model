@@ -12,7 +12,7 @@ from easydict import EasyDict as edict
 config = edict()
 config.network = "iresnet_nf12"
 config.resume = False
-config.output = "work_dirs/ms1mv3_iresnet_nf12_twostream_fp32"
+config.output = "work_dirs/ms1mv3_iresnet_nf12_progressive_fp32"
 config.embedding_size = 512
 config.sample_rate = 1.0
 
@@ -31,17 +31,34 @@ config.nf_alpha_init = 0.02
 config.nf_alpha_max = 0.1
 config.nf_input_gain_init = 1.0
 config.nf_input_gain_min = 0.5
-config.nf_input_gain_max = 2.0
+config.nf_input_gain_max = 1.25
 config.nf_quadratic_scale_max = 0.1
+# Approximation/operating target: Wv(s*x) is expected in [-6, 6]. The block
+# evaluates beta * (Wv(s*x) / 6), so the effective quadratic coefficient is
+# bounded by 0.1 / 6. This public division is folded into conv_v for deploy.
+config.nf_modulation_input_bound = 6.0
+config.nf_initial_modulation_progress = 0.0
+
+# First train an exactly linear residual backbone. Starting after warmup,
+# introduce one degree-2 block per epoch from block 11 back to block 0. All
+# gates are fully enabled after epoch 15.
+config.nf_modulation_group_epochs = tuple(
+    3.0 + block_index for block_index in range(12))
+config.nf_modulation_transition_epochs = 1.0
+config.nf_modulation_order = "reverse"
+config.nf_require_full_modulation = True
 config.nf_range_limit = 6.0
 config.nf_range_sample_size = 16384
-config.nf_range_loss_weight = 0.05
-config.nf_stats_interval = 100
+config.nf_range_loss_weight = 1.0
+config.nf_stats_interval = 50
 
 config.fp16 = False
-config.gradient_clip = 1.0
+config.gradient_clip = 0.5
 config.gradient_clip_type = "norm"
 config.gradient_clip_scope = "backbone"
+config.stable_gradient_clip = True
+config.gradient_norm_warning_threshold = 100.0
+config.gradient_norm_warning_interval = 50
 config.check_finite_grads = True
 config.fail_on_nonfinite_val = True
 config.max_validation_embedding_abs = 1e6

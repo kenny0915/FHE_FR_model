@@ -230,14 +230,22 @@ def log_nf_range_stats(stats, global_step, summary_writer=None,
         })
     worst = max(
         serialized.items(), key=lambda item: item[1]["product_absmax"])
+    worst_stats = worst[1]
     logging.info(
         "[NFRange][%d] product_absmax=%.6g p99.9=%.6g "
         "output_rms_max=%.6g modulation_progress_sum=%.3f "
-        "effective_modulation_absmax=%.6g worst=%s",
+        "effective_modulation_absmax=%.6g worst=%s "
+        "u_absmax=%.6g v_absmax=%.6g modulator_absmax=%.6g "
+        "alpha=%.6g input_gain=%.6g",
         global_step, product_absmax, product_p999, output_rms,
         summary.get("modulation_progress_sum", 0.0),
         summary.get("effective_modulation_absmax", 0.0),
         worst[0],
+        worst_stats.get("operand_u_absmax", float("nan")),
+        worst_stats.get("operand_v_absmax", float("nan")),
+        worst_stats.get("modulator_absmax", float("nan")),
+        worst_stats.get("alpha", float("nan")),
+        worst_stats.get("input_gain", float("nan")),
     )
     return serialized
 
@@ -1240,6 +1248,8 @@ def main(args):
             nf_quadratic_scale_max=float(getattr(
                 cfg, "nf_quadratic_scale_max",
                 getattr(cfg, "nf_modulator_scale_max", 0.25))),
+            nf_modulation_input_bound=float(getattr(
+                cfg, "nf_modulation_input_bound", 6.0)),
             nf_learnable_ws_gain=bool(getattr(
                 cfg, "nf_learnable_ws_gain", True)),
             nf_range_limit=float(getattr(cfg, "nf_range_limit", 6.0)),
