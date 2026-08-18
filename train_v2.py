@@ -1201,6 +1201,8 @@ def main(args):
                 cfg, "precise_relu_lower_degrees", (16, 8, 4))),
             precise_relu_progress=float(getattr(
                 cfg, "precise_relu_initial_progress", 0.0)),
+            precise_relu_backward_mode=str(getattr(
+                cfg, "precise_relu_backward_mode", "exact")),
         )
     if cfg.network.startswith("poolformer_no_ln_x2_act"):
         gate_group_epochs = tuple(getattr(
@@ -1773,11 +1775,12 @@ def main(args):
         if rank == 0:
             logging.info(
                 "PreciseReLU curriculum: stages=%s starts=%s "
-                "transition_epochs=%g input_scale=%g",
+                "transition_epochs=%g input_scale=%g backward=%s",
                 backbone.module.polynomial_stage_names(),
                 precise_relu_stage_epochs,
                 precise_relu_transition_epochs,
                 float(getattr(cfg, "precise_relu_input_scale", 8.0)),
+                str(getattr(cfg, "precise_relu_backward_mode", "exact")),
             )
     layerwise_poly_enabled = hasattr(
         backbone.module, "layerwise_poly_activation_names")

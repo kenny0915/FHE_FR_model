@@ -82,7 +82,8 @@ class ProgressivePrecisePReLU(nn.Module):
     is_progressive_precise_relu = True
 
     def __init__(self, channels, input_scale=8.0, lower_degrees=(16, 8, 4),
-                 progress=0.0, initial_slope=0.25):
+                 progress=0.0, initial_slope=0.25,
+                 backward_mode="exact"):
         super().__init__()
         if channels <= 0:
             raise ValueError("channels must be positive")
@@ -99,11 +100,17 @@ class ProgressivePrecisePReLU(nn.Module):
             raise ValueError("lower_degrees must be strictly decreasing")
 
         self.prelu = nn.PReLU(channels, init=float(initial_slope))
-        self.alpha10 = PreciseReLUAlpha10(input_scale=input_scale)
+        self.alpha10 = PreciseReLUAlpha10(
+            input_scale=input_scale, backward_mode=backward_mode)
         self.students = nn.ModuleList([
-            ChebyReLU(input_scale=input_scale, degree=degree)
+            ChebyReLU(
+                input_scale=input_scale,
+                degree=degree,
+                backward_mode=backward_mode,
+            )
             for degree in lower_degrees
         ])
+        self.backward_mode = str(backward_mode)
         self.lower_degrees = lower_degrees
         self.register_buffer(
             "progress", torch.tensor(float(progress), dtype=torch.float32))
@@ -198,11 +205,14 @@ class IResNet(_IResNet):
 
     def __init__(self, *args, precise_relu_input_scale=8.0,
                  precise_relu_lower_degrees=(16, 8, 4),
-                 precise_relu_progress=0.0, **kwargs):
+                 precise_relu_progress=0.0,
+                 precise_relu_backward_mode="exact", **kwargs):
         super().__init__(*args, **kwargs)
         self.precise_relu_input_scale = float(precise_relu_input_scale)
         self.precise_relu_lower_degrees = tuple(
             int(degree) for degree in precise_relu_lower_degrees)
+        self.precise_relu_backward_mode = str(
+            precise_relu_backward_mode)
         self.register_buffer(
             "polynomial_progress",
             torch.tensor(float(precise_relu_progress), dtype=torch.float32),
@@ -218,6 +228,7 @@ class IResNet(_IResNet):
                     input_scale=self.precise_relu_input_scale,
                     lower_degrees=self.precise_relu_lower_degrees,
                     progress=float(self.polynomial_progress.item()),
+                    backward_mode=self.precise_relu_backward_mode,
                 ).to(device=child.weight.device, dtype=child.weight.dtype)
                 with torch.no_grad():
                     replacement.prelu.weight.copy_(child.weight)

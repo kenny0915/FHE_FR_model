@@ -10,6 +10,8 @@ from torch import nn
 
 __all__ = ["ChebyReLU", "PreciseReLUAlpha10"]
 
+_BACKWARD_MODES = ("exact", "clipped_exact", "relu_ste")
+
 
 def _compute_dtype(x):
     return torch.float32 if x.dtype in (torch.float16, torch.bfloat16) else x.dtype
@@ -32,6 +34,16 @@ def _polyval_with_derivative(x, coefficients):
     return value, derivative
 
 
+def _select_backward_derivative(exact_derivative, x, mode):
+    if mode == "exact":
+        return exact_derivative
+    if mode == "clipped_exact":
+        return exact_derivative.clamp(0.0, 1.0)
+    if mode == "relu_ste":
+        return (x > 0).to(dtype=exact_derivative.dtype)
+    raise ValueError("Unknown polynomial ReLU backward mode: {}".format(mode))
+
+
 class _PreciseReLUAlpha10Function(torch.autograd.Function):
     """Memory-efficient Alpha10 with analytical recomputation in backward.
 
@@ -43,7 +55,8 @@ class _PreciseReLUAlpha10Function(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, x, p1_coeffs, p2_coeffs, p3_coeffs, input_scale):
+    def forward(ctx, x, p1_coeffs, p2_coeffs, p3_coeffs, input_scale,
+                backward_mode):
         compute_dtype = _compute_dtype(x)
         compute_x = x.to(dtype=compute_dtype)
         scale = input_scale.to(device=x.device, dtype=compute_dtype)
@@ -57,6 +70,7 @@ class _PreciseReLUAlpha10Function(torch.autograd.Function):
         output = scale * 0.5 * (scaled_x + scaled_x * p3_x)
         ctx.save_for_backward(
             x, p1_coeffs, p2_coeffs, p3_coeffs, input_scale)
+        ctx.backward_mode = str(backward_mode)
         return output.to(dtype=x.dtype)
 
     @staticmethod
@@ -76,10 +90,12 @@ class _PreciseReLUAlpha10Function(torch.autograd.Function):
         p3_x, p3_derivative = _polyval_with_derivative(p2_x, p3)
         composed_derivative = (
             p3_derivative * p2_derivative * p1_derivative)
-        input_derivative = 0.5 * (
+        exact_derivative = 0.5 * (
             1.0 + p3_x + scaled_x * composed_derivative)
+        input_derivative = _select_backward_derivative(
+            exact_derivative, compute_x, ctx.backward_mode)
         grad_input = grad_output.to(dtype=compute_dtype) * input_derivative
-        return grad_input.to(dtype=x.dtype), None, None, None, None
+        return grad_input.to(dtype=x.dtype), None, None, None, None, None
 
 
 def _cheby_relu_forward(x, coefficients, scale, degree):
@@ -114,7 +130,7 @@ class _ChebyReLUFunction(torch.autograd.Function):
     """Fixed ChebyReLU with input-only activation storage."""
 
     @staticmethod
-    def forward(ctx, x, coefficients, input_scale, degree):
+    def forward(ctx, x, coefficients, input_scale, degree, backward_mode):
         compute_dtype = _compute_dtype(x)
         compute_x = x.to(dtype=compute_dtype)
         scale = input_scale.to(device=x.device, dtype=compute_dtype)
@@ -123,6 +139,7 @@ class _ChebyReLUFunction(torch.autograd.Function):
         output = _cheby_relu_forward(
             compute_x, compute_coefficients, scale, int(degree))
         ctx.degree = int(degree)
+        ctx.backward_mode = str(backward_mode)
         ctx.save_for_backward(x, coefficients, input_scale)
         return output.to(dtype=x.dtype)
 
@@ -148,9 +165,11 @@ class _ChebyReLUFunction(torch.autograd.Function):
                 even_derivative * z_squared
                 + 2.0 * power * compute_coefficients[index]
             )
-        input_derivative = 0.5 + z * even_derivative
+        exact_derivative = 0.5 + z * even_derivative
+        input_derivative = _select_backward_derivative(
+            exact_derivative, compute_x, ctx.backward_mode)
         grad_input = grad_output.to(dtype=compute_dtype) * input_derivative
-        return grad_input.to(dtype=x.dtype), None, None, None
+        return grad_input.to(dtype=x.dtype), None, None, None, None
 
 
 class ChebyReLU(nn.Module):
@@ -177,13 +196,17 @@ class ChebyReLU(nn.Module):
     }
     _MULTIPLICATIVE_DEPTHS = {4: 2, 8: 3, 16: 4}
 
-    def __init__(self, input_scale=8.0, degree=4):
+    def __init__(self, input_scale=8.0, degree=4, backward_mode="exact"):
         super().__init__()
         if input_scale <= 0:
             raise ValueError("input_scale must be positive")
         if degree not in self._NORMALIZED_POWER_COEFFS:
             raise ValueError("ChebyReLU degree must be 4, 8, or 16")
+        if backward_mode not in _BACKWARD_MODES:
+            raise ValueError(
+                "backward_mode must be exact, clipped_exact, or relu_ste")
         self.degree = int(degree)
+        self.backward_mode = str(backward_mode)
         self.multiplicative_depth = self._MULTIPLICATIVE_DEPTHS[self.degree]
         self.register_buffer(
             "input_scale", torch.tensor(float(input_scale), dtype=torch.float32))
@@ -199,6 +222,7 @@ class ChebyReLU(nn.Module):
             self.normalized_power_coeffs,
             self.input_scale,
             self.degree,
+            self.backward_mode,
         )
 
 
@@ -237,10 +261,14 @@ class PreciseReLUAlpha10(nn.Module):
         1.52452197400636e-38, 2.46407138926031e-1,
     )
 
-    def __init__(self, input_scale=1.0):
+    def __init__(self, input_scale=1.0, backward_mode="exact"):
         super().__init__()
         if input_scale <= 0:
             raise ValueError("input_scale must be positive")
+        if backward_mode not in _BACKWARD_MODES:
+            raise ValueError(
+                "backward_mode must be exact, clipped_exact, or relu_ste")
+        self.backward_mode = str(backward_mode)
         self.register_buffer(
             "input_scale", torch.tensor(float(input_scale), dtype=torch.float32))
         self.register_buffer(
@@ -257,4 +285,5 @@ class PreciseReLUAlpha10(nn.Module):
             self.p2_coeffs,
             self.p3_coeffs,
             self.input_scale,
+            self.backward_mode,
         )

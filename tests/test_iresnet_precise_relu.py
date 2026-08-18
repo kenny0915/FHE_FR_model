@@ -122,6 +122,52 @@ def test_memory_efficient_range_penalty_matches_reference_gradient():
         efficient_input.grad, reference_input.grad, rtol=1e-6, atol=1e-7)
 
 
+def test_relu_ste_keeps_polynomial_forward_and_uses_relu_backward():
+    inputs = torch.tensor(
+        [-8.2, -4.0, -0.25, 0.0, 0.25, 4.0, 8.2],
+        requires_grad=True,
+    )
+    exact_inputs = inputs.detach().clone()
+    output_weight = torch.tensor([0.2, -0.4, 0.7, 1.0, -0.3, 0.6, -0.8])
+
+    ste = SharedPreciseReLUAlpha10(
+        8.0, backward_mode="relu_ste")(inputs)
+    exact_forward = SharedPreciseReLUAlpha10(8.0)(exact_inputs)
+    torch.testing.assert_close(ste, exact_forward, rtol=0, atol=0)
+    (ste * output_weight).sum().backward()
+    torch.testing.assert_close(
+        inputs.grad,
+        output_weight * (inputs.detach() > 0).to(output_weight.dtype),
+    )
+
+
+def test_progressive_prelu_ste_has_ordinary_prelu_surrogate_gradient():
+    activation = ProgressivePrecisePReLU(
+        channels=2,
+        input_scale=8.0,
+        progress=0.0,
+        backward_mode="relu_ste",
+    ).eval()
+    with torch.no_grad():
+        activation.prelu.weight.copy_(torch.tensor([0.1, 0.4]))
+    inputs = torch.tensor(
+        [[[[-8.2, -0.5, 0.5, 8.2]],
+          [[-8.2, -0.5, 0.5, 8.2]]]],
+        requires_grad=True,
+    )
+    output_weight = torch.tensor(
+        [[[[0.2, -0.3, 0.4, -0.5]],
+          [[-0.6, 0.7, -0.8, 0.9]]]],
+    )
+    (activation(inputs) * output_weight).sum().backward()
+
+    slope = activation.prelu.weight.detach().reshape(1, 2, 1, 1)
+    expected_derivative = torch.where(
+        inputs.detach() > 0, torch.ones_like(inputs), slope)
+    torch.testing.assert_close(
+        inputs.grad, output_weight * expected_derivative)
+
+
 def test_progressive_activation_starts_at_alpha10_and_ends_at_degree4():
     activation = ProgressivePrecisePReLU(
         channels=2,
@@ -203,11 +249,13 @@ def test_scale8_and_scale16_configs_reach_degree4_with_final_finetuning():
         assert cfg.network == "r50_precise_relu"
         assert cfg.precise_relu_input_scale == expected_scale
         assert cfg.precise_relu_lower_degrees == (16, 8, 4)
+        assert cfg.precise_relu_backward_mode == "relu_ste"
         assert cfg.fp16 is True
         assert cfg.batch_size == 64
-        assert cfg.gradient_acc == 2
-        assert cfg.normalize_gradient_accumulation is True
-        assert cfg.batch_size * 4 * cfg.gradient_acc == 512
+        assert cfg.gradient_acc == 1
+        assert cfg.batch_size * 4 == 256
+        assert cfg.lr == 0.0025
+        assert cfg.amp_init_scale == 1024.0
         assert len(cfg.precise_relu_stage_epochs) == 3
         assert all(
             right >= left + cfg.precise_relu_transition_epochs

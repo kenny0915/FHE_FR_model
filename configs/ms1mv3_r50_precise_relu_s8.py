@@ -23,12 +23,11 @@ config.fp16 = True
 config.momentum = 0.9
 config.weight_decay = 5e-4
 config.gradient_clip = 0.5
-# batch_size is per GPU. On four GPUs, two normalized accumulation steps keep
-# the original effective global batch: 64 * 4 * 2 = 512.
+# batch_size is per GPU. A global batch of 256 avoids both the memory pressure
+# and the scheduler-before-optimizer ordering caused by accumulation.
 config.batch_size = 64
-config.gradient_acc = 2
-config.normalize_gradient_accumulation = True
-config.lr = 0.005
+config.gradient_acc = 1
+config.lr = 0.0025
 config.verbose = 2000
 config.dali = False
 
@@ -38,6 +37,11 @@ config.backbone_init = "work_dirs/ms1mv3_r50/model.pt"
 config.precise_relu_input_scale = 8.0
 config.precise_relu_lower_degrees = (16, 8, 4)
 config.precise_relu_initial_progress = 0.0
+# Alpha10's exact derivative is ill-conditioned near/outside the interval
+# boundary even when its forward approximation is accurate. Keep the exact
+# polynomial forward but use ReLU's derivative during training. Combined with
+# the learned slope, this is exactly the ordinary PReLU surrogate derivative.
+config.precise_relu_backward_mode = "relu_ste"
 
 # Epochs 0-2 train the full Alpha10 replacement. Each listed epoch starts a
 # smooth one-epoch whole-network transition to the next lower degree. Nine
@@ -55,6 +59,8 @@ config.sync_bn = True
 config.broadcast_buffers = True
 config.check_finite_grads = True
 config.ddp_fp16_compress = False
+config.amp_init_scale = 1024.0
+config.amp_growth_interval = 1000
 config.save_all_states = True
 config.checkpoint_interval_epochs = 1
 config.save_epoch_models = True

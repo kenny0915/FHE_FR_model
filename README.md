@@ -111,13 +111,17 @@ multiplicative depth 2); Alpha10's composed algebraic degree is 638 and is only
 the accurate starting teacher. Use the `s16` config when the scale-8 range
 statistics show meaningful tails outside `[-8, 8]`.
 
-The four-GPU recipe uses 64 samples per GPU with two normalized gradient
-accumulation steps, preserving an effective global batch of 512. Convolutions
-run under FP16 autocast, while Alpha10 evaluates and differentiates in FP32.
+The four-GPU recipe uses 64 samples per GPU for a global batch of 256 and a
+linearly scaled learning rate of 0.0025. Convolutions run under FP16 autocast,
+while polynomial activations evaluate and differentiate internally in FP32.
 Its custom backward saves only the activation input and recomputes the fixed
 polynomial derivatives, rather than retaining every full-sized Horner
-intermediate. If a 32 GB GPU still runs out of memory, use batch size 32 with
-`gradient_acc = 4`; the effective global batch and learning rate stay the same.
+intermediate. The polynomial forward is exact, but training uses a ReLU
+straight-through derivative because Alpha10's exact derivative is unstable at
+the approximation boundary. Together with the learned channel slope, this is
+the ordinary PReLU derivative. This surrogate is training-only and does not
+alter inference or the FHE graph. If a 32 GB GPU still runs out of memory, use
+batch size 32 and reduce the learning rate to 0.00125.
 
 For the SimpleGate/RepBatchNorm experiment, epochs 0-8 use GELU while the
 normalization transition finishes. BatchNorm is then recalibrated and verified
