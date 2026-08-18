@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 
+import torch
 import torch.nn as nn
 
 
@@ -103,3 +104,42 @@ def select_gradient_clip_parameters(optimizer, backbone, scope="all"):
         raise ValueError(
             f"gradient_clip_scope={scope!r} selected no parameters")
     return parameters
+
+
+def clip_grad_norm_stable(parameters, max_norm, error_if_nonfinite=False):
+    """Clip an L2 gradient norm using FP64 reductions.
+
+    ``torch.nn.utils.clip_grad_norm_`` accumulates FP32 squared gradients for
+    FP32 parameters. A collection of individually finite, very large
+    gradients can therefore produce an infinite total norm. Reducing each
+    tensor and the final vector in FP64 distinguishes that overflow from a
+    genuinely non-finite gradient and produces the correct clipping factor.
+    """
+    gradients = [
+        parameter.grad for parameter in list(parameters)
+        if parameter.grad is not None
+    ]
+    if not gradients:
+        return torch.tensor(0.0)
+    device = gradients[0].device
+    if any(gradient.device != device for gradient in gradients):
+        raise ValueError("Stable norm clipping requires one gradient device")
+    norms = [
+        torch.linalg.vector_norm(
+            gradient.detach(), ord=2, dtype=torch.float64)
+        for gradient in gradients
+    ]
+    total_norm = torch.linalg.vector_norm(
+        torch.stack(norms), ord=2, dtype=torch.float64)
+    if not torch.isfinite(total_norm):
+        if error_if_nonfinite:
+            raise RuntimeError(
+                "The FP64 total gradient norm is non-finite and cannot be "
+                "clipped")
+        return total_norm
+    clip_coefficient = float(max_norm) / (total_norm + 1e-12)
+    clip_coefficient = clip_coefficient.clamp(max=1.0)
+    for gradient in gradients:
+        gradient.mul_(clip_coefficient.to(
+            device=gradient.device, dtype=gradient.dtype))
+    return total_norm

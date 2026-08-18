@@ -75,6 +75,23 @@ def test_range_penalty_is_finite_and_differentiable():
     )
 
 
+def test_range_penalty_has_finite_gradient_for_extreme_finite_outlier():
+    block = NormFreeGatedBlock(dim=8)
+    extreme = torch.tensor([1e30], requires_grad=True)
+    block._last_range_tensors = {
+        "operand_u": extreme,
+        "operand_v": extreme,
+        "product": extreme,
+        "output": extreme,
+    }
+
+    penalty = block.range_penalty()
+    penalty.backward()
+
+    assert torch.isfinite(penalty)
+    assert torch.isfinite(extreme.grad)
+
+
 def test_deploy_conversion_folds_sws_and_scalar_parameterizations():
     torch.manual_seed(7)
     model = _tiny_model().eval()
@@ -110,4 +127,7 @@ def test_nf12_training_config_matches_stable_recipe():
     assert cfg.embedding_distill_weight == pytest.approx(1.0)
     assert cfg.nf_range_loss_weight > 0.0
     assert cfg.nf_alpha_init < cfg.nf_alpha_max
+    assert cfg.nf_alpha_max == pytest.approx(0.1)
+    assert cfg.nf_input_gain_max == pytest.approx(1.5)
+    assert cfg.nf_modulator_scale_max == pytest.approx(0.1)
     assert cfg.gradient_clip_scope == "backbone"

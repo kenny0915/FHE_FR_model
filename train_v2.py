@@ -21,6 +21,7 @@ from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
 from utils.utils_optimizer import (
+    clip_grad_norm_stable,
     select_gradient_clip_parameters,
     split_weight_decay_parameters,
     temporary_optimizer_lr_scale,
@@ -1178,6 +1179,10 @@ def main(args):
             nf_alpha_max=float(getattr(cfg, "nf_alpha_max", 0.2)),
             nf_input_gain_init=float(getattr(
                 cfg, "nf_input_gain_init", 1.0)),
+            nf_input_gain_min=float(getattr(
+                cfg, "nf_input_gain_min", 0.25)),
+            nf_input_gain_max=float(getattr(
+                cfg, "nf_input_gain_max", 4.0)),
             nf_modulator_scale_max=float(getattr(
                 cfg, "nf_modulator_scale_max", 0.25)),
             nf_quadratic_scale_max=float(getattr(
@@ -2515,6 +2520,10 @@ def main(args):
                     if getattr(cfg, "gradient_clip_type", "norm") == "value":
                         torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
                         total_norm = torch.tensor(0.0, device=local_embeddings.device)
+                    elif getattr(cfg, "stable_gradient_clip", False):
+                        total_norm = clip_grad_norm_stable(
+                            clipped_params, grad_clip,
+                            error_if_nonfinite=False)
                     else:
                         total_norm = torch.nn.utils.clip_grad_norm_(
                             clipped_params, grad_clip, error_if_nonfinite=False
@@ -2548,8 +2557,29 @@ def main(args):
                     check_finite_gradients(module_partial_fc, "partial_fc", global_step)
                     if getattr(cfg, "gradient_clip_type", "norm") == "value":
                         torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
+                        total_norm = torch.tensor(
+                            0.0, device=local_embeddings.device)
+                    elif getattr(cfg, "stable_gradient_clip", False):
+                        total_norm = clip_grad_norm_stable(
+                            clipped_params, grad_clip,
+                            error_if_nonfinite=True)
                     else:
-                        torch.nn.utils.clip_grad_norm_(clipped_params, grad_clip, error_if_nonfinite=True)
+                        total_norm = torch.nn.utils.clip_grad_norm_(
+                            clipped_params, grad_clip,
+                            error_if_nonfinite=True)
+                    gradient_norm_warning_threshold = float(getattr(
+                        cfg, "gradient_norm_warning_threshold", 100.0))
+                    gradient_norm_warning_interval = max(1, int(getattr(
+                        cfg, "gradient_norm_warning_interval", 100)))
+                    if (rank == 0
+                            and gradient_norm_warning_threshold > 0.0
+                            and global_step % gradient_norm_warning_interval == 0
+                            and total_norm.item()
+                            > gradient_norm_warning_threshold):
+                        logging.warning(
+                            "Large finite pre-clip gradient norm at "
+                            "global_step=%d: %.6g (clipped to %.6g)",
+                            global_step, total_norm.item(), grad_clip)
                     with temporary_optimizer_lr_scale(
                             opt, effective_simple_gate_lr_scale):
                         if layerwise_poly_staged_training:

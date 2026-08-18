@@ -376,6 +376,8 @@ def get_model(name, **kwargs):
             alpha_init=kwargs.get("nf_alpha_init", 0.05),
             alpha_max=kwargs.get("nf_alpha_max", 0.2),
             input_gain_init=kwargs.get("nf_input_gain_init", 1.0),
+            input_gain_min=kwargs.get("nf_input_gain_min", 0.25),
+            input_gain_max=kwargs.get("nf_input_gain_max", 4.0),
             modulator_scale_max=kwargs.get(
                 "nf_modulator_scale_max", 0.25),
             range_limit=kwargs.get("nf_range_limit", 6.0),

@@ -16,7 +16,7 @@ from easydict import EasyDict as edict
 config = edict()
 config.network = "poolformer_nf12"
 config.resume = False
-config.output = "work_dirs/ms1mv3_poolformer_nf12_fp32"
+config.output = "work_dirs/ms1mv3_poolformer_nf12_stable_fp32"
 config.embedding_size = 512
 config.sample_rate = 1.0
 
@@ -28,14 +28,16 @@ config.embedding_teacher_checkpoint = (
 config.embedding_distill_weight = 1.0
 
 # Stable NF block initialization. tau mixes only 10% local average; alpha is
-# initially 0.05 and cannot exceed 0.2; the quadratic modulator starts at zero,
+# initially 0.05 and cannot exceed 0.1; the quadratic modulator starts at zero,
 # making every gate exactly linear (u * 1) on the first forward pass.
 config.nf_ws_eps = 1e-4
 config.nf_tau_init = 0.1
 config.nf_alpha_init = 0.05
-config.nf_alpha_max = 0.2
+config.nf_alpha_max = 0.1
 config.nf_input_gain_init = 1.0
-config.nf_modulator_scale_max = 0.25
+config.nf_input_gain_min = 0.5
+config.nf_input_gain_max = 1.5
+config.nf_modulator_scale_max = 0.1
 config.nf_range_limit = 6.0
 config.nf_range_sample_size = 16384
 config.nf_range_loss_weight = 0.01
@@ -47,6 +49,9 @@ config.fp16 = False
 config.gradient_clip = 1.0
 config.gradient_clip_type = "norm"
 config.gradient_clip_scope = "backbone"
+config.stable_gradient_clip = True
+config.gradient_norm_warning_threshold = 100.0
+config.gradient_norm_warning_interval = 100
 config.check_finite_grads = True
 config.fail_on_nonfinite_val = True
 config.max_nonfinite_embedding_skips = 0

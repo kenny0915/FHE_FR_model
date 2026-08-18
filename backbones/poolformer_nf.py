@@ -225,14 +225,27 @@ class NormFreeGatedBlock(nn.Module):
         limit = self.range_limit
         penalties = []
         for name in ("operand_u", "operand_v", "product"):
-            value = self._sample(self._last_range_tensors[name]).float()
-            excess = F.relu(value.abs() - limit) / limit
-            penalties.append(excess.square().mean())
+            full_value = self._last_range_tensors[name].float()
+            value = self._sample(full_value)
+            # Log compression is training-only. It preserves a zero penalty
+            # inside [-limit, limit] but cannot create an enormous auxiliary
+            # gradient when a rare quadratic outlier is still finite.
+            excess = F.relu(
+                torch.log1p(value.abs() / limit) - math.log(2.0))
+            max_excess = F.relu(
+                torch.log1p(full_value.abs().amax() / limit)
+                - math.log(2.0))
+            penalties.append(
+                excess.square().mean() + 0.1 * max_excess.square())
         output = self._sample(self._last_range_tensors["output"]).float()
-        output_rms = output.square().mean().sqrt()
+        output_scale = output.detach().abs().amax().clamp_min(1e-12)
+        output_rms = output_scale * (
+            (output / output_scale).square().mean().sqrt())
         # A soft scale guard complements the tail penalty without trying to
         # force every stage to have identical variance.
-        penalties.append(F.relu(output_rms / limit - 1.0).square())
+        rms_excess = F.relu(
+            torch.log1p(output_rms / limit) - math.log(2.0))
+        penalties.append(rms_excess.square())
         return torch.stack(penalties).mean()
 
     def _sample(self, value):
@@ -373,6 +386,7 @@ class NormFreePoolFormer(nn.Module):
                  num_classes=512, face_embedding=True, fp16=False,
                  pool_size=3, ws_eps=1e-4, tau_init=0.1,
                  alpha_init=0.05, alpha_max=0.2, input_gain_init=1.0,
+                 input_gain_min=0.25, input_gain_max=4.0,
                  modulator_scale_max=0.25, range_limit=6.0,
                  range_sample_size=16384, **kwargs):
         super().__init__()
@@ -396,6 +410,8 @@ class NormFreePoolFormer(nn.Module):
                 alpha_init=alpha_init,
                 alpha_max=alpha_max,
                 input_gain_init=input_gain_init,
+                input_gain_min=input_gain_min,
+                input_gain_max=input_gain_max,
                 modulator_scale_max=modulator_scale_max,
                 range_limit=range_limit,
                 range_sample_size=range_sample_size,

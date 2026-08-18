@@ -2,9 +2,24 @@ import torch
 import pytest
 
 from utils.utils_optimizer import (
+    clip_grad_norm_stable,
     select_gradient_clip_parameters,
     temporary_optimizer_lr_scale,
 )
+
+
+def test_stable_gradient_clip_handles_finite_fp32_norm_overflow():
+    parameter = torch.nn.Parameter(torch.zeros(2))
+    parameter.grad = torch.tensor([1e30, -1e30])
+
+    total_norm = clip_grad_norm_stable(
+        [parameter], max_norm=1.0, error_if_nonfinite=True)
+
+    assert torch.isfinite(total_norm)
+    assert total_norm.dtype == torch.float64
+    assert total_norm.item() == pytest.approx(2 ** 0.5 * 1e30, rel=1e-6)
+    assert torch.linalg.vector_norm(parameter.grad).item() == pytest.approx(
+        1.0, rel=1e-6)
 
 
 def test_temporary_optimizer_lr_scale_restores_scheduler_lr():
