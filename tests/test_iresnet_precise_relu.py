@@ -41,7 +41,7 @@ def test_progressive_activation_starts_at_alpha10_and_ends_at_degree4():
     )
     torch.testing.assert_close(activation(inputs), alpha_expected)
 
-    activation.set_progress(3.0)
+    activation.set_degree_progress(3.0)
     degree4_expected = (
         slope * inputs
         + (1.0 - slope) * ChebyReLU(8.0, degree=4)(inputs)
@@ -79,6 +79,10 @@ def test_r50_replaces_every_original_prelu_and_loads_baseline_strictly():
         if isinstance(module, ProgressivePrecisePReLU)
     ]
     assert len(activations) == 25
+    # ``train_v2.set_prepbn_progress`` reserves ``set_progress(step, total)``
+    # for RepBatchNorm-style modules. PreciseReLU must not match that protocol.
+    assert not any(hasattr(activation, "set_progress")
+                   for activation in activations)
     assert {
         id(module) for module in model.modules()
         if isinstance(module, nn.PReLU)

@@ -71,13 +71,13 @@ class ProgressivePrecisePReLU(nn.Module):
         self._last_range_penalty = None
         self._last_input_absmax = None
         self._last_outside_fraction = None
-        self.set_progress(progress)
+        self.set_degree_progress(progress)
 
     @property
     def transition_count(self):
         return len(self.students)
 
-    def set_progress(self, progress):
+    def set_degree_progress(self, progress):
         progress = float(progress)
         if not math.isfinite(progress):
             raise ValueError("polynomial progress must be finite")
@@ -200,7 +200,7 @@ class IResNet(_IResNet):
                        float(self.polynomial_transition_count()))
         self.polynomial_progress.fill_(progress)
         for activation in self.polynomial_activations():
-            activation.set_progress(progress)
+            activation.set_degree_progress(progress)
 
     def polynomial_stage_names(self):
         return ("alpha10",) + tuple(
