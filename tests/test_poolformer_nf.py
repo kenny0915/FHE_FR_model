@@ -33,6 +33,13 @@ def test_nf12_factory_has_twelve_gates_and_no_backbone_activation_norm():
         if not name.startswith("head") and isinstance(module, forbidden)
     ]
     assert backbone_norms == []
+    sws_convs = [
+        module for module in model.modules()
+        if isinstance(module, ScaledWSConv2d)
+    ]
+    assert sws_convs
+    assert all(module.bias is None for module in sws_convs)
+    assert all(not module.gain.requires_grad for module in sws_convs)
 
 
 def test_gate_is_exactly_linear_at_initialization_and_coefficients_are_bounded():
@@ -48,7 +55,7 @@ def test_gate_is_exactly_linear_at_initialization_and_coefficients_are_bounded()
     rho, alpha = block.residual_coefficients()
     assert alpha.item() == pytest.approx(0.05, abs=1e-6)
     assert 0.0 < alpha.item() < 0.2
-    assert rho.square().add(alpha.square()).item() == pytest.approx(
+    assert rho.add(alpha).item() == pytest.approx(
         1.0, abs=1e-6)
     assert torch.isfinite(outputs).all()
 
@@ -58,6 +65,17 @@ def test_token_mixer_is_nonexpansive_in_infinity_norm():
     inputs = torch.randn(2, 8, 9, 9)
     mixed = block.token_mixer(inputs)
     assert mixed.abs().max() <= inputs.abs().max() + 1e-6
+
+
+def test_reverse_modulation_schedule_maps_first_group_to_last_block():
+    model = _tiny_model()
+    model.set_nf_modulation_progresses(
+        (0.25, 0.0, 0.0, 0.0), order="reverse")
+    blocks = model.nf_blocks()
+
+    assert blocks[-1].modulation_progress.item() == pytest.approx(0.25)
+    assert all(block.modulation_progress.item() == pytest.approx(0.0)
+               for block in blocks[:-1])
 
 
 def test_range_penalty_is_finite_and_differentiable():
@@ -128,6 +146,10 @@ def test_nf12_training_config_matches_stable_recipe():
     assert cfg.nf_range_loss_weight > 0.0
     assert cfg.nf_alpha_init < cfg.nf_alpha_max
     assert cfg.nf_alpha_max == pytest.approx(0.1)
-    assert cfg.nf_input_gain_max == pytest.approx(1.5)
-    assert cfg.nf_modulator_scale_max == pytest.approx(0.1)
+    assert cfg.nf_input_gain_max == pytest.approx(1.25)
+    assert cfg.nf_modulator_scale_max == pytest.approx(0.02)
+    assert cfg.nf_initial_modulation_progress == pytest.approx(0.0)
+    assert cfg.nf_learnable_ws_gain is False
+    assert len(cfg.nf_modulation_group_epochs) == 12
+    assert cfg.nf_modulation_order == "reverse"
     assert cfg.gradient_clip_scope == "backbone"

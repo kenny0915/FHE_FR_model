@@ -147,12 +147,16 @@ class NormFreeGatedBlock(nn.Module):
                  alpha_init=0.05, alpha_max=0.2, input_gain_init=1.0,
                  input_gain_min=0.25, input_gain_max=4.0,
                  modulator_scale_max=0.25, range_limit=6.0,
-                 range_sample_size=16384):
+                 range_sample_size=16384,
+                 initial_modulation_progress=1.0):
         super().__init__()
         if range_limit <= 0:
             raise ValueError("range_limit must be positive")
         if range_sample_size <= 0:
             raise ValueError("range_sample_size must be positive")
+        if not 0.0 <= initial_modulation_progress <= 1.0:
+            raise ValueError(
+                "initial_modulation_progress must be in [0, 1]")
         self.dim = int(dim)
         self.range_limit = float(range_limit)
         self.range_sample_size = int(range_sample_size)
@@ -162,9 +166,12 @@ class NormFreeGatedBlock(nn.Module):
         self.modulator_scale = SymmetricBoundedScalar(
             initial=0.0, maximum=modulator_scale_max)
         self.alpha = BoundedScalar(alpha_init, 1e-5, alpha_max)
-        self.conv_u = ScaledWSConv2d(dim, dim, 1, ws_eps=ws_eps)
-        self.conv_v = ScaledWSConv2d(dim, dim, 1, ws_eps=ws_eps)
-        self.conv_out = ScaledWSConv2d(dim, dim, 1, ws_eps=ws_eps)
+        self.conv_u = ScaledWSConv2d(
+            dim, dim, 1, bias=False, ws_eps=ws_eps)
+        self.conv_v = ScaledWSConv2d(
+            dim, dim, 1, bias=False, ws_eps=ws_eps)
+        self.conv_out = ScaledWSConv2d(
+            dim, dim, 1, bias=False, ws_eps=ws_eps)
         self.apply(_init_ws_conv)
 
         self.range_tracking = False
@@ -172,11 +179,27 @@ class NormFreeGatedBlock(nn.Module):
         self.deploy = False
         self.register_buffer("deploy_tau", torch.tensor(0.0), persistent=True)
         self.register_buffer("deploy_rho", torch.tensor(1.0), persistent=True)
+        self.register_buffer(
+            "modulation_progress",
+            torch.tensor(float(initial_modulation_progress)),
+            persistent=True,
+        )
 
     def residual_coefficients(self):
         alpha = self.alpha()
-        rho = torch.sqrt(torch.clamp(1.0 - alpha.square(), min=0.0))
+        # Convex residual mixing prevents twelve positively correlated
+        # branches from accumulating coefficients greater than one.
+        rho = 1.0 - alpha
         return rho, alpha
+
+    def set_modulation_progress(self, progress):
+        progress = float(progress)
+        if not 0.0 <= progress <= 1.0:
+            raise ValueError("modulation progress must be in [0, 1]")
+        self.modulation_progress.fill_(progress)
+
+    def modulation_coefficient(self):
+        return self.modulator_scale() * self.modulation_progress
 
     def set_range_tracking(self, enabled=True):
         self.range_tracking = bool(enabled)
@@ -190,7 +213,7 @@ class NormFreeGatedBlock(nn.Module):
         mixed = self.token_mixer(x)
         scaled = self.input_gain().to(dtype=x.dtype) * mixed
         u = self.conv_u(scaled)
-        modulation = self.modulator_scale().to(dtype=x.dtype)
+        modulation = self.modulation_coefficient().to(dtype=x.dtype)
         v = 1.0 + modulation * self.conv_v(scaled)
         product = u * v
         branch = self.conv_out(product)
@@ -281,6 +304,8 @@ class NormFreeGatedBlock(nn.Module):
             "rho": rho.detach(),
             "input_gain": self.input_gain().detach(),
             "modulator_scale": self.modulator_scale().detach(),
+            "modulation_progress": self.modulation_progress.detach(),
+            "effective_modulation": self.modulation_coefficient().detach(),
         })
         return summary
 
@@ -291,7 +316,7 @@ class NormFreeGatedBlock(nn.Module):
         with torch.no_grad():
             tau = float(self.token_mixer.tau().item())
             input_gain = float(self.input_gain().item())
-            modulation = float(self.modulator_scale().item())
+            modulation = float(self.modulation_coefficient().item())
             rho, alpha = self.residual_coefficients()
             self.deploy_tau.fill_(tau)
             self.deploy_rho.fill_(float(rho.item()))
@@ -316,7 +341,7 @@ class PatchEmbed(nn.Module):
         super().__init__()
         self.proj = ScaledWSConv2d(
             in_channels, out_channels, kernel_size, stride=stride,
-            padding=padding, ws_eps=ws_eps)
+            padding=padding, bias=False, ws_eps=ws_eps)
         _init_ws_conv(self.proj)
 
     def forward(self, x):
@@ -388,7 +413,9 @@ class NormFreePoolFormer(nn.Module):
                  alpha_init=0.05, alpha_max=0.2, input_gain_init=1.0,
                  input_gain_min=0.25, input_gain_max=4.0,
                  modulator_scale_max=0.25, range_limit=6.0,
-                 range_sample_size=16384, **kwargs):
+                 range_sample_size=16384,
+                 initial_modulation_progress=1.0,
+                 learnable_ws_gain=False, **kwargs):
         super().__init__()
         if fp16:
             raise ValueError(
@@ -415,6 +442,7 @@ class NormFreePoolFormer(nn.Module):
                 modulator_scale_max=modulator_scale_max,
                 range_limit=range_limit,
                 range_sample_size=range_sample_size,
+                initial_modulation_progress=initial_modulation_progress,
             ) for _ in range(depth)]
             network.append(nn.Sequential(*blocks))
             if stage < 3:
@@ -426,7 +454,7 @@ class NormFreePoolFormer(nn.Module):
             self.head = nn.Sequential(
                 ScaledWSConv2d(
                     embed_dims[-1], embed_dims[-1], kernel_size=7,
-                    ws_eps=ws_eps),
+                    bias=False, ws_eps=ws_eps),
                 nn.BatchNorm2d(embed_dims[-1]),
                 nn.Flatten(),
                 nn.Linear(embed_dims[-1], num_classes, bias=False),
@@ -438,6 +466,10 @@ class NormFreePoolFormer(nn.Module):
             self.head = nn.Linear(embed_dims[-1], num_classes)
             nn.init.trunc_normal_(self.head.weight, std=0.02)
             nn.init.zeros_(self.head.bias)
+        if not learnable_ws_gain:
+            for module in self.modules():
+                if isinstance(module, ScaledWSConv2d):
+                    module.gain.requires_grad_(False)
         self.deployed = False
 
     def nf_blocks(self):
@@ -447,6 +479,23 @@ class NormFreePoolFormer(nn.Module):
     def set_nf_range_tracking(self, enabled=True):
         for block in self.nf_blocks():
             block.set_range_tracking(enabled)
+
+    def set_nf_modulation_progresses(self, progresses, order="forward"):
+        blocks = self.nf_blocks()
+        progresses = tuple(float(value) for value in progresses)
+        if len(progresses) != len(blocks):
+            raise ValueError(
+                f"Expected {len(blocks)} modulation progresses, got "
+                f"{len(progresses)}")
+        if order == "reverse":
+            blocks = list(reversed(blocks))
+        elif order != "forward":
+            raise ValueError("NF modulation order must be 'forward' or 'reverse'")
+        for block, progress in zip(blocks, progresses):
+            block.set_modulation_progress(progress)
+
+    def nf_modulation_group_count(self):
+        return len(self.nf_blocks())
 
     def clear_nf_cached_tensors(self):
         for block in self.nf_blocks():

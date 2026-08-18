@@ -205,6 +205,20 @@ def log_nf_range_stats(stats, global_step, summary_writer=None,
         "product_p999": product_p999,
         "output_rms_max": output_rms,
     }
+    modulation_progresses = [
+        values["modulation_progress"]
+        for values in serialized.values()
+        if "modulation_progress" in values
+    ]
+    effective_modulations = [
+        abs(values["effective_modulation"])
+        for values in serialized.values()
+        if "effective_modulation" in values
+    ]
+    if modulation_progresses:
+        summary["modulation_progress_sum"] = sum(modulation_progresses)
+        summary["effective_modulation_absmax"] = max(
+            effective_modulations, default=0.0)
     if summary_writer is not None:
         for metric, value in summary.items():
             summary_writer.add_scalar(
@@ -218,8 +232,11 @@ def log_nf_range_stats(stats, global_step, summary_writer=None,
         serialized.items(), key=lambda item: item[1]["product_absmax"])
     logging.info(
         "[NFRange][%d] product_absmax=%.6g p99.9=%.6g "
-        "output_rms_max=%.6g worst=%s",
+        "output_rms_max=%.6g modulation_progress_sum=%.3f "
+        "effective_modulation_absmax=%.6g worst=%s",
         global_step, product_absmax, product_p999, output_rms,
+        summary.get("modulation_progress_sum", 0.0),
+        summary.get("effective_modulation_absmax", 0.0),
         worst[0],
     )
     return serialized
@@ -1193,6 +1210,8 @@ def main(args):
             nf_range_limit=float(getattr(cfg, "nf_range_limit", 6.0)),
             nf_range_sample_size=int(getattr(
                 cfg, "nf_range_sample_size", 16384)),
+            nf_initial_modulation_progress=float(getattr(
+                cfg, "nf_initial_modulation_progress", 1.0)),
         )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
@@ -1606,6 +1625,15 @@ def main(args):
     nf_range_loss_weight = float(getattr(
         cfg, "nf_range_loss_weight", 0.0))
     nf_stats_interval = int(getattr(cfg, "nf_stats_interval", 0))
+    nf_modulation_group_epochs = tuple(getattr(
+        cfg, "nf_modulation_group_epochs", ()))
+    nf_modulation_transition_epochs = float(getattr(
+        cfg, "nf_modulation_transition_epochs", 1.0))
+    nf_modulation_order = str(getattr(
+        cfg, "nf_modulation_order", "reverse"))
+    nf_modulation_setter = getattr(
+        backbone.module, "set_nf_modulation_progresses", None)
+    nf_modulation_schedule = bool(nf_modulation_group_epochs)
     if nf_range_loss_weight < 0.0:
         raise ValueError("nf_range_loss_weight must be non-negative")
     if nf_stats_interval < 0:
@@ -1613,6 +1641,42 @@ def main(args):
     if nf_range_loss_weight > 0.0 and not nf_enabled:
         raise ValueError(
             "nf_range_loss_weight requires a normalization-free backbone")
+    if nf_modulation_schedule:
+        if nf_modulation_setter is None:
+            raise ValueError(
+                "nf_modulation_group_epochs requires a backbone with "
+                "set_nf_modulation_progresses")
+        group_count = int(backbone.module.nf_modulation_group_count())
+        if len(nf_modulation_group_epochs) != group_count:
+            raise ValueError(
+                "nf_modulation_group_epochs must contain one start per "
+                f"quadratic block ({group_count}), got "
+                f"{len(nf_modulation_group_epochs)}")
+        final_progresses = simple_gate_blends_at_epoch(
+            cfg.num_epoch,
+            nf_modulation_group_epochs,
+            nf_modulation_transition_epochs,
+        )
+        if (getattr(cfg, "nf_require_full_modulation", True)
+                and min(final_progresses, default=0.0) < 1.0):
+            raise ValueError(
+                "NF modulation schedule does not finish before training ends")
+        nf_modulation_setter(
+            simple_gate_blends_at_epoch(
+                start_epoch,
+                nf_modulation_group_epochs,
+                nf_modulation_transition_epochs,
+            ),
+            order=nf_modulation_order,
+        )
+        if rank == 0:
+            logging.info(
+                "NF quadratic schedule: groups=%d order=%s starts=%s "
+                "transition_epochs=%g",
+                group_count, nf_modulation_order,
+                nf_modulation_group_epochs,
+                nf_modulation_transition_epochs,
+            )
     herpn_group_schedule = bool(herpn_enabled and herpn_conversion_groups)
     layerwise_poly_enabled = hasattr(
         backbone.module, "layerwise_poly_activation_names")
@@ -2248,9 +2312,18 @@ def main(args):
             if max_steps_per_epoch > 0 and step_in_epoch >= max_steps_per_epoch:
                 break
             global_step += 1
+            fractional_epoch = epoch + step_in_epoch / max(
+                scheduled_steps_per_epoch, 1)
+            if nf_modulation_schedule:
+                nf_modulation_setter(
+                    simple_gate_blends_at_epoch(
+                        fractional_epoch,
+                        nf_modulation_group_epochs,
+                        nf_modulation_transition_epochs,
+                    ),
+                    order=nf_modulation_order,
+                )
             if affine_group_schedule:
-                fractional_epoch = epoch + step_in_epoch / max(
-                    scheduled_steps_per_epoch, 1)
                 backbone.module.set_affine_group_blends(
                     simple_gate_blends_at_epoch(
                         fractional_epoch,

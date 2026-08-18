@@ -382,6 +382,9 @@ def get_model(name, **kwargs):
                 "nf_modulator_scale_max", 0.25),
             range_limit=kwargs.get("nf_range_limit", 6.0),
             range_sample_size=kwargs.get("nf_range_sample_size", 16384),
+            initial_modulation_progress=kwargs.get(
+                "nf_initial_modulation_progress", 1.0),
+            learnable_ws_gain=kwargs.get("nf_learnable_ws_gain", False),
         )
 
     elif name in ("iresnet_nf8", "iresnet_nf12"):
