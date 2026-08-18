@@ -17,13 +17,17 @@ config.output = "work_dirs/ms1mv3_r50_precise_relu_s8_d4"
 config.embedding_size = 512
 config.sample_rate = 1.0
 
-# Alpha10 and the polynomial transitions compute internally in FP32. Keep the
-# surrounding model FP32 as well for the first stability/accuracy run.
-config.fp16 = False
+# Alpha10 and its analytical backward compute internally in FP32 even under
+# autocast. Keep convolutions/BN activations in FP16 to fit a practical batch.
+config.fp16 = True
 config.momentum = 0.9
 config.weight_decay = 5e-4
 config.gradient_clip = 0.5
-config.batch_size = 128
+# batch_size is per GPU. On four GPUs, two normalized accumulation steps keep
+# the original effective global batch: 64 * 4 * 2 = 512.
+config.batch_size = 64
+config.gradient_acc = 2
+config.normalize_gradient_accumulation = True
 config.lr = 0.005
 config.verbose = 2000
 config.dali = False

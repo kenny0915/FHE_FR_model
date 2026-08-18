@@ -10,6 +10,7 @@ from backbones.polynomial_relu import (
     PreciseReLUAlpha10 as SharedPreciseReLUAlpha10,
 )
 from eval.non_linear_replacement import (
+    ChebyReLU as EvalChebyReLU,
     PreciseReLUAlpha10 as EvalPreciseReLUAlpha10,
 )
 from utils.utils_config import get_config
@@ -20,6 +21,105 @@ def test_shared_alpha10_matches_successful_eval_implementation():
     expected = EvalPreciseReLUAlpha10(input_scale=8.0)(inputs)
     actual = SharedPreciseReLUAlpha10(input_scale=8.0)(inputs)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+def test_memory_efficient_alpha10_backward_matches_reference():
+    torch.manual_seed(17)
+    reference_input = (
+        torch.empty(2, 3, 4, 5).uniform_(-7.5, 7.5).requires_grad_())
+    efficient_input = reference_input.detach().clone().requires_grad_()
+    output_weight = torch.randn_like(reference_input)
+
+    reference_output = EvalPreciseReLUAlpha10(8.0)(reference_input)
+    efficient_output = SharedPreciseReLUAlpha10(8.0)(efficient_input)
+    (reference_output * output_weight).sum().backward()
+    (efficient_output * output_weight).sum().backward()
+
+    torch.testing.assert_close(efficient_output, reference_output, rtol=0, atol=0)
+    torch.testing.assert_close(
+        efficient_input.grad,
+        reference_input.grad,
+        rtol=2e-4,
+        atol=2e-5,
+    )
+
+
+def test_alpha10_autograd_saves_only_one_activation_sized_tensor():
+    inputs = torch.randn(2, 3, 4, 5, requires_grad=True)
+    saved_numels = []
+
+    def pack(tensor):
+        saved_numels.append(tensor.numel())
+        return tensor
+
+    with torch.autograd.graph.saved_tensors_hooks(pack, lambda tensor: tensor):
+        SharedPreciseReLUAlpha10(8.0)(inputs).sum().backward()
+
+    assert sum(numel >= inputs.numel() for numel in saved_numels) == 1
+
+
+def test_memory_efficient_cheby_backward_matches_reference():
+    torch.manual_seed(19)
+    for degree in (4, 8, 16):
+        reference_input = (
+            torch.empty(2, 3, 4, 5).uniform_(-7.5, 7.5).requires_grad_())
+        efficient_input = reference_input.detach().clone().requires_grad_()
+        output_weight = torch.randn_like(reference_input)
+
+        reference_output = EvalChebyReLU(8.0, degree)(reference_input)
+        efficient_output = ChebyReLU(8.0, degree)(efficient_input)
+        (reference_output * output_weight).sum().backward()
+        (efficient_output * output_weight).sum().backward()
+
+        torch.testing.assert_close(
+            efficient_output, reference_output, rtol=0, atol=0)
+        torch.testing.assert_close(
+            efficient_input.grad,
+            reference_input.grad,
+            rtol=2e-4,
+            atol=2e-5,
+        )
+
+
+def test_cheby_autograd_saves_only_one_activation_sized_tensor():
+    for degree in (4, 8, 16):
+        inputs = torch.randn(2, 3, 4, 5, requires_grad=True)
+        saved_numels = []
+
+        def pack(tensor):
+            saved_numels.append(tensor.numel())
+            return tensor
+
+        with torch.autograd.graph.saved_tensors_hooks(
+                pack, lambda tensor: tensor):
+            ChebyReLU(8.0, degree)(inputs).sum().backward()
+
+        assert sum(numel >= inputs.numel() for numel in saved_numels) == 1
+
+
+def test_memory_efficient_range_penalty_matches_reference_gradient():
+    activation = ProgressivePrecisePReLU(
+        channels=2, input_scale=2.0, progress=0.0).train()
+    efficient_input = torch.tensor(
+        [[[[3.0, -2.5], [0.5, -0.25]],
+          [[-4.0, 2.25], [0.75, -1.0]]]],
+        requires_grad=True,
+    )
+    reference_input = efficient_input.detach().clone().requires_grad_()
+
+    activation(efficient_input)
+    efficient_penalty = activation.range_penalty()
+    reference_excess = torch.relu(reference_input.abs() - 2.0)
+    reference_penalty = (
+        reference_excess.square().mean()
+        + 0.1 * reference_excess.flatten(1).amax(dim=1).square().mean()
+    )
+    efficient_penalty.backward()
+    reference_penalty.backward()
+
+    torch.testing.assert_close(efficient_penalty, reference_penalty)
+    torch.testing.assert_close(
+        efficient_input.grad, reference_input.grad, rtol=1e-6, atol=1e-7)
 
 
 def test_progressive_activation_starts_at_alpha10_and_ends_at_degree4():
@@ -103,6 +203,11 @@ def test_scale8_and_scale16_configs_reach_degree4_with_final_finetuning():
         assert cfg.network == "r50_precise_relu"
         assert cfg.precise_relu_input_scale == expected_scale
         assert cfg.precise_relu_lower_degrees == (16, 8, 4)
+        assert cfg.fp16 is True
+        assert cfg.batch_size == 64
+        assert cfg.gradient_acc == 2
+        assert cfg.normalize_gradient_accumulation is True
+        assert cfg.batch_size * 4 * cfg.gradient_acc == 512
         assert len(cfg.precise_relu_stage_epochs) == 3
         assert all(
             right >= left + cfg.precise_relu_transition_epochs

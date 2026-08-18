@@ -36,6 +36,46 @@ __all__ = [
 _SUPPORTED_LOWER_DEGREES = (16, 8, 4)
 
 
+class _PolynomialRangePenaltyFunction(torch.autograd.Function):
+    """Tail penalty that saves no intermediate feature maps for backward."""
+
+    @staticmethod
+    def forward(ctx, x, input_scale):
+        compute_x = x.float()
+        scale = input_scale.to(device=x.device, dtype=compute_x.dtype)
+        excess = torch.relu(compute_x.abs() - scale)
+        flat_excess = excess.flatten(1)
+        penalty = (
+            excess.square().mean()
+            + 0.1 * flat_excess.amax(dim=1).square().mean()
+        )
+        ctx.save_for_backward(x, input_scale)
+        return penalty
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, input_scale = ctx.saved_tensors
+        compute_x = x.float()
+        scale = input_scale.to(device=x.device, dtype=compute_x.dtype)
+        excess = torch.relu(compute_x.abs() - scale)
+        input_gradient = (
+            2.0 * excess * compute_x.sign() / max(excess.numel(), 1))
+
+        flat_excess = excess.flatten(1)
+        sample_max, sample_argmax = flat_excess.max(dim=1)
+        max_gradient = torch.zeros_like(flat_excess)
+        max_gradient.scatter_(
+            1,
+            sample_argmax.unsqueeze(1),
+            (0.2 * sample_max / max(flat_excess.shape[0], 1)).unsqueeze(1),
+        )
+        input_gradient = input_gradient + (
+            max_gradient.reshape_as(compute_x) * compute_x.sign())
+        input_gradient = input_gradient * grad_output.to(
+            dtype=input_gradient.dtype)
+        return input_gradient.to(dtype=x.dtype), None
+
+
 class ProgressivePrecisePReLU(nn.Module):
     """PReLU using an Alpha-10-to-low-degree ReLU curriculum."""
 
@@ -128,14 +168,13 @@ class ProgressivePrecisePReLU(nn.Module):
             )
             scale = self.alpha10.input_scale.to(
                 device=x.device, dtype=compute_x.dtype)
-            excess = torch.relu(compute_x.abs() - scale)
-            self._last_range_penalty = (
-                excess.square().mean()
-                + 0.1 * excess.flatten(1).amax(dim=1).square().mean()
-            )
-            self._last_input_absmax = compute_x.detach().abs().amax()
-            self._last_outside_fraction = (
-                (excess.detach() > 0).float().mean())
+            self._last_range_penalty = _PolynomialRangePenaltyFunction.apply(
+                x, self.alpha10.input_scale)
+            with torch.no_grad():
+                excess = torch.relu(compute_x.abs() - scale)
+                self._last_input_absmax = compute_x.abs().amax()
+                self._last_outside_fraction = (
+                    (excess > 0).float().mean())
         else:
             self._last_range_penalty = None
 
