@@ -33,6 +33,10 @@ Examples:
   LayerNorm, exact `C -> 2C -> gate -> C` expansion, and zero residual scales.
   This variant retains non-FHE LayerNorm to isolate gate-training stability.
 - `ms1mv3_r50_no_relu`: train an R50 variant with ReLU/PReLU removed or replaced.
+- `ms1mv3_r50_precise_relu_s8`: fine-tune the pretrained R50 with every
+  PReLU's ReLU component replaced by `PreciseReLUAlpha10` on `[-8, 8]`, then
+  transition through independently fitted degrees 16, 8, and 4. The
+  `ms1mv3_r50_precise_relu_s16` variant uses `[-16, 16]`.
 - `ms1mv3_r50_herpn_residual_scale`: train IResNet50 from scratch with pure
   degree-2 HerPN activations and one learnable residual scalar per block,
   initialized to `1/sqrt(24)`. This recipe has no PReLU teacher or
@@ -87,6 +91,25 @@ Important training settings are controlled by the config file:
 - `output`: output directory. If `None`, the config loader may derive it from the config name.
 
 To resume training, set `config.resume = True` in the config and make sure the corresponding `checkpoint_gpu_*.pt` files exist in the output directory.
+
+For the progressive PreciseReLU R50 experiment, first ensure the baseline
+checkpoint exists at `work_dirs/ms1mv3_r50/model.pt`, then launch one scale:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+  --nproc_per_node=4 \
+  train_v2.py configs/ms1mv3_r50_precise_relu_s8
+```
+
+All 25 activations use Alpha10 initially. At epochs 2, 6, and 10 the whole
+network begins a one-epoch transition to degree 16, 8, and 4 respectively;
+BatchNorm statistics are recalibrated after each transition. TensorBoard logs
+`PreciseReLU/Input Abs Max` and `PreciseReLU/Outside Range Fraction`. Values
+outside the declared interval are especially important because polynomial
+error can grow rapidly there. Degree 4 is the final target (nonlinear
+multiplicative depth 2); Alpha10's composed algebraic degree is 638 and is only
+the accurate starting teacher. Use the `s16` config when the scale-8 range
+statistics show meaningful tails outside `[-8, 8]`.
 
 For the SimpleGate/RepBatchNorm experiment, epochs 0-8 use GELU while the
 normalization transition finishes. BatchNorm is then recalibrated and verified

@@ -523,6 +523,31 @@ def herpn_progress_at_epoch(epoch_value, stage_epochs, transition_epochs):
                for start in starts)
 
 
+def precise_relu_progress_at_epoch(epoch_value, stage_epochs,
+                                   transition_epochs):
+    """Return Alpha10-to-lower-degree curriculum progress.
+
+    Each start transitions the whole network to the next independently fitted
+    ReLU polynomial.  Integer progress selects a single polynomial; fractional
+    progress blends only the adjacent pair during plaintext training.
+    """
+    starts = tuple(float(value) for value in stage_epochs)
+    transition_epochs = float(transition_epochs)
+    if not starts:
+        return 0.0
+    if transition_epochs <= 0:
+        raise ValueError("precise_relu_transition_epochs must be positive")
+    if any(right < left + transition_epochs
+           for left, right in zip(starts, starts[1:])):
+        raise ValueError(
+            "PreciseReLU degree transitions must be ordered and non-overlapping")
+    return sum(
+        min(max(
+            (float(epoch_value) - start) / transition_epochs, 0.0), 1.0)
+        for start in starts
+    )
+
+
 def herpn_group_blends_at_epoch(epoch_value, conversion_groups, group_epochs,
                                 transition_epochs):
     groups = tuple(tuple(group) for group in conversion_groups)
@@ -1159,6 +1184,16 @@ def main(args):
             layerwise_poly_progress=float(getattr(
                 cfg, "herpn_initial_progress", 0.0)),
         )
+    if (cfg.network.startswith("r")
+            and cfg.network.endswith("_precise_relu")):
+        model_kwargs.update(
+            precise_relu_input_scale=float(getattr(
+                cfg, "precise_relu_input_scale", 8.0)),
+            precise_relu_lower_degrees=tuple(getattr(
+                cfg, "precise_relu_lower_degrees", (16, 8, 4))),
+            precise_relu_progress=float(getattr(
+                cfg, "precise_relu_initial_progress", 0.0)),
+        )
     if cfg.network.startswith("poolformer_no_ln_x2_act"):
         gate_group_epochs = tuple(getattr(
             cfg, "simple_gate_group_epochs", ()))
@@ -1229,6 +1264,9 @@ def main(args):
         if hasattr(backbone, "set_herpn_progress"):
             backbone.set_herpn_progress(
                 float(getattr(cfg, "herpn_initial_progress", 0.0)))
+        if hasattr(backbone, "set_polynomial_progress"):
+            backbone.set_polynomial_progress(float(getattr(
+                cfg, "precise_relu_initial_progress", 0.0)))
         logging.info("Initialized backbone from %s", backbone_init)
         del init_checkpoint
     layerwise_poly_scale_file = getattr(
@@ -1621,6 +1659,16 @@ def main(args):
     herpn_save_after_group = bool(
         getattr(cfg, "herpn_save_after_group", False))
     herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
+    precise_relu_enabled = hasattr(
+        backbone.module, "set_polynomial_progress")
+    precise_relu_stage_epochs = tuple(getattr(
+        cfg, "precise_relu_stage_epochs", ()))
+    precise_relu_transition_epochs = float(getattr(
+        cfg, "precise_relu_transition_epochs", 1.0))
+    precise_relu_range_loss_weight = float(getattr(
+        cfg, "precise_relu_range_loss_weight", 0.0))
+    precise_relu_bn_recalibration_batches = int(getattr(
+        cfg, "precise_relu_bn_recalibration_batches", 0))
     nf_enabled = hasattr(backbone.module, "set_nf_range_tracking")
     nf_range_loss_weight = float(getattr(
         cfg, "nf_range_loss_weight", 0.0))
@@ -1678,6 +1726,49 @@ def main(args):
                 nf_modulation_transition_epochs,
             )
     herpn_group_schedule = bool(herpn_enabled and herpn_conversion_groups)
+    precise_relu_schedule = bool(
+        precise_relu_enabled and precise_relu_stage_epochs)
+    if precise_relu_range_loss_weight < 0.0:
+        raise ValueError("precise_relu_range_loss_weight must be non-negative")
+    if precise_relu_range_loss_weight > 0.0 and not precise_relu_enabled:
+        raise ValueError(
+            "precise_relu_range_loss_weight requires a precise-ReLU backbone")
+    if precise_relu_bn_recalibration_batches < 0:
+        raise ValueError(
+            "precise_relu_bn_recalibration_batches must be non-negative")
+    if precise_relu_schedule:
+        transition_count = int(
+            backbone.module.polynomial_transition_count())
+        if len(precise_relu_stage_epochs) != transition_count:
+            raise ValueError(
+                "precise_relu_stage_epochs must contain one start for each "
+                f"lower-degree student ({transition_count}), got "
+                f"{len(precise_relu_stage_epochs)}")
+        final_progress = precise_relu_progress_at_epoch(
+            cfg.num_epoch,
+            precise_relu_stage_epochs,
+            precise_relu_transition_epochs,
+        )
+        if (getattr(cfg, "precise_relu_require_final_degree", True)
+                and final_progress < transition_count):
+            raise ValueError(
+                "PreciseReLU schedule does not reach its final degree before "
+                f"training ends: final_progress={final_progress:.3f}")
+        backbone.module.set_polynomial_progress(
+            precise_relu_progress_at_epoch(
+                start_epoch,
+                precise_relu_stage_epochs,
+                precise_relu_transition_epochs,
+            ))
+        if rank == 0:
+            logging.info(
+                "PreciseReLU curriculum: stages=%s starts=%s "
+                "transition_epochs=%g input_scale=%g",
+                backbone.module.polynomial_stage_names(),
+                precise_relu_stage_epochs,
+                precise_relu_transition_epochs,
+                float(getattr(cfg, "precise_relu_input_scale", 8.0)),
+            )
     layerwise_poly_enabled = hasattr(
         backbone.module, "layerwise_poly_activation_names")
     layerwise_poly_range_batches = int(getattr(
@@ -1786,6 +1877,13 @@ def main(args):
     completed_herpn_stages = int(math.floor(float(
         backbone.module.herpn_progress.item()) + 1e-6)
     ) if herpn_enabled and not herpn_group_schedule else 0
+    completed_precise_relu_stages = int(math.floor(
+        precise_relu_progress_at_epoch(
+            start_epoch,
+            precise_relu_stage_epochs,
+            precise_relu_transition_epochs,
+        ) + 1e-6
+    )) if precise_relu_schedule else 0
     max_steps_per_epoch = int(getattr(cfg, "max_steps_per_epoch", 0))
     scheduled_steps_per_epoch = (
         max_steps_per_epoch if max_steps_per_epoch > 0 else steps_per_epoch)
@@ -2197,6 +2295,37 @@ def main(args):
                             and distributed.is_initialized()):
                         distributed.barrier()
                 completed_simple_gate_groups = newly_completed_gates
+        if precise_relu_schedule:
+            epoch_precise_progress = precise_relu_progress_at_epoch(
+                epoch,
+                precise_relu_stage_epochs,
+                precise_relu_transition_epochs,
+            )
+            backbone.module.set_polynomial_progress(epoch_precise_progress)
+            newly_completed_precise_stages = int(math.floor(
+                epoch_precise_progress + 1e-6))
+            if (newly_completed_precise_stages
+                    > completed_precise_relu_stages):
+                if rank == 0:
+                    logging.info(
+                        "PreciseReLU stage %d/%d completed (%s); "
+                        "recalibrating BatchNorm with %d batches",
+                        newly_completed_precise_stages,
+                        backbone.module.polynomial_transition_count(),
+                        backbone.module.polynomial_stage_names()[
+                            newly_completed_precise_stages],
+                        precise_relu_bn_recalibration_batches,
+                    )
+                recalibrate_herpn_batchnorm(
+                    backbone,
+                    train_loader,
+                    precise_relu_bn_recalibration_batches,
+                    global_step,
+                )
+                if cfg.dali:
+                    train_loader.reset()
+                completed_precise_relu_stages = (
+                    newly_completed_precise_stages)
         if herpn_group_schedule:
             epoch_blends = herpn_group_blends_at_epoch(
                 epoch, herpn_conversion_groups, herpn_group_epochs,
@@ -2314,6 +2443,13 @@ def main(args):
             global_step += 1
             fractional_epoch = epoch + step_in_epoch / max(
                 scheduled_steps_per_epoch, 1)
+            if precise_relu_schedule:
+                backbone.module.set_polynomial_progress(
+                    precise_relu_progress_at_epoch(
+                        fractional_epoch,
+                        precise_relu_stage_epochs,
+                        precise_relu_transition_epochs,
+                    ))
             if nf_modulation_schedule:
                 nf_modulation_setter(
                     simple_gate_blends_at_epoch(
@@ -2520,6 +2656,7 @@ def main(args):
             simple_gate_range_penalty = local_embeddings.new_zeros(())
             simple_gate_distillation_loss = local_embeddings.new_zeros(())
             nf_range_penalty = local_embeddings.new_zeros(())
+            precise_relu_range_penalty = local_embeddings.new_zeros(())
             if embedding_teacher is not None:
                 loss = loss + (
                     embedding_distill_weight
@@ -2538,6 +2675,17 @@ def main(args):
                         f"Non-finite HerPN range penalty at global_step={global_step}"
                     )
                 loss = loss + herpn_range_loss_weight * range_penalty
+            if (precise_relu_enabled
+                    and precise_relu_range_loss_weight > 0.0):
+                precise_relu_range_penalty = (
+                    backbone.module.polynomial_range_penalty())
+                if not torch.isfinite(precise_relu_range_penalty):
+                    raise FloatingPointError(
+                        "Non-finite PreciseReLU range penalty at "
+                        f"global_step={global_step}")
+                loss = loss + (
+                    precise_relu_range_loss_weight
+                    * precise_relu_range_penalty)
             if herpn_enabled and herpn_distill_loss_weight > 0:
                 distillation_names = (
                     active_layerwise_group
@@ -2701,6 +2849,8 @@ def main(args):
                         'Loss/SimpleGate Distillation': (
                             simple_gate_distillation_loss.item()),
                         'Loss/NF Range Penalty': nf_range_penalty.item(),
+                        'Loss/PreciseReLU Range Penalty': (
+                            precise_relu_range_penalty.item()),
                         'Loss/Embedding Distillation': (
                             embedding_distillation_loss.item()),
                         'Process/SimpleGate Progress': (
@@ -2713,6 +2863,9 @@ def main(args):
                         'Process/HerPN Progress': (
                             float(backbone.module.herpn_progress.item())
                             if herpn_enabled else 0.0),
+                        'Process/PreciseReLU Progress': (
+                            float(backbone.module.polynomial_progress.item())
+                            if precise_relu_enabled else 0.0),
                         'Process/Step': global_step,
                         'Process/Epoch': epoch
                     })
@@ -2722,6 +2875,9 @@ def main(args):
                     summary_writer.add_scalar(
                         'Loss/NF Range Penalty',
                         nf_range_penalty.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Loss/PreciseReLU Range Penalty',
+                        precise_relu_range_penalty.item(), global_step)
                     summary_writer.add_scalar(
                         'Loss/Embedding Distillation',
                         embedding_distillation_loss.item(), global_step)
@@ -2754,6 +2910,22 @@ def main(args):
                             summary_writer.add_scalar(
                                 "ResidualScale/" + name.capitalize(),
                                 float(value.item()), global_step)
+                if (summary_writer is not None and precise_relu_enabled
+                        and global_step % cfg.frequent == 0):
+                    precise_summary = (
+                        backbone.module.polynomial_range_summary())
+                    summary_writer.add_scalar(
+                        'Process/PreciseReLU Progress',
+                        float(backbone.module.polynomial_progress.item()),
+                        global_step)
+                    summary_writer.add_scalar(
+                        'PreciseReLU/Input Abs Max',
+                        float(precise_summary['input_absmax'].item()),
+                        global_step)
+                    summary_writer.add_scalar(
+                        'PreciseReLU/Outside Range Fraction',
+                        float(precise_summary['outside_fraction'].item()),
+                        global_step)
                 if (summary_writer is not None and simple_gate_progressive
                         and global_step % cfg.frequent == 0):
                     summary_writer.add_scalar(
