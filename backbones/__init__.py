@@ -360,6 +360,28 @@ def get_model(name, **kwargs):
             fp16=kwargs.get("fp16", False),
         )
 
+    elif name in ("poolformer_nf8", "poolformer_nf12"):
+        from .poolformer_nf import poolformer_nf8, poolformer_nf12
+        factory = {
+            "poolformer_nf8": poolformer_nf8,
+            "poolformer_nf12": poolformer_nf12,
+        }[name]
+        return factory(
+            pretrained=False,
+            num_classes=kwargs.get("num_features", 512),
+            face_embedding=True,
+            fp16=kwargs.get("fp16", False),
+            ws_eps=kwargs.get("nf_ws_eps", 1e-4),
+            tau_init=kwargs.get("nf_tau_init", 0.1),
+            alpha_init=kwargs.get("nf_alpha_init", 0.05),
+            alpha_max=kwargs.get("nf_alpha_max", 0.2),
+            input_gain_init=kwargs.get("nf_input_gain_init", 1.0),
+            modulator_scale_max=kwargs.get(
+                "nf_modulator_scale_max", 0.25),
+            range_limit=kwargs.get("nf_range_limit", 6.0),
+            range_sample_size=kwargs.get("nf_range_sample_size", 16384),
+        )
+
     elif name == "poolformer_fully_gated_prepbn_s24":
         from .poolformer_fully_gated_prepbn import (
             poolformer_fully_gated_prepbn_s24,

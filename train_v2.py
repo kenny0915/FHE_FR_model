@@ -175,6 +175,73 @@ def log_simple_gate_stats(stats, global_step, summary_writer=None,
     return serialized
 
 
+def log_nf_range_stats(stats, global_step, summary_writer=None,
+                       wandb_logger=None):
+    """Log normalization-free block ranges and return scalar snapshots."""
+    if not stats:
+        return {}
+    serialized = {
+        block_name: {
+            metric: float(value.detach().item())
+            for metric, value in block_stats.items()
+        }
+        for block_name, block_stats in stats.items() if block_stats
+    }
+    if not serialized:
+        return {}
+    for block_name, block_stats in serialized.items():
+        if summary_writer is not None:
+            for metric, value in block_stats.items():
+                summary_writer.add_scalar(
+                    f"NFRange/{block_name}/{metric}", value, global_step)
+    product_absmax = max(
+        values["product_absmax"] for values in serialized.values())
+    product_p999 = max(
+        values["product_p999"] for values in serialized.values())
+    output_rms = max(values["output_rms"] for values in serialized.values())
+    summary = {
+        "product_absmax": product_absmax,
+        "product_p999": product_p999,
+        "output_rms_max": output_rms,
+    }
+    if summary_writer is not None:
+        for metric, value in summary.items():
+            summary_writer.add_scalar(
+                f"NFRange/Summary/{metric}", value, global_step)
+    if wandb_logger:
+        wandb_logger.log({
+            f"NFRange/Summary/{metric}": value
+            for metric, value in summary.items()
+        })
+    worst = max(
+        serialized.items(), key=lambda item: item[1]["product_absmax"])
+    logging.info(
+        "[NFRange][%d] product_absmax=%.6g p99.9=%.6g "
+        "output_rms_max=%.6g worst=%s",
+        global_step, product_absmax, product_p999, output_rms,
+        worst[0],
+    )
+    return serialized
+
+
+def load_embedding_teacher_checkpoint(model, checkpoint_path):
+    """Strictly load common backbone checkpoint layouts into a teacher."""
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    if not isinstance(checkpoint, dict):
+        raise TypeError(
+            f"Teacher checkpoint must be a dict, got {type(checkpoint)!r}")
+    for key in ("state_dict_backbone", "state_dict", "model"):
+        nested = checkpoint.get(key)
+        if isinstance(nested, dict):
+            checkpoint = nested
+            break
+    state_dict = {
+        (key[7:] if key.startswith("module.") else key): value
+        for key, value in checkpoint.items()
+    }
+    model.load_state_dict(state_dict, strict=True)
+
+
 def begin_batchnorm_recalibration(module: torch.nn.Module, reset=True):
     """Use the final eval graph while updating only BatchNorm statistics."""
     batchnorm_state = [
@@ -1103,6 +1170,20 @@ def main(args):
             affine_blocks_per_group=int(getattr(
                 cfg, "affine_blocks_per_group", 1)),
         )
+    if cfg.network.startswith("poolformer_nf"):
+        model_kwargs.update(
+            nf_ws_eps=float(getattr(cfg, "nf_ws_eps", 1e-4)),
+            nf_tau_init=float(getattr(cfg, "nf_tau_init", 0.1)),
+            nf_alpha_init=float(getattr(cfg, "nf_alpha_init", 0.05)),
+            nf_alpha_max=float(getattr(cfg, "nf_alpha_max", 0.2)),
+            nf_input_gain_init=float(getattr(
+                cfg, "nf_input_gain_init", 1.0)),
+            nf_modulator_scale_max=float(getattr(
+                cfg, "nf_modulator_scale_max", 0.25)),
+            nf_range_limit=float(getattr(cfg, "nf_range_limit", 6.0)),
+            nf_range_sample_size=int(getattr(
+                cfg, "nf_range_sample_size", 16384)),
+        )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
     backbone_init = getattr(cfg, "backbone_init", "")
@@ -1157,6 +1238,34 @@ def main(args):
                 max(item["bias_absmax"] for item in diagnostics),
                 max(item["relative_rmse_max"] for item in diagnostics),
             )
+
+    embedding_distill_weight = float(getattr(
+        cfg, "embedding_distill_weight", 0.0))
+    if embedding_distill_weight < 0.0:
+        raise ValueError("embedding_distill_weight must be non-negative")
+    embedding_teacher = None
+    if embedding_distill_weight > 0.0:
+        teacher_network = str(getattr(
+            cfg, "embedding_teacher_network", ""))
+        teacher_checkpoint = str(getattr(
+            cfg, "embedding_teacher_checkpoint", ""))
+        if not teacher_network or not teacher_checkpoint:
+            raise ValueError(
+                "Positive embedding_distill_weight requires both "
+                "embedding_teacher_network and embedding_teacher_checkpoint")
+        embedding_teacher = get_model(
+            teacher_network,
+            dropout=0.0,
+            fp16=False,
+            num_features=cfg.embedding_size,
+        ).cuda()
+        load_embedding_teacher_checkpoint(
+            embedding_teacher, teacher_checkpoint)
+        embedding_teacher.eval()
+        embedding_teacher.requires_grad_(False)
+        logging.info(
+            "Loaded frozen embedding teacher %s from %s (weight=%g)",
+            teacher_network, teacher_checkpoint, embedding_distill_weight)
     if getattr(cfg, "sync_bn", False):
         backbone = torch.nn.SyncBatchNorm.convert_sync_batchnorm(backbone)
 
@@ -1306,13 +1415,38 @@ def main(args):
             margin_loss, cfg.embedding_size, cfg.num_classes,
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
-        opt = torch.optim.AdamW(
-            params=[
+        if getattr(cfg, "selective_weight_decay", False):
+            decay_params, no_decay_params = split_weight_decay_parameters(
+                backbone)
+            parameter_groups = [
+                {
+                    "params": decay_params,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "backbone",
+                },
+                {
+                    "params": no_decay_params,
+                    "weight_decay": 0.0,
+                    "scope": "backbone",
+                },
+                {
+                    "params": module_partial_fc.parameters(),
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "classifier",
+                },
+            ]
+            logging.info(
+                "Selective AdamW weight decay: %d backbone tensors with "
+                "decay, %d without decay",
+                len(decay_params), len(no_decay_params))
+        else:
+            parameter_groups = [
                 {
                     "params": [
                         parameter for parameter in backbone.parameters()
                         if (parameter.requires_grad
-                            and id(parameter) not in layerwise_poly_parameter_ids)
+                            and id(parameter) not in
+                            layerwise_poly_parameter_ids)
                     ],
                     "scope": "backbone",
                 },
@@ -1325,8 +1459,13 @@ def main(args):
                     "params": module_partial_fc.parameters(),
                     "scope": "classifier",
                 },
-            ],
-            lr=cfg.lr, weight_decay=cfg.weight_decay)
+            ]
+        opt = torch.optim.AdamW(
+            params=parameter_groups,
+            lr=cfg.lr,
+            weight_decay=(0.0 if getattr(
+                cfg, "selective_weight_decay", False)
+                else cfg.weight_decay))
     else:
         raise
 
@@ -1453,6 +1592,17 @@ def main(args):
     herpn_save_after_group = bool(
         getattr(cfg, "herpn_save_after_group", False))
     herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
+    nf_enabled = hasattr(backbone.module, "set_nf_range_tracking")
+    nf_range_loss_weight = float(getattr(
+        cfg, "nf_range_loss_weight", 0.0))
+    nf_stats_interval = int(getattr(cfg, "nf_stats_interval", 0))
+    if nf_range_loss_weight < 0.0:
+        raise ValueError("nf_range_loss_weight must be non-negative")
+    if nf_stats_interval < 0:
+        raise ValueError("nf_stats_interval must be non-negative")
+    if nf_range_loss_weight > 0.0 and not nf_enabled:
+        raise ValueError(
+            "nf_range_loss_weight requires a normalization-free backbone")
     herpn_group_schedule = bool(herpn_enabled and herpn_conversion_groups)
     layerwise_poly_enabled = hasattr(
         backbone.module, "layerwise_poly_activation_names")
@@ -1721,6 +1871,8 @@ def main(args):
             "simple_gate_group_bn_recalibration_batches > 0")
     last_simple_gate_snapshot = {}
     last_simple_gate_snapshot_step = None
+    last_nf_snapshot = {}
+    last_nf_snapshot_step = None
     max_nonfinite_embedding_skips = int(getattr(
         cfg, "max_nonfinite_embedding_skips", 0))
     nonfinite_embedding_skips = 0
@@ -2103,6 +2255,12 @@ def main(args):
                 and simple_gate_stats_interval > 0
                 and global_step % simple_gate_stats_interval == 0
             )
+            capture_nf_stats = (
+                nf_enabled and nf_stats_interval > 0
+                and global_step % nf_stats_interval == 0)
+            if nf_enabled:
+                backbone.module.set_nf_range_tracking(
+                    nf_range_loss_weight > 0.0 or capture_nf_stats)
             set_simple_gate_instrumentation(
                 backbone.module,
                 capture_simple_gate_stats,
@@ -2190,6 +2348,15 @@ def main(args):
                         f"product_absmax={worst_stats['product_absmax']:.6g}, "
                         f"product_p999={worst_stats['product_p999']:.6g}, "
                         f"blend={worst_stats.get('blend', float('nan')):.3f}")
+                if last_nf_snapshot:
+                    worst_name, worst_stats = max(
+                        last_nf_snapshot.items(),
+                        key=lambda item: item[1]["product_absmax"])
+                    gate_context += (
+                        f"; last_nf_profile_step={last_nf_snapshot_step}, "
+                        f"worst_nf_block={worst_name}, "
+                        f"product_absmax={worst_stats['product_absmax']:.6g}, "
+                        f"product_p999={worst_stats['product_p999']:.6g}")
                 if (max_nonfinite_embedding_skips <= 0
                         or nonfinite_embedding_skips
                         > max_nonfinite_embedding_skips):
@@ -2220,6 +2387,10 @@ def main(args):
                 )
                 if clear_gate_cache is not None:
                     clear_gate_cache()
+                clear_nf_cache = getattr(
+                    backbone.module, "clear_nf_cached_tensors", None)
+                if clear_nf_cache is not None:
+                    clear_nf_cache()
                 del backbone_output, local_embeddings
                 torch.cuda.empty_cache()
                 if not lr_scheduler_step_per_epoch:
@@ -2227,6 +2398,31 @@ def main(args):
                 set_simple_gate_instrumentation(backbone.module, False)
                 continue
             del batchnorm_snapshot
+            embedding_distillation_loss = local_embeddings.new_zeros(())
+            if embedding_teacher is not None:
+                # Run the no-grad teacher before PartialFC constructs its
+                # large classifier graph, reducing peak memory on V100s.
+                with torch.no_grad():
+                    teacher_embeddings = embedding_teacher(img)
+                if teacher_embeddings.shape != local_embeddings.shape:
+                    raise ValueError(
+                        "Embedding teacher/student shape mismatch: "
+                        f"teacher={tuple(teacher_embeddings.shape)}, "
+                        f"student={tuple(local_embeddings.shape)}")
+                if not torch.isfinite(teacher_embeddings).all():
+                    raise FloatingPointError(
+                        "Non-finite teacher embeddings at "
+                        f"global_step={global_step}")
+                student_unit = F.normalize(
+                    local_embeddings.float(), dim=1, eps=1e-6)
+                teacher_unit = F.normalize(
+                    teacher_embeddings.float(), dim=1, eps=1e-6)
+                embedding_distillation_loss = 0.5 * (
+                    student_unit - teacher_unit).square().sum(dim=1).mean()
+                if not torch.isfinite(embedding_distillation_loss):
+                    raise FloatingPointError(
+                        "Non-finite embedding distillation loss at "
+                        f"global_step={global_step}")
             if cryptoface_patch_training:
                 local_labels = local_labels.squeeze().long()
                 logits = module_partial_fc(local_embeddings, local_labels)
@@ -2240,6 +2436,18 @@ def main(args):
             distillation_loss = local_embeddings.new_zeros(())
             simple_gate_range_penalty = local_embeddings.new_zeros(())
             simple_gate_distillation_loss = local_embeddings.new_zeros(())
+            nf_range_penalty = local_embeddings.new_zeros(())
+            if embedding_teacher is not None:
+                loss = loss + (
+                    embedding_distill_weight
+                    * embedding_distillation_loss)
+            if nf_enabled and nf_range_loss_weight > 0.0:
+                nf_range_penalty = backbone.module.nf_range_penalty()
+                if not torch.isfinite(nf_range_penalty):
+                    raise FloatingPointError(
+                        "Non-finite NF range penalty at "
+                        f"global_step={global_step}")
+                loss = loss + nf_range_loss_weight * nf_range_penalty
             if herpn_enabled and herpn_range_loss_weight > 0:
                 range_penalty = backbone.module.herpn_range_penalty()
                 if not torch.isfinite(range_penalty):
@@ -2364,6 +2572,14 @@ def main(args):
                     )
                     last_simple_gate_snapshot_step = global_step
                     set_simple_gate_instrumentation(backbone.module, False)
+                if capture_nf_stats:
+                    last_nf_snapshot = log_nf_range_stats(
+                        backbone.module.nf_range_summary(),
+                        global_step,
+                        summary_writer=summary_writer,
+                        wandb_logger=wandb_logger,
+                    )
+                    last_nf_snapshot_step = global_step
                 if wandb_logger:
                     wandb_logger.log({
                         'Loss/Task Loss': task_loss.item(),
@@ -2376,6 +2592,9 @@ def main(args):
                             simple_gate_range_penalty.item()),
                         'Loss/SimpleGate Distillation': (
                             simple_gate_distillation_loss.item()),
+                        'Loss/NF Range Penalty': nf_range_penalty.item(),
+                        'Loss/Embedding Distillation': (
+                            embedding_distillation_loss.item()),
                         'Process/SimpleGate Progress': (
                             sum(simple_gate_blends_at_epoch(
                                 epoch + step_in_epoch / max(
@@ -2389,6 +2608,15 @@ def main(args):
                         'Process/Step': global_step,
                         'Process/Epoch': epoch
                     })
+
+                if (summary_writer is not None
+                        and global_step % cfg.frequent == 0):
+                    summary_writer.add_scalar(
+                        'Loss/NF Range Penalty',
+                        nf_range_penalty.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Loss/Embedding Distillation',
+                        embedding_distillation_loss.item(), global_step)
 
                 if (summary_writer is not None and herpn_enabled and
                         global_step % cfg.frequent == 0):
@@ -2457,6 +2685,9 @@ def main(args):
                         sum(current_affine_blends),
                         global_step,
                     )
+                if nf_enabled:
+                    backbone.module.clear_nf_cached_tensors()
+                    backbone.module.set_nf_range_tracking(False)
                     
                 loss_am.update(loss.item(), 1)
                 callback_logging(
