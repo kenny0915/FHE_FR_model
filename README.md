@@ -37,6 +37,10 @@ Examples:
   PReLU's ReLU component replaced by `PreciseReLUAlpha10` on `[-8, 8]`, then
   transition through independently fitted degrees 16, 8, and 4. The
   `ms1mv3_r50_precise_relu_s16` variant uses `[-16, 16]`.
+- `ms1mv3_r50_precise_relu_alpha7_s16`: fine-tune through an Alpha10-to-Alpha7
+  curriculum on the fixed interval `[-16, 16]`. Scale-24 and scale-32 configs
+  provide wider-range comparisons; all finish with the paper's two-component
+  Alpha7 polynomial at nonlinear multiplicative depth 7.
 - `ms1mv3_r50_herpn_residual_scale`: train IResNet50 from scratch with pure
   degree-2 HerPN activations and one learnable residual scalar per block,
   initialized to `1/sqrt(24)`. This recipe has no PReLU teacher or
@@ -122,6 +126,22 @@ the approximation boundary. Together with the learned channel slope, this is
 the ordinary PReLU derivative. This surrogate is training-only and does not
 alter inference or the FHE graph. If a 32 GB GPU still runs out of memory, use
 batch size 32 and reduce the learning rate to 0.00125.
+
+For the Alpha7 accuracy experiment, start with scale 16:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
+  --nproc_per_node=4 \
+  train_v2.py configs/ms1mv3_r50_precise_relu_alpha7_s16
+```
+
+Epochs 0-2 use Alpha10, epochs 3-5 blend to Alpha7, and the remaining epochs
+fine-tune Alpha7 exclusively. A frozen baseline R50 embedding teacher, fixed
+interval range penalty, finite checks, gradient clipping, and post-transition
+BatchNorm recalibration protect face-recognition geometry. Compare the `s24`
+and `s32` configs only if TensorBoard shows meaningful activation mass outside
+`[-16, 16]`; their in-range Alpha7 error bounds increase from 0.125 to 0.1875
+and 0.25 respectively.
 
 For the SimpleGate/RepBatchNorm experiment, epochs 0-8 use GELU while the
 normalization transition finishes. BatchNorm is then recalibrated and verified

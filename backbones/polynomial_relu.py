@@ -8,7 +8,7 @@ plaintext constants in an FHE implementation.
 import torch
 from torch import nn
 
-__all__ = ["ChebyReLU", "PreciseReLUAlpha10"]
+__all__ = ["ChebyReLU", "PreciseReLUAlpha7", "PreciseReLUAlpha10"]
 
 _BACKWARD_MODES = ("exact", "clipped_exact", "relu_ste")
 
@@ -79,6 +79,12 @@ class _PreciseReLUAlpha10Function(torch.autograd.Function):
             ctx.saved_tensors)
         compute_dtype = _compute_dtype(x)
         compute_x = x.to(dtype=compute_dtype)
+        if ctx.backward_mode == "relu_ste":
+            input_derivative = (compute_x > 0).to(dtype=compute_dtype)
+            grad_input = (
+                grad_output.to(dtype=compute_dtype) * input_derivative)
+            return (
+                grad_input.to(dtype=x.dtype), None, None, None, None, None)
         scale = input_scale.to(device=x.device, dtype=compute_dtype)
         p1 = p1_coeffs.to(device=x.device, dtype=compute_dtype)
         p2 = p2_coeffs.to(device=x.device, dtype=compute_dtype)
@@ -96,6 +102,50 @@ class _PreciseReLUAlpha10Function(torch.autograd.Function):
             exact_derivative, compute_x, ctx.backward_mode)
         grad_input = grad_output.to(dtype=compute_dtype) * input_derivative
         return grad_input.to(dtype=x.dtype), None, None, None, None, None
+
+
+class _PreciseReLUAlpha7Function(torch.autograd.Function):
+    """Memory-efficient Alpha7 with analytical backward recomputation."""
+
+    @staticmethod
+    def forward(ctx, x, p1_coeffs, p2_coeffs, input_scale, backward_mode):
+        compute_dtype = _compute_dtype(x)
+        compute_x = x.to(dtype=compute_dtype)
+        scale = input_scale.to(device=x.device, dtype=compute_dtype)
+        p1 = p1_coeffs.to(device=x.device, dtype=compute_dtype)
+        p2 = p2_coeffs.to(device=x.device, dtype=compute_dtype)
+        scaled_x = compute_x * scale.reciprocal()
+        p1_x = _polyval(scaled_x, p1)
+        p2_x = _polyval(p1_x, p2)
+        output = scale * 0.5 * (scaled_x + scaled_x * p2_x)
+        ctx.save_for_backward(x, p1_coeffs, p2_coeffs, input_scale)
+        ctx.backward_mode = str(backward_mode)
+        return output.to(dtype=x.dtype)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, p1_coeffs, p2_coeffs, input_scale = ctx.saved_tensors
+        compute_dtype = _compute_dtype(x)
+        compute_x = x.to(dtype=compute_dtype)
+        if ctx.backward_mode == "relu_ste":
+            input_derivative = (compute_x > 0).to(dtype=compute_dtype)
+            grad_input = (
+                grad_output.to(dtype=compute_dtype) * input_derivative)
+            return grad_input.to(dtype=x.dtype), None, None, None, None
+        scale = input_scale.to(device=x.device, dtype=compute_dtype)
+        p1 = p1_coeffs.to(device=x.device, dtype=compute_dtype)
+        p2 = p2_coeffs.to(device=x.device, dtype=compute_dtype)
+
+        scaled_x = compute_x * scale.reciprocal()
+        p1_x, p1_derivative = _polyval_with_derivative(scaled_x, p1)
+        p2_x, p2_derivative = _polyval_with_derivative(p1_x, p2)
+        composed_derivative = p2_derivative * p1_derivative
+        exact_derivative = 0.5 * (
+            1.0 + p2_x + scaled_x * composed_derivative)
+        input_derivative = _select_backward_derivative(
+            exact_derivative, compute_x, ctx.backward_mode)
+        grad_input = grad_output.to(dtype=compute_dtype) * input_derivative
+        return grad_input.to(dtype=x.dtype), None, None, None, None
 
 
 def _cheby_relu_forward(x, coefficients, scale, degree):
@@ -226,6 +276,59 @@ class ChebyReLU(nn.Module):
         )
 
 
+class PreciseReLUAlpha7(nn.Module):
+    """Alpha-7 composite approximation to ReLU on ``[-S, S]``.
+
+    Appendix A uses two degree-7 sign-polynomial components. The resulting
+    ReLU polynomial has algebraic degree 50, nonlinear multiplicative depth
+    7, and normalized maximum error at most ``2**-7`` on ``[-1, 1]``.
+    Scaling to ``[-S, S]`` changes the absolute error bound to ``S/128``.
+    """
+
+    alpha = 7
+    component_degrees = (7, 7)
+    algebraic_degree = 50
+    multiplicative_depth = 7
+    non_scalar_multiplications = 9
+
+    _P1_COEFFS = (
+        3.60471572275560e-36, 7.30445164958251,
+        -5.05471704202722e-35, -3.46825871108659e1,
+        1.16564665409095e-34, 5.98596518298826e1,
+        -6.54298492839531e-35, -3.18755225906466e1,
+    )
+    _P2_COEFFS = (
+        -9.46491402344260e-49, 2.40085652217597,
+        6.41744632725342e-48, -2.63125454261783,
+        -7.25338564676814e-48, 1.54912674773593,
+        2.06916466421812e-48, -3.31172956504304e-1,
+    )
+
+    def __init__(self, input_scale=1.0, backward_mode="exact"):
+        super().__init__()
+        if input_scale <= 0:
+            raise ValueError("input_scale must be positive")
+        if backward_mode not in _BACKWARD_MODES:
+            raise ValueError(
+                "backward_mode must be exact, clipped_exact, or relu_ste")
+        self.backward_mode = str(backward_mode)
+        self.register_buffer(
+            "input_scale", torch.tensor(float(input_scale), dtype=torch.float32))
+        self.register_buffer(
+            "p1_coeffs", torch.tensor(self._P1_COEFFS, dtype=torch.float32))
+        self.register_buffer(
+            "p2_coeffs", torch.tensor(self._P2_COEFFS, dtype=torch.float32))
+
+    def forward(self, x):
+        return _PreciseReLUAlpha7Function.apply(
+            x,
+            self.p1_coeffs,
+            self.p2_coeffs,
+            self.input_scale,
+            self.backward_mode,
+        )
+
+
 class PreciseReLUAlpha10(nn.Module):
     """Alpha-10 composite approximation to ReLU on ``[-S, S]``.
 
@@ -238,6 +341,8 @@ class PreciseReLUAlpha10(nn.Module):
 
     component_degrees = (7, 7, 13)
     algebraic_degree = 638
+    multiplicative_depth = 11
+    non_scalar_multiplications = 16
 
     _P1_COEFFS = (
         -1.68048812248597e-47, 1.08541842577442e1,

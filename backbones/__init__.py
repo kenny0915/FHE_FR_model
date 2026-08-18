@@ -75,6 +75,19 @@ def get_iresnet_precise_relu(depth, pretrained=False, progress=True, **kwargs):
     return factory(pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_iresnet_precise_relu_alpha7(
+        depth, pretrained=False, progress=True, **kwargs):
+    from . import iresnet_precise_relu_alpha7
+    factory = {
+        18: iresnet_precise_relu_alpha7.iresnet18,
+        34: iresnet_precise_relu_alpha7.iresnet34,
+        50: iresnet_precise_relu_alpha7.iresnet50,
+        100: iresnet_precise_relu_alpha7.iresnet100,
+        200: iresnet_precise_relu_alpha7.iresnet200,
+    }[depth]
+    return factory(pretrained=pretrained, progress=progress, **kwargs)
+
+
 def get_iresnet_herpn_residual_scale(
         depth, pretrained=False, progress=True, **kwargs):
     from . import iresnet_herpn_residual_scale
@@ -170,6 +183,16 @@ def get_model(name, **kwargs):
         return get_iresnet_precise_relu(100, False, **kwargs)
     elif name in ("r200_precise_relu",):
         return get_iresnet_precise_relu(200, False, **kwargs)
+    elif name in ("r18_precise_relu_alpha7",):
+        return get_iresnet_precise_relu_alpha7(18, False, **kwargs)
+    elif name in ("r34_precise_relu_alpha7",):
+        return get_iresnet_precise_relu_alpha7(34, False, **kwargs)
+    elif name in ("r50_precise_relu_alpha7",):
+        return get_iresnet_precise_relu_alpha7(50, False, **kwargs)
+    elif name in ("r100_precise_relu_alpha7",):
+        return get_iresnet_precise_relu_alpha7(100, False, **kwargs)
+    elif name in ("r200_precise_relu_alpha7",):
+        return get_iresnet_precise_relu_alpha7(200, False, **kwargs)
     elif name in ("mbf_no_relu",):
         fp16 = kwargs.get("fp16", False)
         num_features = kwargs.get("num_features", 512)

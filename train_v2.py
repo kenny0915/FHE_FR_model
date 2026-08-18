@@ -533,7 +533,7 @@ def herpn_progress_at_epoch(epoch_value, stage_epochs, transition_epochs):
 
 def precise_relu_progress_at_epoch(epoch_value, stage_epochs,
                                    transition_epochs):
-    """Return Alpha10-to-lower-degree curriculum progress.
+    """Return Alpha10-to-polynomial-student curriculum progress.
 
     Each start transitions the whole network to the next independently fitted
     ReLU polynomial.  Integer progress selects a single polynomial; fractional
@@ -548,7 +548,7 @@ def precise_relu_progress_at_epoch(epoch_value, stage_epochs,
     if any(right < left + transition_epochs
            for left, right in zip(starts, starts[1:])):
         raise ValueError(
-            "PreciseReLU degree transitions must be ordered and non-overlapping")
+            "PreciseReLU transitions must be ordered and non-overlapping")
     return sum(
         min(max(
             (float(epoch_value) - start) / transition_epochs, 0.0), 1.0)
@@ -1192,13 +1192,17 @@ def main(args):
             layerwise_poly_progress=float(getattr(
                 cfg, "herpn_initial_progress", 0.0)),
         )
-    if (cfg.network.startswith("r")
-            and cfg.network.endswith("_precise_relu")):
+    if cfg.network.startswith("r") and "_precise_relu" in cfg.network:
+        alpha7_backbone = cfg.network.endswith("_precise_relu_alpha7")
         model_kwargs.update(
             precise_relu_input_scale=float(getattr(
                 cfg, "precise_relu_input_scale", 8.0)),
+            precise_relu_target_alphas=tuple(getattr(
+                cfg, "precise_relu_target_alphas",
+                (7,) if alpha7_backbone else ())),
             precise_relu_lower_degrees=tuple(getattr(
-                cfg, "precise_relu_lower_degrees", (16, 8, 4))),
+                cfg, "precise_relu_lower_degrees",
+                () if alpha7_backbone else (16, 8, 4))),
             precise_relu_progress=float(getattr(
                 cfg, "precise_relu_initial_progress", 0.0)),
             precise_relu_backward_mode=str(getattr(
@@ -1754,17 +1758,20 @@ def main(args):
         if len(precise_relu_stage_epochs) != transition_count:
             raise ValueError(
                 "precise_relu_stage_epochs must contain one start for each "
-                f"lower-degree student ({transition_count}), got "
+                f"polynomial student ({transition_count}), got "
                 f"{len(precise_relu_stage_epochs)}")
         final_progress = precise_relu_progress_at_epoch(
             cfg.num_epoch,
             precise_relu_stage_epochs,
             precise_relu_transition_epochs,
         )
-        if (getattr(cfg, "precise_relu_require_final_degree", True)
+        require_final_stage = bool(getattr(
+            cfg, "precise_relu_require_final_stage",
+            getattr(cfg, "precise_relu_require_final_degree", True)))
+        if (require_final_stage
                 and final_progress < transition_count):
             raise ValueError(
-                "PreciseReLU schedule does not reach its final degree before "
+                "PreciseReLU schedule does not reach its final stage before "
                 f"training ends: final_progress={final_progress:.3f}")
         backbone.module.set_polynomial_progress(
             precise_relu_progress_at_epoch(

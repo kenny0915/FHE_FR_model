@@ -1,4 +1,4 @@
-"""IResNet curriculum from PreciseReLUAlpha10 to low-degree ReLU.
+"""IResNet curricula from PreciseReLUAlpha10 to polynomial ReLU students.
 
 Every original channel-wise PReLU is written as
 
@@ -6,9 +6,9 @@ Every original channel-wise PReLU is written as
 
 and only its ReLU term is replaced.  Training starts with the accurate
 Alpha-10 composite approximation on ``[-S, S]`` and then smoothly transitions
-through independently fitted Chebyshev/minimax students.  The students are
-not coefficient truncations of Alpha-10: truncating a jointly fitted power
-series is not a valid lower-degree approximation.
+through configured precise-alpha and/or independently fitted Chebyshev/minimax
+students. The students are not coefficient truncations of Alpha-10: truncating
+a jointly fitted power series is not a valid lower-degree approximation.
 
 At a completed stage the encrypted activation is polynomial-only.  The PReLU
 slope is a learned plaintext channel-wise coefficient.  The default final
@@ -21,7 +21,11 @@ import torch
 from torch import nn
 
 from .iresnet import IBasicBlock, IResNet as _IResNet
-from .polynomial_relu import ChebyReLU, PreciseReLUAlpha10
+from .polynomial_relu import (
+    ChebyReLU,
+    PreciseReLUAlpha7,
+    PreciseReLUAlpha10,
+)
 
 __all__ = [
     "ProgressivePrecisePReLU",
@@ -34,6 +38,7 @@ __all__ = [
 ]
 
 _SUPPORTED_LOWER_DEGREES = (16, 8, 4)
+_PRECISE_RELU_BY_ALPHA = {7: PreciseReLUAlpha7}
 
 
 class _PolynomialRangePenaltyFunction(torch.autograd.Function):
@@ -77,12 +82,12 @@ class _PolynomialRangePenaltyFunction(torch.autograd.Function):
 
 
 class ProgressivePrecisePReLU(nn.Module):
-    """PReLU using an Alpha-10-to-low-degree ReLU curriculum."""
+    """PReLU using an Alpha10-to-polynomial-student curriculum."""
 
     is_progressive_precise_relu = True
 
     def __init__(self, channels, input_scale=8.0, lower_degrees=(16, 8, 4),
-                 progress=0.0, initial_slope=0.25,
+                 target_alphas=(), progress=0.0, initial_slope=0.25,
                  backward_mode="exact"):
         super().__init__()
         if channels <= 0:
@@ -90,8 +95,15 @@ class ProgressivePrecisePReLU(nn.Module):
         if input_scale <= 0:
             raise ValueError("input_scale must be positive")
         lower_degrees = tuple(int(degree) for degree in lower_degrees)
-        if not lower_degrees:
-            raise ValueError("lower_degrees must not be empty")
+        target_alphas = tuple(int(alpha) for alpha in target_alphas)
+        if not target_alphas and not lower_degrees:
+            raise ValueError(
+                "target_alphas and lower_degrees must not both be empty")
+        if any(alpha not in _PRECISE_RELU_BY_ALPHA
+               for alpha in target_alphas):
+            raise ValueError("target_alphas may contain only 7")
+        if len(set(target_alphas)) != len(target_alphas):
+            raise ValueError("target_alphas must not contain duplicates")
         if any(degree not in _SUPPORTED_LOWER_DEGREES
                for degree in lower_degrees):
             raise ValueError("lower_degrees may contain only 16, 8, and 4")
@@ -102,15 +114,24 @@ class ProgressivePrecisePReLU(nn.Module):
         self.prelu = nn.PReLU(channels, init=float(initial_slope))
         self.alpha10 = PreciseReLUAlpha10(
             input_scale=input_scale, backward_mode=backward_mode)
-        self.students = nn.ModuleList([
+        precise_students = [
+            _PRECISE_RELU_BY_ALPHA[alpha](
+                input_scale=input_scale,
+                backward_mode=backward_mode,
+            )
+            for alpha in target_alphas
+        ]
+        degree_students = [
             ChebyReLU(
                 input_scale=input_scale,
                 degree=degree,
                 backward_mode=backward_mode,
             )
             for degree in lower_degrees
-        ])
+        ]
+        self.students = nn.ModuleList(precise_students + degree_students)
         self.backward_mode = str(backward_mode)
+        self.target_alphas = target_alphas
         self.lower_degrees = lower_degrees
         self.register_buffer(
             "progress", torch.tensor(float(progress), dtype=torch.float32))
@@ -204,11 +225,14 @@ class IResNet(_IResNet):
     """Ordinary IResNet topology with all 25 R50 PReLUs replaced."""
 
     def __init__(self, *args, precise_relu_input_scale=8.0,
+                 precise_relu_target_alphas=(),
                  precise_relu_lower_degrees=(16, 8, 4),
                  precise_relu_progress=0.0,
                  precise_relu_backward_mode="exact", **kwargs):
         super().__init__(*args, **kwargs)
         self.precise_relu_input_scale = float(precise_relu_input_scale)
+        self.precise_relu_target_alphas = tuple(
+            int(alpha) for alpha in precise_relu_target_alphas)
         self.precise_relu_lower_degrees = tuple(
             int(degree) for degree in precise_relu_lower_degrees)
         self.precise_relu_backward_mode = str(
@@ -226,6 +250,7 @@ class IResNet(_IResNet):
                 replacement = ProgressivePrecisePReLU(
                     channels=child.num_parameters,
                     input_scale=self.precise_relu_input_scale,
+                    target_alphas=self.precise_relu_target_alphas,
                     lower_degrees=self.precise_relu_lower_degrees,
                     progress=float(self.polynomial_progress.item()),
                     backward_mode=self.precise_relu_backward_mode,
@@ -243,7 +268,10 @@ class IResNet(_IResNet):
         ]
 
     def polynomial_transition_count(self):
-        return len(self.precise_relu_lower_degrees)
+        return (
+            len(self.precise_relu_target_alphas)
+            + len(self.precise_relu_lower_degrees)
+        )
 
     def set_polynomial_progress(self, progress):
         progress = min(max(float(progress), 0.0),
@@ -253,9 +281,14 @@ class IResNet(_IResNet):
             activation.set_degree_progress(progress)
 
     def polynomial_stage_names(self):
-        return ("alpha10",) + tuple(
-            "degree{}".format(degree)
-            for degree in self.precise_relu_lower_degrees)
+        return (
+            ("alpha10",)
+            + tuple("alpha{}".format(alpha)
+                    for alpha in self.precise_relu_target_alphas)
+            + tuple(
+                "degree{}".format(degree)
+                for degree in self.precise_relu_lower_degrees)
+        )
 
     def polynomial_range_penalty(self):
         penalties = [
