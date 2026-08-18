@@ -28,6 +28,11 @@ def _tiny_model(num_classes=16):
 def test_nf12_factory_has_twelve_residual_products_and_no_backbone_norm():
     model = get_model("iresnet_nf12", num_features=32, fp16=False)
     assert len(model.nf_blocks()) == 12
+    assert all(
+        not module.gain.requires_grad
+        for module in model.modules()
+        if isinstance(module, ScaledWSConv2d)
+    )
 
     forbidden = (nn.LayerNorm, nn.GroupNorm, nn.modules.batchnorm._BatchNorm)
     backbone_norms = [
@@ -43,15 +48,15 @@ def test_quadratic_is_exactly_linear_at_initialization_and_scales_are_bounded():
     inputs = torch.randn(2, 8, 7, 7)
     outputs = block(inputs)
 
-    preactivation = block._last_range_tensors["preactivation"]
+    operand_u = block._last_range_tensors["operand_u"]
     modulator = block._last_range_tensors["modulator"]
     product = block._last_range_tensors["product"]
     assert torch.equal(modulator, torch.ones_like(modulator))
-    assert torch.equal(product, preactivation)
+    assert torch.equal(product, operand_u)
     assert block.quadratic_scale().item() == pytest.approx(0.0, abs=1e-8)
     rho, alpha = block.residual_coefficients()
-    assert alpha.item() == pytest.approx(0.05, abs=1e-6)
-    assert 0.0 < alpha.item() < 0.2
+    assert alpha.item() == pytest.approx(0.02, abs=1e-6)
+    assert 0.0 < alpha.item() < 0.1
     assert rho.square().add(alpha.square()).item() == pytest.approx(
         1.0, abs=1e-6)
     assert torch.isfinite(outputs).all()
@@ -124,5 +129,6 @@ def test_nf12_training_config_uses_r50_teacher_and_stable_recipe():
     assert cfg.embedding_distill_weight == pytest.approx(1.0)
     assert cfg.nf_range_loss_weight > 0.0
     assert cfg.nf_alpha_init < cfg.nf_alpha_max
-    assert cfg.nf_quadratic_scale_max <= 0.25
+    assert cfg.nf_quadratic_scale_max <= 0.1
+    assert not cfg.nf_learnable_ws_gain
     assert cfg.gradient_clip_scope == "backbone"

@@ -1188,6 +1188,8 @@ def main(args):
             nf_quadratic_scale_max=float(getattr(
                 cfg, "nf_quadratic_scale_max",
                 getattr(cfg, "nf_modulator_scale_max", 0.25))),
+            nf_learnable_ws_gain=bool(getattr(
+                cfg, "nf_learnable_ws_gain", True)),
             nf_range_limit=float(getattr(cfg, "nf_range_limit", 6.0)),
             nf_range_sample_size=int(getattr(
                 cfg, "nf_range_sample_size", 16384)),

@@ -396,12 +396,15 @@ def get_model(name, **kwargs):
             face_embedding=True,
             fp16=kwargs.get("fp16", False),
             ws_eps=kwargs.get("nf_ws_eps", 1e-4),
-            alpha_init=kwargs.get("nf_alpha_init", 0.05),
-            alpha_max=kwargs.get("nf_alpha_max", 0.2),
+            alpha_init=kwargs.get("nf_alpha_init", 0.02),
+            alpha_max=kwargs.get("nf_alpha_max", 0.1),
             input_gain_init=kwargs.get("nf_input_gain_init", 1.0),
+            input_gain_min=kwargs.get("nf_input_gain_min", 0.5),
+            input_gain_max=kwargs.get("nf_input_gain_max", 2.0),
             quadratic_scale_max=kwargs.get(
                 "nf_quadratic_scale_max",
-                kwargs.get("nf_modulator_scale_max", 0.25)),
+                kwargs.get("nf_modulator_scale_max", 0.1)),
+            learnable_ws_gain=kwargs.get("nf_learnable_ws_gain", False),
             range_limit=kwargs.get("nf_range_limit", 6.0),
             range_sample_size=kwargs.get("nf_range_sample_size", 16384),
         )

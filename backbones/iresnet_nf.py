@@ -3,9 +3,9 @@
 Each residual block is linear at initialization and introduces exactly one
 ciphertext-ciphertext product along its encrypted path::
 
-    z = W1(s * x)
-    a = z * (1 + beta * z)
-    y = rho * shortcut(x) + alpha * W2(a)
+    u = Wu(s * x)
+    v = 1 + beta * Wv(s * x)
+    y = rho * shortcut(x) + alpha * Wo(u * v)
 
 Scaled weight standardization (SWS) and bounded scalar parameterizations are
 training-time operations on plaintext parameters.  ``switch_to_deploy``
@@ -37,13 +37,13 @@ __all__ = [
 
 
 class NormFreeResidualBlock(nn.Module):
-    """Two-convolution ResNet block with a bounded near-linear quadratic."""
+    """Spatial ResNet block with a bounded two-stream quadratic gate."""
 
     def __init__(self, in_channels, out_channels, stride=1, ws_eps=1e-4,
-                 alpha_init=0.05, alpha_max=0.2, input_gain_init=1.0,
-                 input_gain_min=0.25, input_gain_max=4.0,
-                 quadratic_scale_max=0.25, range_limit=6.0,
-                 range_sample_size=16384):
+                 alpha_init=0.02, alpha_max=0.1, input_gain_init=1.0,
+                 input_gain_min=0.5, input_gain_max=2.0,
+                 quadratic_scale_max=0.1, range_limit=6.0,
+                 range_sample_size=16384, learnable_ws_gain=False):
         super().__init__()
         if stride not in (1, 2):
             raise ValueError("NormFreeResidualBlock stride must be 1 or 2")
@@ -59,10 +59,13 @@ class NormFreeResidualBlock(nn.Module):
         self.quadratic_scale = SymmetricBoundedScalar(
             initial=0.0, maximum=quadratic_scale_max)
         self.alpha = BoundedScalar(alpha_init, 1e-5, alpha_max)
-        self.conv1 = ScaledWSConv2d(
+        self.conv_u = ScaledWSConv2d(
             in_channels, out_channels, 3, stride=1, padding=1,
             ws_eps=ws_eps)
-        self.conv2 = ScaledWSConv2d(
+        # An independent 1x1 projection avoids the positive DC shift of z^2.
+        self.conv_v = ScaledWSConv2d(
+            in_channels, out_channels, 1, stride=1, ws_eps=ws_eps)
+        self.conv_out = ScaledWSConv2d(
             out_channels, out_channels, 3, stride=stride, padding=1,
             ws_eps=ws_eps)
         self.projection = (
@@ -71,11 +74,14 @@ class NormFreeResidualBlock(nn.Module):
             if stride != 1 or in_channels != out_channels else nn.Identity()
         )
         self.apply(_init_ws_conv)
+        if not learnable_ws_gain:
+            for module in self.modules():
+                if isinstance(module, ScaledWSConv2d):
+                    module.gain.requires_grad_(False)
 
         self.range_tracking = False
         self._last_range_tensors = None
         self.deploy = False
-        self.register_buffer("deploy_beta", torch.tensor(0.0), persistent=True)
         self.register_buffer("deploy_rho", torch.tensor(1.0), persistent=True)
 
     def residual_coefficients(self):
@@ -93,11 +99,12 @@ class NormFreeResidualBlock(nn.Module):
 
     def _training_forward(self, x):
         scaled = self.input_gain().to(dtype=x.dtype) * x
-        preactivation = self.conv1(scaled)
+        operand_u = self.conv_u(scaled)
+        operand_v = self.conv_v(scaled)
         beta = self.quadratic_scale().to(dtype=x.dtype)
-        modulator = 1.0 + beta * preactivation
-        product = preactivation * modulator
-        branch = self.conv2(product)
+        modulator = 1.0 + beta * operand_v
+        product = operand_u * modulator
+        branch = self.conv_out(product)
         shortcut = self.projection(x)
         rho, alpha = self.residual_coefficients()
         output = (
@@ -107,7 +114,8 @@ class NormFreeResidualBlock(nn.Module):
         if self.range_tracking:
             self._last_range_tensors = {
                 "input": x,
-                "preactivation": preactivation,
+                "operand_u": operand_u,
+                "operand_v": operand_v,
                 "modulator": modulator,
                 "product": product,
                 "branch": branch,
@@ -117,13 +125,13 @@ class NormFreeResidualBlock(nn.Module):
         return output
 
     def _deploy_forward(self, x):
-        preactivation = self.conv1(x)
-        beta = self.deploy_beta.to(dtype=x.dtype)
-        activation = preactivation * (1.0 + beta * preactivation)
+        operand_u = self.conv_u(x)
+        modulator = 1.0 + self.conv_v(x)
+        product = operand_u * modulator
         shortcut = self.projection(x)
         return (
             self.deploy_rho.to(dtype=x.dtype) * shortcut
-            + self.conv2(activation)
+            + self.conv_out(product)
         )
 
     def forward(self, x):
@@ -141,10 +149,14 @@ class NormFreeResidualBlock(nn.Module):
             raise RuntimeError("Range tracking must be enabled before forward")
         limit = self.range_limit
         penalties = []
-        for name in ("preactivation", "modulator", "product"):
-            value = self._sample(self._last_range_tensors[name]).float()
-            excess = F.relu(value.abs() - limit) / limit
-            penalties.append(excess.square().mean())
+        for name in ("operand_u", "operand_v", "modulator", "product"):
+            full_value = self._last_range_tensors[name].float()
+            value = self._sample(full_value)
+            excess = F.relu(value.abs() / limit - 1.0)
+            mean_tail = excess.square().mean()
+            sample_tail = F.relu(
+                full_value.abs().flatten(1).amax(dim=1) / limit - 1.0)
+            penalties.append(mean_tail + 0.01 * sample_tail.square().mean())
         output = self._sample(self._last_range_tensors["output"]).float()
         output_rms = output.square().mean().sqrt()
         penalties.append(F.relu(output_rms / limit - 1.0).square())
@@ -185,9 +197,10 @@ class NormFreeResidualBlock(nn.Module):
             input_gain = float(self.input_gain().item())
             beta = float(self.quadratic_scale().item())
             rho, alpha = self.residual_coefficients()
-            self.deploy_beta.fill_(beta)
-            self.conv1 = self.conv1.to_conv2d(input_scale=input_gain)
-            self.conv2 = self.conv2.to_conv2d(
+            self.conv_u = self.conv_u.to_conv2d(input_scale=input_gain)
+            self.conv_v = self.conv_v.to_conv2d(
+                input_scale=input_gain, output_scale=beta)
+            self.conv_out = self.conv_out.to_conv2d(
                 output_scale=float(alpha.item()))
             if isinstance(self.projection, ScaledWSConv2d):
                 self.projection = self.projection.to_conv2d(
@@ -208,9 +221,11 @@ class NormFreeIResNet(nn.Module):
 
     def __init__(self, layers=(2, 2, 6, 2), channels=(64, 128, 256, 512),
                  num_classes=512, face_embedding=True, fp16=False,
-                 ws_eps=1e-4, alpha_init=0.05, alpha_max=0.2,
-                 input_gain_init=1.0, quadratic_scale_max=0.25,
-                 range_limit=6.0, range_sample_size=16384, **kwargs):
+                 ws_eps=1e-4, alpha_init=0.02, alpha_max=0.1,
+                 input_gain_init=1.0, input_gain_min=0.5,
+                 input_gain_max=2.0, quadratic_scale_max=0.1,
+                 range_limit=6.0, range_sample_size=16384,
+                 learnable_ws_gain=False, **kwargs):
         super().__init__()
         del kwargs
         if fp16:
@@ -224,6 +239,8 @@ class NormFreeIResNet(nn.Module):
         self.stem = ScaledWSConv2d(
             3, channels[0], 3, stride=1, padding=1, ws_eps=ws_eps)
         _init_ws_conv(self.stem)
+        if not learnable_ws_gain:
+            self.stem.gain.requires_grad_(False)
 
         stages = []
         in_channels = channels[0]
@@ -238,9 +255,12 @@ class NormFreeIResNet(nn.Module):
                     alpha_init=alpha_init,
                     alpha_max=alpha_max,
                     input_gain_init=input_gain_init,
+                    input_gain_min=input_gain_min,
+                    input_gain_max=input_gain_max,
                     quadratic_scale_max=quadratic_scale_max,
                     range_limit=range_limit,
                     range_sample_size=range_sample_size,
+                    learnable_ws_gain=learnable_ws_gain,
                 ))
                 in_channels = out_channels
             stages.append(nn.Sequential(*blocks))
@@ -257,6 +277,8 @@ class NormFreeIResNet(nn.Module):
                 nn.BatchNorm1d(num_classes),
             )
             _init_ws_conv(self.head[0])
+            if not learnable_ws_gain:
+                self.head[0].gain.requires_grad_(False)
             nn.init.trunc_normal_(self.head[3].weight, std=0.02)
         else:
             self.head = nn.Linear(channels[-1], num_classes)
@@ -277,7 +299,13 @@ class NormFreeIResNet(nn.Module):
             block.clear_cached_tensors()
 
     def nf_range_penalty(self):
-        losses = [block.range_penalty() for block in self.nf_blocks()]
+        losses = []
+        for index, block in enumerate(self.nf_blocks()):
+            loss = block.range_penalty()
+            if not torch.isfinite(loss):
+                raise FloatingPointError(
+                    f"Non-finite NF range penalty in block_{index:02d}")
+            losses.append(loss)
         if not losses:
             return next(self.parameters()).new_zeros(())
         return torch.stack(losses).mean()
