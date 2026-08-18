@@ -148,9 +148,80 @@ class ChebyReLU(torch.nn.Module):
         return out.to(dtype=x.dtype)
 
 
-class PreciseReLUAlpha10(torch.nn.Module):
-    # Appendix A of "Precise Approximation of Convolutional Neural Networks":
-    # r_alpha(x) = 0.5 * (x + x * (p3 o p2 o p1)(x)), alpha = 10.
+class _PreciseReLU(torch.nn.Module):
+    """Scaled Appendix-A PreciseReLU on ``[-input_scale, input_scale]``."""
+
+    alpha = None
+    component_degrees = ()
+    multiplicative_depth = None
+    non_scalar_multiplications = None
+    _COMPONENT_COEFFS = ()
+
+    def __init__(self, input_scale=1.0):
+        super().__init__()
+        if input_scale <= 0:
+            raise ValueError("input_scale must be positive")
+        self.input_scale = float(input_scale)
+        for index, coefficients in enumerate(self._COMPONENT_COEFFS, start=1):
+            self.register_buffer(
+                "p{}_coeffs".format(index),
+                torch.tensor(coefficients, dtype=torch.float32),
+            )
+
+    @staticmethod
+    def _polyval(x, coeffs):
+        y = coeffs[-1].to(dtype=x.dtype, device=x.device)
+        for coeff in coeffs[:-1].flip(0):
+            y = y * x + coeff.to(dtype=x.dtype, device=x.device)
+        return y
+
+    def forward(self, x):
+        compute_x = x.float()
+        scaled_x = compute_x / self.input_scale
+        sign_approximation = scaled_x
+        for index in range(1, len(self._COMPONENT_COEFFS) + 1):
+            coefficients = getattr(self, "p{}_coeffs".format(index)).float()
+            sign_approximation = self._polyval(
+                sign_approximation, coefficients)
+        out = self.input_scale * 0.5 * (
+            scaled_x + scaled_x * sign_approximation)
+        return out.to(dtype=x.dtype)
+
+
+class PreciseReLUAlpha7(_PreciseReLU):
+    """PreciseReLU with alpha=7 from Appendix A of the reference paper.
+
+    The normalized approximation target is ReLU on ``[-1, 1]`` with error
+    at most ``2**-7``. ``input_scale`` applies the paper's transformation
+    ``B * r_7(x / B)`` to target ``[-B, B]`` (error at most ``B * 2**-7``).
+    """
+
+    alpha = 7
+    component_degrees = (7, 7)
+    multiplicative_depth = 7
+    non_scalar_multiplications = 9
+    _P1_COEFFS = (
+        3.60471572275560e-36, 7.30445164958251,
+        -5.05471704202722e-35, -3.46825871108659e1,
+        1.16564665409095e-34, 5.98596518298826e1,
+        -6.54298492839531e-35, -3.18755225906466e1,
+    )
+    _P2_COEFFS = (
+        -9.46491402344260e-49, 2.40085652217597,
+        6.41744632725342e-48, -2.63125454261783,
+        -7.25338564676814e-48, 1.54912674773593,
+        2.06916466421812e-48, -3.31172956504304e-1,
+    )
+    _COMPONENT_COEFFS = (_P1_COEFFS, _P2_COEFFS)
+
+
+class PreciseReLUAlpha10(_PreciseReLU):
+    """PreciseReLU with alpha=10 from Appendix A of the reference paper."""
+
+    alpha = 10
+    component_degrees = (7, 7, 13)
+    multiplicative_depth = 11
+    non_scalar_multiplications = 16
     _P1_COEFFS = (
         -1.68048812248597e-47, 1.08541842577442e1,
         5.19213405604261e-46, -6.22833925211098e1,
@@ -172,40 +243,29 @@ class PreciseReLUAlpha10(torch.nn.Module):
         -1.26770087815848e-37, -2.04298067399942,
         1.52452197400636e-38, 2.46407138926031e-1,
     )
+    _COMPONENT_COEFFS = (_P1_COEFFS, _P2_COEFFS, _P3_COEFFS)
 
-    def __init__(self, input_scale=1.0):
-        super().__init__()
-        if input_scale <= 0:
-            raise ValueError("input_scale must be positive")
-        self.input_scale = float(input_scale)
-        self.register_buffer("p1_coeffs", torch.tensor(self._P1_COEFFS, dtype=torch.float32))
-        self.register_buffer("p2_coeffs", torch.tensor(self._P2_COEFFS, dtype=torch.float32))
-        self.register_buffer("p3_coeffs", torch.tensor(self._P3_COEFFS, dtype=torch.float32))
 
-    @staticmethod
-    def _polyval(x, coeffs):
-        y = coeffs[-1].to(dtype=x.dtype, device=x.device)
-        for coeff in coeffs[:-1].flip(0):
-            y = y * x + coeff.to(dtype=x.dtype, device=x.device)
-        return y
-
-    def forward(self, x):
-        compute_x = x.float()
-        scaled_x = compute_x / self.input_scale
-        p1_x = self._polyval(scaled_x, self.p1_coeffs.float())
-        p2_x = self._polyval(p1_x, self.p2_coeffs.float())
-        p3_x = self._polyval(p2_x, self.p3_coeffs.float())
-        out = self.input_scale * 0.5 * (scaled_x + scaled_x * p3_x)
-        return out.to(dtype=x.dtype)
+_PRECISE_RELU_BY_ALPHA = {
+    7: PreciseReLUAlpha7,
+    10: PreciseReLUAlpha10,
+}
 
 
 class PReLU_Approx(torch.nn.Module):
-    def __init__(self, slope, input_scale=1.0, polynomial_degree=4):
+    def __init__(self, slope, input_scale=1.0, polynomial_degree=4,
+                 precise_alpha=None):
         super().__init__()
         slope = slope.detach().clone().float().reshape(-1)
-        # self.relu = PreciseReLUAlpha10(input_scale=input_scale)
-        self.relu = ChebyReLU(
-            input_scale=input_scale, degree=polynomial_degree)
+        if precise_alpha is None:
+            self.relu = ChebyReLU(
+                input_scale=input_scale, degree=polynomial_degree)
+        else:
+            try:
+                precise_relu = _PRECISE_RELU_BY_ALPHA[int(precise_alpha)]
+            except (KeyError, TypeError, ValueError):
+                raise ValueError('precise_alpha must be 7, 10, or None')
+            self.relu = precise_relu(input_scale=input_scale)
         self.register_buffer("slope", slope)
 
     def _slope_for(self, x):
@@ -222,20 +282,22 @@ class PReLU_Approx(torch.nn.Module):
 
 
 def replace_resnet_activations_with_poly(
-        module, input_scale=1.0, polynomial_degree=4):
+        module, input_scale=1.0, polynomial_degree=4, precise_alpha=None):
     replaced = 0
     for name, child in module.named_children():
         if isinstance(child, torch.nn.PReLU):
             replacement = PReLU_Approx(
                 child.weight, input_scale=input_scale,
-                polynomial_degree=polynomial_degree).to(
+                polynomial_degree=polynomial_degree,
+                precise_alpha=precise_alpha).to(
                     device=child.weight.device, dtype=child.weight.dtype)
             setattr(module, name, replacement)
             replaced += 1
         else:
             replaced += replace_resnet_activations_with_poly(
                 child, input_scale=input_scale,
-                polynomial_degree=polynomial_degree)
+                polynomial_degree=polynomial_degree,
+                precise_alpha=precise_alpha)
     return replaced
 
 
@@ -254,7 +316,7 @@ def _replace_named_child(module, qualified_name, child):
 
 
 def replace_resnet_activations_with_poly_scales(
-        module, input_scales, polynomial_degree=4):
+        module, input_scales, polynomial_degree=4, precise_alpha=None):
     """Replace every PReLU using a fixed public scale keyed by module name."""
     prelus = _prelu_modules(module)
     expected_names = {name for name, _ in prelus}
@@ -272,7 +334,8 @@ def replace_resnet_activations_with_poly_scales(
             raise ValueError(
                 'Input scale for {} must be finite and positive'.format(name))
         replacement = PReLU_Approx(
-            prelu.weight, scale, polynomial_degree=polynomial_degree).to(
+            prelu.weight, scale, polynomial_degree=polynomial_degree,
+            precise_alpha=precise_alpha).to(
             device=prelu.weight.device, dtype=prelu.weight.dtype)
         _replace_named_child(module, name, replacement)
     return len(prelus)
@@ -280,7 +343,7 @@ def replace_resnet_activations_with_poly_scales(
 
 def calibrate_resnet_activations_with_poly(
         module, calibration_inputs, scale_margin=2.0, min_input_scale=1e-3,
-        polynomial_degree=4):
+        polynomial_degree=4, precise_alpha=None):
     """Sequentially measure and replace PReLUs with fixed-scale polynomials.
 
     The input of each activation is measured on the *partially converted*
@@ -294,8 +357,11 @@ def calibrate_resnet_activations_with_poly(
         raise ValueError('scale_margin must be greater than 1')
     if min_input_scale <= 0.0:
         raise ValueError('min_input_scale must be positive')
-    if polynomial_degree not in ChebyReLU._NORMALIZED_POWER_COEFFS:
+    if (precise_alpha is None
+            and polynomial_degree not in ChebyReLU._NORMALIZED_POWER_COEFFS):
         raise ValueError('polynomial_degree must be 4, 8, or 16')
+    if precise_alpha is not None and precise_alpha not in _PRECISE_RELU_BY_ALPHA:
+        raise ValueError('precise_alpha must be 7, 10, or None')
     if not torch.is_tensor(calibration_inputs) or calibration_inputs.numel() == 0:
         raise ValueError('calibration_inputs must be a non-empty tensor')
     if not torch.isfinite(calibration_inputs).all():
@@ -335,7 +401,8 @@ def calibrate_resnet_activations_with_poly(
                 input_scale = max(input_absmax * scale_margin, min_input_scale)
                 replacement = PReLU_Approx(
                     prelu.weight, input_scale,
-                    polynomial_degree=polynomial_degree).to(
+                    polynomial_degree=polynomial_degree,
+                    precise_alpha=precise_alpha).to(
                     device=prelu.weight.device, dtype=prelu.weight.dtype)
                 _replace_named_child(module, name, replacement)
                 diagnostics.append({

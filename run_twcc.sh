@@ -14,7 +14,8 @@ CUDA_VISIBLE_DEVICES=0 python eval_ijbc_replace_non_linear.py \
   --batch-size 128 \
   --job ms1mv3_r50 \
   --target IJBC \
-  --network r50
+  --network r50 \
+  --relu-poly-precise-alpha 7
 
 # poolformer
 # train

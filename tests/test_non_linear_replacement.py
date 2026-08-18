@@ -4,6 +4,7 @@ import torch
 from eval.non_linear_replacement import (
     ChebyReLU,
     PReLU_Approx,
+    PreciseReLUAlpha7,
     calibrate_resnet_activations_with_poly,
     replace_resnet_activations_with_poly,
     replace_resnet_activations_with_poly_scales,
@@ -24,6 +25,29 @@ class SmallPReLUModel(torch.nn.Module):
 
 
 class NonLinearReplacementTest(unittest.TestCase):
+    def test_precise_relu_alpha7_matches_paper_error_bound(self):
+        input_scale = 3.5
+        inputs = torch.linspace(
+            -input_scale, input_scale, 20001, dtype=torch.float64)
+        approximation = PreciseReLUAlpha7(input_scale=input_scale)
+        error = (approximation(inputs) - torch.relu(inputs)).abs().max()
+
+        self.assertLessEqual(float(error), input_scale * (2.0 ** -7))
+        self.assertEqual(approximation.component_degrees, (7, 7))
+        self.assertEqual(approximation.multiplicative_depth, 7)
+        self.assertEqual(approximation.non_scalar_multiplications, 9)
+
+    def test_replacement_can_select_precise_relu_alpha7(self):
+        model = SmallPReLUModel().eval()
+
+        replaced = replace_resnet_activations_with_poly(
+            model, input_scale=8.0, precise_alpha=7)
+
+        self.assertEqual(replaced, 2)
+        self.assertIsInstance(model.first.relu, PreciseReLUAlpha7)
+        self.assertIsInstance(model.second.relu, PreciseReLUAlpha7)
+        self.assertTrue(torch.isfinite(model(torch.ones(2, 2))).all())
+
     def test_higher_degrees_are_more_precise_on_normalized_interval(self):
         inputs = torch.linspace(-1.0, 1.0, 20001, dtype=torch.float64)
         target = torch.relu(inputs)
