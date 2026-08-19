@@ -70,6 +70,28 @@ def prepbn_transition_complete(current_step: int, total_steps: int) -> bool:
     return total_steps <= 0 or current_step >= total_steps
 
 
+def frozen_std_group_steps(start_epoch, gap_steps, steps_per_epoch,
+                           group_count):
+    """Build ordered hard-switch steps for frozen-std normalization sites."""
+    start_epoch = float(start_epoch)
+    gap_steps = int(gap_steps)
+    steps_per_epoch = int(steps_per_epoch)
+    group_count = int(group_count)
+    if start_epoch < 0.0:
+        raise ValueError("frozen_std_start_epoch must be non-negative")
+    if gap_steps <= 0:
+        raise ValueError("frozen_std_group_gap_steps must be positive")
+    if steps_per_epoch <= 0:
+        raise ValueError("steps_per_epoch must be positive")
+    if group_count < 0:
+        raise ValueError("group_count must be non-negative")
+    # ``global_step`` is one-based inside the batch loop.  Adding one makes an
+    # integer epoch boundary switch on the first batch of the following epoch.
+    first_step = int(round(start_epoch * steps_per_epoch)) + 1
+    return tuple(first_step + index * gap_steps
+                 for index in range(group_count))
+
+
 def simple_gate_blends_at_epoch(epoch_value, group_epochs, transition_epochs):
     """Return one GELU-to-gate blend for each ordered conversion group."""
     starts = tuple(float(value) for value in group_epochs)
@@ -1237,6 +1259,13 @@ def main(args):
             affine_blocks_per_group=int(getattr(
                 cfg, "affine_blocks_per_group", 1)),
         )
+    if cfg.network.startswith("poolformer_fully_gated_frozen_std"):
+        model_kwargs.update(
+            frozen_std_momentum=float(getattr(
+                cfg, "frozen_std_momentum", 0.9)),
+            frozen_std_initial=float(getattr(
+                cfg, "frozen_std_initial", 1.0)),
+        )
     if cfg.network.startswith(("poolformer_nf", "iresnet_nf")):
         model_kwargs.update(
             nf_ws_eps=float(getattr(cfg, "nf_ws_eps", 1e-4)),
@@ -1589,6 +1618,9 @@ def main(args):
     resumed_affine_group_names = None
     resumed_completed_herpn_groups = None
     resumed_herpn_conversion_groups = None
+    resumed_frozen_std_group_names = None
+    resumed_frozen_std_group_steps = None
+    resumed_completed_frozen_std_groups = None
     if cfg.resume:
         dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
         start_epoch = dict_checkpoint["epoch"]
@@ -1605,6 +1637,12 @@ def main(args):
             "completed_herpn_groups")
         resumed_herpn_conversion_groups = dict_checkpoint.get(
             "herpn_conversion_groups")
+        resumed_frozen_std_group_names = dict_checkpoint.get(
+            "frozen_std_group_names")
+        resumed_frozen_std_group_steps = dict_checkpoint.get(
+            "frozen_std_group_steps")
+        resumed_completed_frozen_std_groups = dict_checkpoint.get(
+            "completed_frozen_std_groups")
         checkpoint_gate_grouping = dict_checkpoint.get(
             "simple_gate_grouping")
         configured_gate_grouping = str(getattr(
@@ -1955,6 +1993,86 @@ def main(args):
             simple_gate_blends_at_epoch(
                 start_epoch, affine_group_epochs,
                 affine_group_transition_epochs))
+    frozen_std_enabled = hasattr(
+        backbone.module, "freeze_frozen_std_group")
+    frozen_std_group_names = (
+        backbone.module.frozen_std_group_names()
+        if frozen_std_enabled else ())
+    frozen_std_steps = (
+        frozen_std_group_steps(
+            getattr(cfg, "frozen_std_start_epoch", 1.0),
+            getattr(cfg, "frozen_std_group_gap_steps", 200),
+            scheduled_steps_per_epoch,
+            len(frozen_std_group_names),
+        )
+        if frozen_std_enabled else ())
+    frozen_std_aux_loss_weight = float(getattr(
+        cfg, "frozen_std_aux_loss_weight", 0.0))
+    if frozen_std_aux_loss_weight < 0.0:
+        raise ValueError("frozen_std_aux_loss_weight must be non-negative")
+    if frozen_std_aux_loss_weight > 0.0 and not frozen_std_enabled:
+        raise ValueError(
+            "frozen_std_aux_loss_weight requires a frozen-std backbone")
+    if frozen_std_enabled:
+        if int(getattr(cfg, "gradient_acc", 1)) != 1:
+            raise ValueError(
+                "Frozen-std switch steps are optimizer steps and require "
+                "gradient_acc=1")
+        if not frozen_std_group_names:
+            raise RuntimeError("Frozen-std backbone has no conversion groups")
+        if frozen_std_steps[0] <= 1:
+            raise ValueError(
+                "Frozen-std conversion must leave at least one training batch "
+                "to initialize every running standard deviation")
+        total_scheduled_steps = scheduled_steps_per_epoch * int(cfg.num_epoch)
+        if (getattr(cfg, "frozen_std_require_full_conversion", True)
+                and frozen_std_steps[-1] > total_scheduled_steps):
+            raise ValueError(
+                "Frozen-std schedule does not finish before training ends: "
+                f"last_switch={frozen_std_steps[-1]}, "
+                f"total_steps={total_scheduled_steps}")
+        if resumed_frozen_std_group_names is not None:
+            checkpoint_names = tuple(
+                tuple(group) for group in resumed_frozen_std_group_names)
+            if checkpoint_names != frozen_std_group_names:
+                raise ValueError(
+                    "Resume checkpoint frozen-std groups do not match the model")
+        if resumed_frozen_std_group_steps is not None:
+            checkpoint_steps = tuple(
+                int(step) for step in resumed_frozen_std_group_steps)
+            if checkpoint_steps != frozen_std_steps:
+                raise ValueError(
+                    "Resume checkpoint frozen-std steps do not match the "
+                    f"config: checkpoint={checkpoint_steps}, "
+                    f"config={frozen_std_steps}")
+        completed_frozen_std_groups = (
+            backbone.module.frozen_std_frozen_count())
+        if (resumed_completed_frozen_std_groups is not None
+                and int(resumed_completed_frozen_std_groups)
+                != completed_frozen_std_groups):
+            raise ValueError(
+                "Resume checkpoint frozen-std completion metadata does not "
+                "match its model buffers")
+        expected_completed = sum(
+            global_step >= step for step in frozen_std_steps)
+        if completed_frozen_std_groups != expected_completed:
+            raise ValueError(
+                "Frozen-std checkpoint state is inconsistent with global_step: "
+                f"model={completed_frozen_std_groups}, "
+                f"schedule={expected_completed}, global_step={global_step}")
+        backbone.module.set_frozen_std_auxiliary_loss(
+            frozen_std_aux_loss_weight > 0.0)
+        if rank == 0:
+            logging.info(
+                "Frozen-std schedule: %d LayerNorm sites, first step=%d, "
+                "last step=%d, gap=%d, already converted=%d, auxiliary "
+                "weight=%.6g",
+                len(frozen_std_group_names), frozen_std_steps[0],
+                frozen_std_steps[-1],
+                int(getattr(cfg, "frozen_std_group_gap_steps", 200)),
+                completed_frozen_std_groups, frozen_std_aux_loss_weight)
+    else:
+        completed_frozen_std_groups = 0
     simple_gate_stats_interval = int(getattr(
         cfg, "simple_gate_stats_interval", 0))
     simple_gate_enabled = hasattr(
@@ -2461,6 +2579,25 @@ def main(args):
             if max_steps_per_epoch > 0 and step_in_epoch >= max_steps_per_epoch:
                 break
             global_step += 1
+            if (frozen_std_enabled
+                    and completed_frozen_std_groups
+                    < len(frozen_std_steps)
+                    and global_step
+                    == frozen_std_steps[completed_frozen_std_groups]):
+                group_index = completed_frozen_std_groups
+                diagnostics = backbone.module.freeze_frozen_std_group(
+                    group_index, distributed=True)
+                completed_frozen_std_groups += 1
+                if rank == 0:
+                    logging.info(
+                        "Hard-switched frozen-std group %d/%d at step %d: %s",
+                        completed_frozen_std_groups,
+                        len(frozen_std_group_names),
+                        global_step,
+                        ", ".join(
+                            f"{name} std={value:.6g}"
+                            for name, value in diagnostics),
+                    )
             fractional_epoch = epoch + step_in_epoch / max(
                 scheduled_steps_per_epoch, 1)
             if precise_relu_schedule:
@@ -2630,6 +2767,10 @@ def main(args):
                     backbone.module, "clear_nf_cached_tensors", None)
                 if clear_nf_cache is not None:
                     clear_nf_cache()
+                clear_frozen_std_cache = getattr(
+                    backbone.module, "clear_frozen_std_cached_tensors", None)
+                if clear_frozen_std_cache is not None:
+                    clear_frozen_std_cache()
                 del backbone_output, local_embeddings
                 torch.cuda.empty_cache()
                 if not lr_scheduler_step_per_epoch:
@@ -2677,6 +2818,7 @@ def main(args):
             simple_gate_distillation_loss = local_embeddings.new_zeros(())
             nf_range_penalty = local_embeddings.new_zeros(())
             precise_relu_range_penalty = local_embeddings.new_zeros(())
+            frozen_std_auxiliary_loss = local_embeddings.new_zeros(())
             if embedding_teacher is not None:
                 loss = loss + (
                     embedding_distill_weight
@@ -2742,6 +2884,16 @@ def main(args):
                 loss = loss + (
                     simple_gate_distill_loss_weight
                     * simple_gate_distillation_loss)
+            if frozen_std_enabled and frozen_std_aux_loss_weight > 0.0:
+                frozen_std_auxiliary_loss = (
+                    backbone.module.frozen_std_auxiliary_loss())
+                if not torch.isfinite(frozen_std_auxiliary_loss):
+                    raise FloatingPointError(
+                        "Non-finite frozen-std auxiliary loss at "
+                        f"global_step={global_step}")
+                loss = loss + (
+                    frozen_std_aux_loss_weight
+                    * frozen_std_auxiliary_loss)
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
 
@@ -2873,6 +3025,8 @@ def main(args):
                             precise_relu_range_penalty.item()),
                         'Loss/Embedding Distillation': (
                             embedding_distillation_loss.item()),
+                        'Loss/Frozen Std Auxiliary': (
+                            frozen_std_auxiliary_loss.item()),
                         'Process/SimpleGate Progress': (
                             sum(simple_gate_blends_at_epoch(
                                 epoch + step_in_epoch / max(
@@ -2901,6 +3055,9 @@ def main(args):
                     summary_writer.add_scalar(
                         'Loss/Embedding Distillation',
                         embedding_distillation_loss.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Loss/Frozen Std Auxiliary',
+                        frozen_std_auxiliary_loss.item(), global_step)
 
                 if (summary_writer is not None and herpn_enabled and
                         global_step % cfg.frequent == 0):
@@ -3039,6 +3196,9 @@ def main(args):
                 "affine_group_epochs": affine_group_epochs,
                 "affine_group_names": (
                     affine_group_names if affine_group_schedule else ()),
+                "frozen_std_group_names": frozen_std_group_names,
+                "frozen_std_group_steps": frozen_std_steps,
+                "completed_frozen_std_groups": completed_frozen_std_groups,
             }
             atomic_torch_save(
                 checkpoint,
@@ -3074,6 +3234,12 @@ def main(args):
     if affine_group_schedule:
         backbone.module.set_affine_group_blends(
             (1.0,) * len(affine_group_epochs))
+    if (frozen_std_enabled
+            and getattr(cfg, "frozen_std_require_full_conversion", True)
+            and completed_frozen_std_groups != len(frozen_std_group_names)):
+        raise RuntimeError(
+            "Training ended before every frozen-std group was converted: "
+            f"{completed_frozen_std_groups}/{len(frozen_std_group_names)}")
 
     prepbn_bn_stat_epochs = int(getattr(cfg, "prepbn_bn_stat_epochs", 0))
     if prepbn_bn_stat_epochs > 0:
@@ -3121,7 +3287,8 @@ def main(args):
             worst_stats["product_outside_fraction"],
         )
 
-    if getattr(cfg, "final_verification_after_prepbn", False):
+    if (getattr(cfg, "final_verification_after_prepbn", False)
+            or getattr(cfg, "final_verification_after_frozen_std", False)):
         if rank == 0:
             logging.info("Running final verification with fully converted normalization")
         callback_verification(global_step, backbone.module)
