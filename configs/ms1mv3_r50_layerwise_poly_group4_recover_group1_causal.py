@@ -25,6 +25,11 @@ config.backbone_init = (
     "work_dirs/ms1mv3_r50_layerwise_poly_group4_d2/"
     "model_herpn_group_01_bnrecalibrated.pt")
 
+# Group 2 is tail-heavy on the completed group-1 graph.  Accept only its
+# tail-ratio violation provisionally so epoch 0 can condition the upstream
+# convolution/BatchNorm weights.  The causal epoch-1 pass remains strict.
+config.layerwise_poly_initial_calibration_provisional = True
+
 # The checkpoint contains the stem/layer1 group fully converted.  Progress 2.0
 # preserves exactly those stages while the negative schedule entry records
 # that their transition completed before this recovery run starts.

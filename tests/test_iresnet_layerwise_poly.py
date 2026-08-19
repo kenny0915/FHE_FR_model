@@ -476,6 +476,7 @@ def test_r50_group4_causal_recovery_reuses_safe_group1_with_short_schedule():
     assert recovery_cfg.herpn_conversion_groups == base_cfg.herpn_conversion_groups
     assert recovery_cfg.herpn_group_epochs == (-1, 1, 3, 5, 7, 9, 11)
     assert recovery_cfg.layerwise_poly_causal_strict_calibration
+    assert recovery_cfg.layerwise_poly_initial_calibration_provisional
     assert recovery_cfg.num_epoch == 18
     assert (recovery_cfg.num_epoch
             - recovery_cfg.herpn_group_epochs[-1]

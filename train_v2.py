@@ -2061,6 +2061,8 @@ def main(args):
         getattr(cfg, "herpn_range_loss_weight", 0.0)))
     layerwise_poly_allow_provisional_tail = bool(getattr(
         cfg, "layerwise_poly_allow_provisional_tail_conditioning", False))
+    layerwise_poly_initial_calibration_provisional = bool(getattr(
+        cfg, "layerwise_poly_initial_calibration_provisional", False))
     layerwise_poly_strict_recalibrate_before_blend = bool(getattr(
         cfg, "layerwise_poly_strict_recalibrate_before_blend", False))
     layerwise_poly_causal_strict_calibration = bool(getattr(
@@ -2118,6 +2120,11 @@ def main(args):
             "Provisional layerwise intervals require staged training, a "
             "positive conditioning backbone LR/range weight, and strict "
             "recalibration before blending")
+    if (layerwise_poly_initial_calibration_provisional
+            and not layerwise_poly_allow_provisional_tail):
+        raise ValueError(
+            "Provisional initial layerwise calibration requires provisional "
+            "tail conditioning")
     layerwise_poly_local_fit_backbone_lr_scale = (
         layerwise_poly_conditioning_backbone_lr_scale
         if layerwise_poly_conditioning_backbone_lr_scale > 0.0
@@ -2707,7 +2714,8 @@ def main(args):
     if layerwise_poly_enabled and not cfg.resume:
         if isinstance(layerwise_poly_range_loader, DataLoader):
             layerwise_poly_range_loader.sampler.set_epoch(start_epoch)
-        calibrate_next_layerwise_poly_group()
+        calibrate_next_layerwise_poly_group(
+            provisional=layerwise_poly_initial_calibration_provisional)
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
