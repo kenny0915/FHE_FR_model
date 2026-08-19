@@ -38,7 +38,12 @@ config.backbone_init = (
 config.frozen_std_momentum = 0.9
 config.frozen_std_initial = 1.0
 config.frozen_std_spatial_margin = 1.25
-config.frozen_std_max_tail_to_mean_ratio = 8.0
+# A large tail/mean ratio means the conservative tail map attenuates typical
+# samples at that position; it does not amplify the tail.  Keep this ratio in
+# the transition diagnostics, but do not abort on it.  The absolute magnitude
+# cap below remains the numerical guard against the scale explosion observed
+# in the scalar hard-switch run.  Set a positive value for fidelity ablations.
+config.frozen_std_max_tail_to_mean_ratio = 0.0
 config.frozen_std_max_value = 1e4
 
 # With 4 V100s and 128 samples/GPU there are about 10,116 optimizer steps per

@@ -2134,9 +2134,10 @@ def main(args):
             if frozen_std_spatial_margin < 1.0:
                 raise ValueError(
                     "frozen_std_spatial_margin must be at least 1")
-            if frozen_std_max_tail_to_mean_ratio <= 0.0:
+            if frozen_std_max_tail_to_mean_ratio < 0.0:
                 raise ValueError(
-                    "frozen_std_max_tail_to_mean_ratio must be positive")
+                    "frozen_std_max_tail_to_mean_ratio must be non-negative; "
+                    "zero disables the optional fidelity guard")
             if frozen_std_max_value <= 0.0:
                 raise ValueError("frozen_std_max_value must be positive")
         total_scheduled_steps = scheduled_steps_per_epoch * int(cfg.num_epoch)

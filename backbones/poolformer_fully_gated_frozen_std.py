@@ -246,7 +246,7 @@ class SpatialTailFrozenStdLayerNorm2d(FrozenStdLayerNorm2d):
         if (float(max_tail_to_mean_ratio) > 0.0
                 and ratio_max > float(max_tail_to_mean_ratio)):
             raise FloatingPointError(
-                "Spatial frozen-std tail ratio is unsafe: "
+                "Spatial frozen-std tail/mean fidelity limit exceeded: "
                 f"{ratio_max:.6g} > {float(max_tail_to_mean_ratio):.6g}")
         if (float(max_frozen_std) > 0.0
                 and frozen_max > float(max_frozen_std)):
@@ -426,12 +426,21 @@ class FrozenStdFullyGatedPoolFormer(FullyGatedPoolFormer):
                 raise TypeError(
                     "Progressive frozen-std conversion requires spatial-tail "
                     f"normalization, but {name} is {type(module).__name__}")
-            result = begin(
-                distributed=distributed,
-                margin=margin,
-                max_tail_to_mean_ratio=max_tail_to_mean_ratio,
-                max_frozen_std=max_frozen_std,
-            )
+            try:
+                result = begin(
+                    distributed=distributed,
+                    margin=margin,
+                    max_tail_to_mean_ratio=max_tail_to_mean_ratio,
+                    max_frozen_std=max_frozen_std,
+                )
+            except (FloatingPointError, RuntimeError) as error:
+                current = module.transition_diagnostics()
+                details = ", ".join(
+                    f"{key}={value:.6g}"
+                    for key, value in current.items())
+                raise type(error)(
+                    f"Frozen-std conversion rejected at {name}: {error}; "
+                    f"{details}") from error
             diagnostics.append({"name": name, **result})
         return tuple(diagnostics)
 

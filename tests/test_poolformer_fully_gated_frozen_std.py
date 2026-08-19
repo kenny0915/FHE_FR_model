@@ -205,13 +205,31 @@ def test_spatial_transition_rejects_unsafe_tail_ratio():
     inputs[0, :, 0, 0].mul_(100.0)
     module(inputs)
 
-    with pytest.raises(FloatingPointError, match="tail ratio is unsafe"):
+    with pytest.raises(
+            FloatingPointError, match="tail/mean fidelity limit exceeded"):
         module.begin_transition(
             distributed=False,
             margin=1.0,
             max_tail_to_mean_ratio=1.1,
             max_frozen_std=1e6,
         )
+
+
+def test_zero_tail_ratio_limit_keeps_diagnostic_without_rejection():
+    module = SpatialTailFrozenStdLayerNorm2d(4, momentum=0.0).train()
+    inputs = torch.randn(4, 4, 2, 2)
+    inputs[0, :, 0, 0].mul_(100.0)
+    module(inputs)
+
+    diagnostics = module.begin_transition(
+        distributed=False,
+        margin=1.0,
+        max_tail_to_mean_ratio=0.0,
+        max_frozen_std=1e6,
+    )
+
+    assert diagnostics["tail_to_mean_max"] > 1.1
+    assert module._transition_started
 
 
 def test_spatial_state_dict_restores_dynamic_map_and_active_blend():
