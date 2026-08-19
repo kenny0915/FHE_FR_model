@@ -96,6 +96,34 @@ def test_freeze_requires_observed_data():
         FrozenStdLayerNorm2d(4).freeze(distributed=False)
 
 
+def test_extreme_finite_inputs_do_not_overflow_tracked_std():
+    module = FrozenStdLayerNorm2d(4, momentum=0.9).train()
+    inputs = torch.tensor(
+        [[[[1e25]], [[-1e25]], [[5e24]], [[-5e24]]]],
+        dtype=torch.float32,
+    )
+
+    exact_output = module(inputs)
+    assert torch.isfinite(module.running_std)
+    assert module.running_std.item() > 1e24
+
+    module.freeze(distributed=False)
+    frozen_output = module(inputs)
+    assert torch.isfinite(exact_output).all()
+    assert torch.isfinite(frozen_output).all()
+
+
+def test_finite_batch_repairs_inf_ema_from_old_checkpoint():
+    module = FrozenStdLayerNorm2d(4, momentum=0.9).train()
+    module.ema_initialized.fill_(True)
+    module.running_std.fill_(float("inf"))
+
+    module(torch.randn(2, 4, 3, 3))
+
+    assert torch.isfinite(module.running_std)
+    assert module.running_std.item() > 0.0
+
+
 def test_groups_follow_norm2_then_norm1_then_final_order():
     model = _small_frozen_std(layers=(1, 1))
     assert model.frozen_std_group_names() == (

@@ -55,13 +55,42 @@ class FrozenStdLayerNorm2d(nn.Module):
         super()._load_from_state_dict(*args, **kwargs)
         self._is_frozen = bool(self.is_frozen.detach().item())
 
+    def _stable_channel_std(self, x):
+        """Compute per-position channel std without squaring large values."""
+        x_float = x.float()
+        centered = x_float - self._stable_channel_mean(x_float)
+        # Scaling by the largest centered channel keeps every squared value in
+        # [0, 1].  Clamp at sqrt(eps) so the epsilon term is also safe for
+        # constant and very small inputs.
+        scale = centered.abs().amax(dim=1, keepdim=True).clamp_min(
+            self.eps ** 0.5)
+        scaled_variance = (centered / scale).square().mean(dim=1)
+        scale = scale.squeeze(1)
+        return scale * torch.sqrt(
+            scaled_variance + self.eps / scale.square())
+
+    @staticmethod
+    def _stable_channel_mean(x):
+        """Fixed-count channel mean whose accumulator cannot overflow."""
+        return (x / x.shape[1]).sum(dim=1, keepdim=True)
+
     @torch.no_grad()
     def _update_running_std(self, x):
-        x_float = x.float()
-        variance = (x_float - x_float.mean(dim=1, keepdim=True)).square()
-        batch_std = torch.sqrt(
-            variance.mean(dim=1) + self.eps).mean().to(self.running_std)
-        if not bool(self.ema_initialized.item()):
+        position_std = self._stable_channel_std(x)
+        # Avoid overflow in the reduction as well: average values after
+        # normalizing by their finite maximum, then restore the scale.
+        reduction_scale = position_std.amax().clamp_min(self.eps ** 0.5)
+        batch_std = (
+            reduction_scale * (position_std / reduction_scale).mean()
+        ).to(self.running_std)
+        if not torch.isfinite(batch_std) or batch_std.item() <= 0.0:
+            raise FloatingPointError(
+                "Non-finite frozen-std observation from finite activations")
+        if (not bool(self.ema_initialized.item())
+                or not bool(torch.isfinite(self.running_std).item())):
+            # The second condition repairs old checkpoints whose FP32
+            # centered-square statistic overflowed before this stable
+            # collector was introduced.
             self.running_std.copy_(batch_std)
             self.ema_initialized.fill_(True)
         else:
@@ -79,7 +108,7 @@ class FrozenStdLayerNorm2d(nn.Module):
         )
 
     def _frozen_forward(self, x):
-        centered = x - x.mean(dim=1, keepdim=True)
+        centered = x - self._stable_channel_mean(x)
         return (
             self.weight.view(1, -1, 1, 1)
             * centered
@@ -224,9 +253,7 @@ class FrozenStdFullyGatedPoolFormer(FullyGatedPoolFormer):
         if hidden is None:
             raise RuntimeError(
                 "Frozen-std auxiliary loss requested without a training forward")
-        hidden = hidden.float()
-        centered = hidden - hidden.mean(dim=1, keepdim=True)
-        std = torch.sqrt(centered.square().mean(dim=1) + self.norm.eps)
+        std = self.norm._stable_channel_std(hidden)
         target_statistics = torch.stack((
             std.detach().sum(),
             std.new_tensor(std.numel()),
