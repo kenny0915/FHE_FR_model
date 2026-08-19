@@ -365,6 +365,22 @@ def test_r50_group4_epoch3_resume_config_keeps_output_and_schedule():
     assert resume_cfg.herpn_group_epochs[1] == pytest.approx(4.0)
 
 
+def test_r50_group4_epoch4_resume_adds_conditioning_without_more_epochs():
+    base_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4.py")
+    resume_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4_resume_epoch4.py")
+
+    assert resume_cfg.resume
+    assert resume_cfg.output == base_cfg.output
+    assert resume_cfg.herpn_group_epochs == (2, 5, 7, 9, 11, 13, 15)
+    assert resume_cfg.num_epoch == base_cfg.num_epoch == 22
+    final_conversion_epoch = (
+        resume_cfg.herpn_group_epochs[-1]
+        + resume_cfg.herpn_transition_epochs)
+    assert resume_cfg.num_epoch - final_conversion_epoch == 6
+
+
 def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_cheby8_finetune.py")
