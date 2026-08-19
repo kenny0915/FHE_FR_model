@@ -15,6 +15,7 @@ from backbones.iresnet_layerwise_poly import (
     LayerwisePolynomialActivation,
 )
 from eval.non_linear_replacement import PReLU_Approx
+from utils.utils_layerwise_poly import causally_calibrate_polynomial_group
 
 
 class _EasyDict(dict):
@@ -395,6 +396,90 @@ def test_r50_group4_epoch5_resume_uses_bounded_tail_scale_floor():
         1.1)
     assert resume_cfg.layerwise_poly_max_tail_scale_expansion == pytest.approx(
         2.0)
+
+
+def test_causal_group_calibration_exposes_each_polynomial_prefix_and_restores():
+    class FakeActivation(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.register_buffer("blend", torch.tensor(0.0))
+
+        def set_blend(self, value):
+            self.blend.fill_(float(value))
+
+    module = nn.Module()
+    module.first = FakeActivation()
+    module.second = FakeActivation()
+    module.third = FakeActivation()
+    observed_prefixes = []
+
+    def calibrate_one(name, index, count):
+        observed_prefixes.append((
+            name,
+            index,
+            count,
+            tuple(float(getattr(module, item).blend) for item in (
+                "first", "second", "third")),
+        ))
+        return [{"activation": name}]
+
+    def verify_group(names):
+        assert names == ("first", "second", "third")
+        assert all(float(getattr(module, name).blend) == 1.0 for name in names)
+        return {"boundary": "next", "absmax": 12.0, "batches_per_rank": 4}
+
+    results, verification = causally_calibrate_polynomial_group(
+        module, ("first", "second", "third"), calibrate_one, verify_group)
+
+    assert observed_prefixes == [
+        ("first", 0, 3, (0.0, 0.0, 0.0)),
+        ("second", 1, 3, (1.0, 0.0, 0.0)),
+        ("third", 2, 3, (1.0, 1.0, 0.0)),
+    ]
+    assert [result["activation"] for result in results] == [
+        "first", "second", "third"]
+    assert verification["boundary"] == "next"
+    assert all(float(getattr(module, name).blend) == 0.0 for name in (
+        "first", "second", "third"))
+
+
+def test_causal_group_calibration_restores_blends_after_failure():
+    activation = _activation(scale=2.0, blend=0.0)
+    module = nn.Module()
+    module.activation = activation
+
+    with pytest.raises(FloatingPointError, match="unsafe boundary"):
+        causally_calibrate_polynomial_group(
+            module,
+            ("activation",),
+            lambda name, index, count: [{"activation": name}],
+            lambda names: (_ for _ in ()).throw(
+                FloatingPointError("unsafe boundary")),
+        )
+    assert float(activation.blend) == 0.0
+
+
+def test_r50_group4_causal_recovery_reuses_safe_group1_with_short_schedule():
+    base_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4.py")
+    recovery_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4_recover_group1_causal.py")
+
+    assert not recovery_cfg.resume
+    assert recovery_cfg.output != base_cfg.output
+    assert recovery_cfg.backbone_init.endswith(
+        "model_herpn_group_01_bnrecalibrated.pt")
+    # Construct at zero progress so uncalibrated later activations are valid;
+    # restore the completed prefix only after loading the group-1 checkpoint.
+    assert recovery_cfg.herpn_initial_progress == pytest.approx(0.0)
+    assert recovery_cfg.backbone_init_herpn_progress == pytest.approx(2.0)
+    assert recovery_cfg.herpn_conversion_groups == base_cfg.herpn_conversion_groups
+    assert recovery_cfg.herpn_group_epochs == (-1, 1, 3, 5, 7, 9, 11)
+    assert recovery_cfg.layerwise_poly_causal_strict_calibration
+    assert recovery_cfg.num_epoch == 18
+    assert (recovery_cfg.num_epoch
+            - recovery_cfg.herpn_group_epochs[-1]
+            - recovery_cfg.herpn_transition_epochs) == pytest.approx(6.0)
 
 
 def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():
