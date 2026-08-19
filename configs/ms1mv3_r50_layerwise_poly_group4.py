@@ -45,6 +45,9 @@ config.layerwise_poly_distill_eps = 1e-4
 # The larger 1.5 margin is retained from the earlier interval correction; the
 # tail guard remains mandatory before blending. Cross-stage scale growth is not
 # compared because width/resolution changes make adjacent stage scales unlike.
+# After conditioning, an isolated representative maximum may raise S just
+# enough to sit below the tail limit. The 1.1 safety margin targets an observed
+# tail ratio of 8/1.1=7.27, while the 2x cap still rejects a broad runaway.
 config.layerwise_poly_range_calibration_batches = 0
 config.layerwise_poly_range_margin = 1.5
 config.layerwise_poly_min_scale = 1e-3
@@ -54,6 +57,9 @@ config.layerwise_poly_range_holdout_fraction = 0.05
 config.layerwise_poly_max_tail_ratio = 8.0
 config.layerwise_poly_max_scale_growth = 16.0
 config.layerwise_poly_max_input_scale = 1e5
+config.layerwise_poly_strict_tail_scale_floor = True
+config.layerwise_poly_tail_scale_floor_margin = 1.1
+config.layerwise_poly_max_tail_scale_expansion = 2.0
 
 config.herpn_range_loss_weight = 0.1
 config.herpn_distill_loss_weight = 1.0

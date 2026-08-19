@@ -793,7 +793,9 @@ def calibrate_layerwise_poly_input_scales(
         min_scale, global_step, dali=False, *, quantile=1.0,
         quantile_samples=65536, holdout_fraction=0.0,
         max_tail_ratio=0.0, max_scale_growth=0.0, max_input_scale=0.0,
-        allow_recalibration=False, allow_provisional_tail=False):
+        allow_recalibration=False, allow_provisional_tail=False,
+        enforce_tail_scale_floor=False, tail_scale_floor_margin=1.0,
+        max_tail_scale_expansion=0.0):
     """Fit separate intervals for one activation group in one loader pass.
 
     All requested activations are observed on the same current eval graph.
@@ -816,6 +818,8 @@ def calibrate_layerwise_poly_input_scales(
     max_tail_ratio = float(max_tail_ratio)
     max_scale_growth = float(max_scale_growth)
     max_input_scale = float(max_input_scale)
+    tail_scale_floor_margin = float(tail_scale_floor_margin)
+    max_tail_scale_expansion = float(max_tail_scale_expansion)
     if not 0.0 < quantile <= 1.0:
         raise ValueError("layerwise_poly_range_quantile must be in (0, 1]")
     if quantile_samples <= 0:
@@ -825,6 +829,16 @@ def calibrate_layerwise_poly_input_scales(
             "layerwise_poly_range_holdout_fraction must be in [0, 0.5)")
     if min(max_tail_ratio, max_scale_growth, max_input_scale) < 0.0:
         raise ValueError("Layerwise polynomial safety limits must be non-negative")
+    if tail_scale_floor_margin < 1.0:
+        raise ValueError(
+            "layerwise_poly_tail_scale_floor_margin must be at least 1")
+    if (max_tail_scale_expansion < 0.0
+            or 0.0 < max_tail_scale_expansion < 1.0):
+        raise ValueError(
+            "layerwise_poly_max_tail_scale_expansion must be zero or at least 1")
+    if enforce_tail_scale_floor and max_tail_ratio <= 0.0:
+        raise ValueError(
+            "Tail scale flooring requires layerwise_poly_max_tail_ratio > 0")
 
     module = backbone.module
     activation_names = tuple(activation_names)
@@ -967,7 +981,25 @@ def calibrate_layerwise_poly_input_scales(
         calibration_absmax = float(global_values[1].item())
         holdout_absmax = float(global_values[2].item())
         robust_absmax = float(global_values[3].item())
-        calibrated_scale = max(robust_absmax * margin, min_scale)
+        robust_scale = max(robust_absmax * margin, min_scale)
+        calibrated_scale = robust_scale
+        tail_scale_floor = None
+        tail_scale_expansion = 1.0
+        tail_floor_applied = False
+        tail_floor_hard_violation = None
+        if enforce_tail_scale_floor and observed_absmax > 0.0:
+            tail_scale_floor = (
+                observed_absmax / max_tail_ratio * tail_scale_floor_margin)
+            tail_scale_expansion = tail_scale_floor / robust_scale
+            if (max_tail_scale_expansion > 0.0
+                    and tail_scale_expansion > max_tail_scale_expansion):
+                tail_floor_hard_violation = (
+                    "tail_scale_expansion="
+                    f"{tail_scale_expansion:.7g}>"
+                    f"{max_tail_scale_expansion:.7g}")
+            elif tail_scale_floor > calibrated_scale:
+                calibrated_scale = tail_scale_floor
+                tail_floor_applied = True
 
         activation_index = model_order.index(activation_name)
         previous_scale = None
@@ -1000,6 +1032,8 @@ def calibrate_layerwise_poly_input_scales(
         tail_ratio = observed_absmax / max(calibrated_scale, min_scale)
         provisional_violations = []
         hard_violations = []
+        if tail_floor_hard_violation is not None:
+            hard_violations.append(tail_floor_hard_violation)
         if max_tail_ratio > 0.0 and tail_ratio > max_tail_ratio:
             provisional_violations.append(
                 f"tail_ratio={tail_ratio:.7g}>{max_tail_ratio:.7g}")
@@ -1019,6 +1053,10 @@ def calibrate_layerwise_poly_input_scales(
             "robust_absmax": robust_absmax,
             "quantile": quantile,
             "input_scale": calibrated_scale,
+            "robust_input_scale": robust_scale,
+            "tail_scale_floor": tail_scale_floor,
+            "tail_scale_expansion": tail_scale_expansion,
+            "tail_floor_applied": tail_floor_applied,
             "previous_scale": previous_scale,
             "scale_growth": scale_growth,
             "same_stage_as_previous": same_stage_as_previous,
@@ -1914,6 +1952,12 @@ def main(args):
         cfg, "layerwise_poly_allow_provisional_tail_conditioning", False))
     layerwise_poly_strict_recalibrate_before_blend = bool(getattr(
         cfg, "layerwise_poly_strict_recalibrate_before_blend", False))
+    layerwise_poly_strict_tail_scale_floor = bool(getattr(
+        cfg, "layerwise_poly_strict_tail_scale_floor", False))
+    layerwise_poly_tail_scale_floor_margin = float(getattr(
+        cfg, "layerwise_poly_tail_scale_floor_margin", 1.0))
+    layerwise_poly_max_tail_scale_expansion = float(getattr(
+        cfg, "layerwise_poly_max_tail_scale_expansion", 0.0))
     layerwise_poly_blend_backbone_lr_scale = float(getattr(
         cfg, "layerwise_poly_blend_backbone_lr_scale", 1.0))
     layerwise_poly_final_backbone_lr_scale = float(getattr(
@@ -1929,6 +1973,19 @@ def main(args):
     if layerwise_poly_conditioning_range_loss_weight < 0.0:
         raise ValueError(
             "layerwise_poly_conditioning_range_loss_weight must be non-negative")
+    if layerwise_poly_tail_scale_floor_margin < 1.0:
+        raise ValueError(
+            "layerwise_poly_tail_scale_floor_margin must be at least 1")
+    if (layerwise_poly_max_tail_scale_expansion < 0.0
+            or 0.0 < layerwise_poly_max_tail_scale_expansion < 1.0):
+        raise ValueError(
+            "layerwise_poly_max_tail_scale_expansion must be zero or at least 1")
+    if (layerwise_poly_strict_tail_scale_floor
+            and (not layerwise_poly_strict_recalibrate_before_blend
+                 or layerwise_poly_max_tail_ratio <= 0.0)):
+        raise ValueError(
+            "Strict tail scale flooring requires strict pre-blend "
+            "recalibration and a positive maximum tail ratio")
     if (layerwise_poly_allow_provisional_tail
             and (not layerwise_poly_staged_training
                  or layerwise_poly_conditioning_backbone_lr_scale <= 0.0
@@ -2369,6 +2426,12 @@ def main(args):
             max_input_scale=layerwise_poly_max_input_scale,
             allow_recalibration=allow_recalibration,
             allow_provisional_tail=provisional,
+            enforce_tail_scale_floor=(
+                allow_recalibration
+                and not provisional
+                and layerwise_poly_strict_tail_scale_floor),
+            tail_scale_floor_margin=layerwise_poly_tail_scale_floor_margin,
+            max_tail_scale_expansion=layerwise_poly_max_tail_scale_expansion,
         )
         if rank == 0:
             logging.info(
@@ -2382,7 +2445,8 @@ def main(args):
                     "Layerwise polynomial interval %s: %s robust "
                     "q=%.6g absmax=%.7g observed_absmax=%.7g "
                     "tail_ratio=%.5g margin=%.4g scale=%.7g "
-                    "scale_growth=%s batches/rank=%d holdout/rank=%d "
+                    "scale_growth=%s tail_floor=%s expansion=%.5g "
+                    "floor_applied=%s batches/rank=%d holdout/rank=%d "
                     "max_source=%s violations=%s",
                     "PROVISIONAL" if result["provisional"] else "calibrated",
                     result["activation"],
@@ -2394,6 +2458,10 @@ def main(args):
                     result["input_scale"],
                     (f'{result["scale_growth"]:.5g}'
                      if result["scale_growth"] is not None else "n/a"),
+                    (f'{result["tail_scale_floor"]:.7g}'
+                     if result["tail_scale_floor"] is not None else "n/a"),
+                    result["tail_scale_expansion"],
+                    result["tail_floor_applied"],
                     result["batches_per_rank"],
                     result["holdout_batches_per_rank"],
                     result["source"],
@@ -2416,6 +2484,12 @@ def main(args):
                         "LayerwisePoly/Provisional/"
                         + result["activation"].replace(".", "/"),
                         float(result["provisional"]),
+                        global_step,
+                    )
+                    summary_writer.add_scalar(
+                        "LayerwisePoly/TailScaleExpansion/"
+                        + result["activation"].replace(".", "/"),
+                        result["tail_scale_expansion"],
                         global_step,
                     )
         return results

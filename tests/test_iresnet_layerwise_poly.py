@@ -340,6 +340,9 @@ def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
         0.01)
     assert cfg.layerwise_poly_conditioning_range_loss_weight == pytest.approx(
         1.0)
+    assert cfg.layerwise_poly_strict_tail_scale_floor
+    assert cfg.layerwise_poly_tail_scale_floor_margin == pytest.approx(1.1)
+    assert cfg.layerwise_poly_max_tail_scale_expansion == pytest.approx(2.0)
     assert cfg.layerwise_poly_blend_backbone_lr_scale == pytest.approx(0.1)
     assert cfg.layerwise_poly_final_backbone_lr_scale == pytest.approx(0.1)
     assert cfg.layerwise_poly_range_margin == pytest.approx(1.5)
@@ -379,6 +382,19 @@ def test_r50_group4_epoch4_resume_adds_conditioning_without_more_epochs():
         resume_cfg.herpn_group_epochs[-1]
         + resume_cfg.herpn_transition_epochs)
     assert resume_cfg.num_epoch - final_conversion_epoch == 6
+
+
+def test_r50_group4_epoch5_resume_uses_bounded_tail_scale_floor():
+    resume_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4_resume_epoch5_tailfloor.py")
+
+    assert resume_cfg.resume
+    assert resume_cfg.herpn_group_epochs == (2, 5, 7, 9, 11, 13, 15)
+    assert resume_cfg.layerwise_poly_strict_tail_scale_floor
+    assert resume_cfg.layerwise_poly_tail_scale_floor_margin == pytest.approx(
+        1.1)
+    assert resume_cfg.layerwise_poly_max_tail_scale_expansion == pytest.approx(
+        2.0)
 
 
 def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():
