@@ -405,12 +405,22 @@ def get_model(name, **kwargs):
             fp16=kwargs.get("fp16", False),
         )
 
-    elif name in ("poolformer_nf8", "poolformer_nf12"):
-        from .poolformer_nf import poolformer_nf8, poolformer_nf12
+    elif name in (
+            "poolformer_nf8", "poolformer_nf12",
+            "poolformer_nf12_rezero_fixed_gate"):
+        from .poolformer_nf import (
+            poolformer_nf8,
+            poolformer_nf12,
+            poolformer_nf12_rezero_fixed_gate,
+        )
         factory = {
             "poolformer_nf8": poolformer_nf8,
             "poolformer_nf12": poolformer_nf12,
+            "poolformer_nf12_rezero_fixed_gate": (
+                poolformer_nf12_rezero_fixed_gate),
         }[name]
+        rezero_fixed_gate = (
+            name == "poolformer_nf12_rezero_fixed_gate")
         return factory(
             pretrained=False,
             num_classes=kwargs.get("num_features", 512),
@@ -418,8 +428,11 @@ def get_model(name, **kwargs):
             fp16=kwargs.get("fp16", False),
             ws_eps=kwargs.get("nf_ws_eps", 1e-4),
             tau_init=kwargs.get("nf_tau_init", 0.1),
-            alpha_init=kwargs.get("nf_alpha_init", 0.05),
-            alpha_max=kwargs.get("nf_alpha_max", 0.2),
+            alpha_init=kwargs.get(
+                "nf_alpha_init", 0.0 if rezero_fixed_gate else 0.05),
+            alpha_max=kwargs.get(
+                "nf_alpha_max", 1.0 / 12.0
+                if rezero_fixed_gate else 0.2),
             input_gain_init=kwargs.get("nf_input_gain_init", 1.0),
             input_gain_min=kwargs.get("nf_input_gain_min", 0.25),
             input_gain_max=kwargs.get("nf_input_gain_max", 4.0),
@@ -430,6 +443,12 @@ def get_model(name, **kwargs):
             initial_modulation_progress=kwargs.get(
                 "nf_initial_modulation_progress", 1.0),
             learnable_ws_gain=kwargs.get("nf_learnable_ws_gain", False),
+            residual_mode=kwargs.get(
+                "nf_residual_mode",
+                "rezero" if rezero_fixed_gate else "convex"),
+            fixed_modulator_scale=kwargs.get(
+                "nf_fixed_modulator_scale",
+                0.02 if rezero_fixed_gate else None),
         )
 
     elif name in ("iresnet_nf8", "iresnet_nf12"):

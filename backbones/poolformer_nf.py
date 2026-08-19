@@ -11,7 +11,8 @@ The gate is deliberately close to linear at initialization::
     v = 1 + beta W_v(s x)
     g = u * v
 
-``beta`` starts at zero.  The residual coefficient and token-mixing strength
+``beta`` is either bounded and zero-initialized or fixed to a small value with
+a zero-to-one curriculum.  The residual coefficient and token-mixing strength
 are bounded scalars, preventing a block from abruptly amplifying its input.
 """
 
@@ -62,6 +63,22 @@ class SymmetricBoundedScalar(nn.Module):
 
     def forward(self):
         return self.maximum * torch.tanh(self.raw)
+
+
+class FixedScalar(nn.Module):
+    """A public scalar kept fixed during training and deployment."""
+
+    exclude_from_weight_decay = True
+
+    def __init__(self, value):
+        super().__init__()
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("Fixed scalar must be finite")
+        self.register_buffer("value", torch.tensor(value, dtype=torch.float32))
+
+    def forward(self):
+        return self.value
 
 
 class ScaledWSConv2d(nn.Conv2d):
@@ -148,7 +165,9 @@ class NormFreeGatedBlock(nn.Module):
                  input_gain_min=0.25, input_gain_max=4.0,
                  modulator_scale_max=0.25, range_limit=6.0,
                  range_sample_size=16384,
-                 initial_modulation_progress=1.0):
+                 initial_modulation_progress=1.0,
+                 residual_mode="convex",
+                 fixed_modulator_scale=None):
         super().__init__()
         if range_limit <= 0:
             raise ValueError("range_limit must be positive")
@@ -160,12 +179,24 @@ class NormFreeGatedBlock(nn.Module):
         self.dim = int(dim)
         self.range_limit = float(range_limit)
         self.range_sample_size = int(range_sample_size)
+        self.residual_mode = str(residual_mode)
+        if self.residual_mode not in ("convex", "rezero"):
+            raise ValueError(
+                "residual_mode must be 'convex' or 'rezero'")
         self.token_mixer = StableTokenMixer(pool_size, tau_init)
         self.input_gain = BoundedScalar(
             input_gain_init, input_gain_min, input_gain_max)
-        self.modulator_scale = SymmetricBoundedScalar(
-            initial=0.0, maximum=modulator_scale_max)
-        self.alpha = BoundedScalar(alpha_init, 1e-5, alpha_max)
+        self.modulator_scale = (
+            FixedScalar(fixed_modulator_scale)
+            if fixed_modulator_scale is not None else
+            SymmetricBoundedScalar(
+                initial=0.0, maximum=modulator_scale_max)
+        )
+        self.alpha = (
+            SymmetricBoundedScalar(initial=alpha_init, maximum=alpha_max)
+            if self.residual_mode == "rezero" else
+            BoundedScalar(alpha_init, 1e-5, alpha_max)
+        )
         self.conv_u = ScaledWSConv2d(
             dim, dim, 1, bias=False, ws_eps=ws_eps)
         self.conv_v = ScaledWSConv2d(
@@ -187,9 +218,15 @@ class NormFreeGatedBlock(nn.Module):
 
     def residual_coefficients(self):
         alpha = self.alpha()
-        # Convex residual mixing prevents twelve positively correlated
-        # branches from accumulating coefficients greater than one.
-        rho = 1.0 - alpha
+        if self.residual_mode == "rezero":
+            # ReZero starts as the exact identity.  The symmetric bound keeps
+            # the learned public residual weight from recreating an
+            # unbounded LayerNorm scale symmetry.
+            rho = torch.ones_like(alpha)
+        else:
+            # Convex residual mixing prevents positively correlated branches
+            # from accumulating coefficients greater than one.
+            rho = 1.0 - alpha
         return rho, alpha
 
     def set_modulation_progress(self, progress):
@@ -415,7 +452,8 @@ class NormFreePoolFormer(nn.Module):
                  modulator_scale_max=0.25, range_limit=6.0,
                  range_sample_size=16384,
                  initial_modulation_progress=1.0,
-                 learnable_ws_gain=False, **kwargs):
+                 learnable_ws_gain=False, residual_mode="convex",
+                 fixed_modulator_scale=None, **kwargs):
         super().__init__()
         if fp16:
             raise ValueError(
@@ -443,6 +481,8 @@ class NormFreePoolFormer(nn.Module):
                 range_limit=range_limit,
                 range_sample_size=range_sample_size,
                 initial_modulation_progress=initial_modulation_progress,
+                residual_mode=residual_mode,
+                fixed_modulator_scale=fixed_modulator_scale,
             ) for _ in range(depth)]
             network.append(nn.Sequential(*blocks))
             if stage < 3:
@@ -550,6 +590,24 @@ def poolformer_nf12(pretrained=False, **kwargs):
     """FHEPoolFormer-NF12: stage depths ``[2, 2, 6, 2]``."""
     if pretrained:
         raise ValueError("poolformer_nf12 is designed for training from scratch")
+    model = NormFreePoolFormer(
+        layers=(2, 2, 6, 2),
+        embed_dims=(64, 128, 256, 512),
+        **kwargs,
+    )
+    model.default_cfg = {}
+    return model
+
+
+def poolformer_nf12_rezero_fixed_gate(pretrained=False, **kwargs):
+    """NF12 with bounded ReZero residuals and fixed quadratic gate scale."""
+    if pretrained:
+        raise ValueError(
+            "poolformer_nf12_rezero_fixed_gate is trained from scratch")
+    kwargs.setdefault("residual_mode", "rezero")
+    kwargs.setdefault("alpha_init", 0.0)
+    kwargs.setdefault("alpha_max", 1.0 / 12.0)
+    kwargs.setdefault("fixed_modulator_scale", 0.02)
     model = NormFreePoolFormer(
         layers=(2, 2, 6, 2),
         embed_dims=(64, 128, 256, 512),

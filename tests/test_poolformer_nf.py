@@ -7,6 +7,7 @@ import torch.nn as nn
 from backbones import get_model
 from backbones.poolformer_nf import (
     BoundedScalar,
+    FixedScalar,
     NormFreeGatedBlock,
     NormFreePoolFormer,
     ScaledWSConv2d,
@@ -14,12 +15,13 @@ from backbones.poolformer_nf import (
 )
 
 
-def _tiny_model(num_classes=16):
+def _tiny_model(num_classes=16, **kwargs):
     return NormFreePoolFormer(
         layers=(1, 1, 1, 1),
         embed_dims=(8, 16, 32, 64),
         num_classes=num_classes,
         fp16=False,
+        **kwargs,
     )
 
 
@@ -58,6 +60,50 @@ def test_gate_is_exactly_linear_at_initialization_and_coefficients_are_bounded()
     assert rho.add(alpha).item() == pytest.approx(
         1.0, abs=1e-6)
     assert torch.isfinite(outputs).all()
+
+
+def test_rezero_fixed_gate_block_starts_as_identity_with_bounded_residual():
+    torch.manual_seed(5)
+    block = NormFreeGatedBlock(
+        dim=8,
+        residual_mode="rezero",
+        alpha_init=0.0,
+        alpha_max=1.0 / 12.0,
+        fixed_modulator_scale=0.02,
+        initial_modulation_progress=1.0,
+    )
+    inputs = torch.randn(2, 8, 7, 7)
+    outputs = block(inputs)
+    rho, alpha = block.residual_coefficients()
+
+    assert torch.equal(outputs, inputs)
+    assert rho.item() == pytest.approx(1.0)
+    assert alpha.item() == pytest.approx(0.0)
+    assert isinstance(block.modulator_scale, FixedScalar)
+    assert block.modulation_coefficient().item() == pytest.approx(0.02)
+    assert list(block.modulator_scale.parameters()) == []
+
+    with torch.no_grad():
+        block.alpha.raw.fill_(100.0)
+    assert block.alpha().item() <= 1.0 / 12.0
+
+
+def test_registered_rezero_fixed_gate_nf12_uses_stable_scalars():
+    model = get_model(
+        "poolformer_nf12_rezero_fixed_gate",
+        num_features=32,
+        fp16=False,
+    )
+    blocks = model.nf_blocks()
+
+    assert len(blocks) == 12
+    assert all(block.residual_mode == "rezero" for block in blocks)
+    assert all(block.alpha().item() == pytest.approx(0.0)
+               for block in blocks)
+    assert all(isinstance(block.modulator_scale, FixedScalar)
+               for block in blocks)
+    assert all(block.modulator_scale().item() == pytest.approx(0.02)
+               for block in blocks)
 
 
 def test_token_mixer_is_nonexpansive_in_infinity_norm():
@@ -136,6 +182,30 @@ def test_deploy_conversion_folds_sws_and_scalar_parameterizations():
                for module in model.modules())
 
 
+def test_rezero_fixed_gate_deploy_conversion_preserves_output():
+    torch.manual_seed(9)
+    model = _tiny_model(
+        residual_mode="rezero",
+        alpha_init=0.0,
+        alpha_max=0.1,
+        fixed_modulator_scale=0.02,
+        initial_modulation_progress=1.0,
+    ).eval()
+    with torch.no_grad():
+        for block in model.nf_blocks():
+            block.alpha.raw.fill_(0.25)
+    inputs = torch.randn(2, 3, 112, 112)
+
+    with torch.no_grad():
+        expected = model(inputs)
+        deployed = model.switch_to_deploy(inplace=False)
+        actual = deployed(inputs)
+
+    assert torch.allclose(actual, expected, rtol=2e-5, atol=2e-5)
+    assert not any(isinstance(module, FixedScalar)
+                   for module in deployed.modules())
+
+
 def test_nf12_training_config_matches_stable_recipe():
     cfg = importlib.import_module(
         "configs.ms1mv3_poolformer_nf12_fp32").config
@@ -153,3 +223,19 @@ def test_nf12_training_config_matches_stable_recipe():
     assert len(cfg.nf_modulation_group_epochs) == 12
     assert cfg.nf_modulation_order == "reverse"
     assert cfg.gradient_clip_scope == "backbone"
+
+
+def test_rezero_fixed_gate_config_is_fresh_bounded_student():
+    cfg = importlib.import_module(
+        "configs.ms1mv3_poolformer_nf12_rezero_fixed_gate_fp32").config
+
+    assert cfg.network == "poolformer_nf12_rezero_fixed_gate"
+    assert cfg.resume is False
+    assert "backbone_init" not in cfg
+    assert cfg.nf_residual_mode == "rezero"
+    assert cfg.nf_alpha_init == pytest.approx(0.0)
+    assert cfg.nf_alpha_max == pytest.approx(1.0 / 12.0)
+    assert cfg.nf_fixed_modulator_scale == pytest.approx(0.02)
+    assert cfg.nf_learnable_ws_gain is False
+    assert cfg.embedding_distill_weight > 0.0
+    assert cfg.nf_range_loss_weight > 0.0

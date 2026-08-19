@@ -1381,6 +1381,10 @@ def main(args):
                 cfg, "nf_range_sample_size", 16384)),
             nf_initial_modulation_progress=float(getattr(
                 cfg, "nf_initial_modulation_progress", 1.0)),
+            nf_residual_mode=str(getattr(
+                cfg, "nf_residual_mode", "convex")),
+            nf_fixed_modulator_scale=getattr(
+                cfg, "nf_fixed_modulator_scale", None),
         )
 
     backbone = get_model(cfg.network, **model_kwargs).cuda()
