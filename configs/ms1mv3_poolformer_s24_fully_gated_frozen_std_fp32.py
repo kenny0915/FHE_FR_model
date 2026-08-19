@@ -43,10 +43,15 @@ config.frozen_std_start_epoch = 1.0
 config.frozen_std_group_gap_steps = 200
 config.frozen_std_require_full_conversion = True
 
-# The paper applies its variance-concentration auxiliary objective at the input
-# to the final LayerNorm.  This implementation uses the same objective, with a
-# detached global mean across DDP workers.
-config.frozen_std_aux_loss_weight = 0.1
+# Keep the optional variance-concentration objective disabled for the stable
+# fully gated run.  Unlike a transformer residual stream, this model compounds
+# 24 quadratic SimpleGates; its unnormalized final hidden scale can become very
+# large while the exact final LayerNorm still keeps the task embeddings well
+# behaved.  An absolute-scale standard-deviation MSE therefore dominated the
+# ArcFace loss (about 9.7e6 after six switches) and produced non-finite
+# gradients.  The official LN-removal base schedules also default this weight
+# to zero.  The implementation remains available for controlled ablations.
+config.frozen_std_aux_loss_weight = 0.0
 config.final_verification_after_frozen_std = True
 
 # Conservative FP32 warm-start fine-tuning for V100 stability.  AMP/bfloat16 is
