@@ -72,7 +72,7 @@ def prepbn_transition_complete(current_step: int, total_steps: int) -> bool:
 
 def frozen_std_group_steps(start_epoch, gap_steps, steps_per_epoch,
                            group_count):
-    """Build ordered hard-switch steps for frozen-std normalization sites."""
+    """Build ordered transition-start steps for frozen-std sites."""
     start_epoch = float(start_epoch)
     gap_steps = int(gap_steps)
     steps_per_epoch = int(steps_per_epoch)
@@ -1308,7 +1308,9 @@ def main(args):
             affine_blocks_per_group=int(getattr(
                 cfg, "affine_blocks_per_group", 1)),
         )
-    if cfg.network.startswith("poolformer_fully_gated_frozen_std"):
+    if cfg.network.startswith((
+            "poolformer_fully_gated_frozen_std",
+            "poolformer_fully_gated_spatial_frozen_std")):
         model_kwargs.update(
             frozen_std_momentum=float(getattr(
                 cfg, "frozen_std_momentum", 0.9)),
@@ -1669,6 +1671,7 @@ def main(args):
     resumed_herpn_conversion_groups = None
     resumed_frozen_std_group_names = None
     resumed_frozen_std_group_steps = None
+    resumed_frozen_std_transition_steps = None
     resumed_completed_frozen_std_groups = None
     if cfg.resume:
         dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
@@ -1690,6 +1693,8 @@ def main(args):
             "frozen_std_group_names")
         resumed_frozen_std_group_steps = dict_checkpoint.get(
             "frozen_std_group_steps")
+        resumed_frozen_std_transition_steps = dict_checkpoint.get(
+            "frozen_std_transition_steps")
         resumed_completed_frozen_std_groups = dict_checkpoint.get(
             "completed_frozen_std_groups")
         checkpoint_gate_grouping = dict_checkpoint.get(
@@ -2084,6 +2089,16 @@ def main(args):
             len(frozen_std_group_names),
         )
         if frozen_std_enabled else ())
+    frozen_std_transition_steps = int(getattr(
+        cfg, "frozen_std_transition_steps", 0))
+    frozen_std_progressive = (
+        frozen_std_enabled and frozen_std_transition_steps > 0)
+    frozen_std_spatial_margin = float(getattr(
+        cfg, "frozen_std_spatial_margin", 1.25))
+    frozen_std_max_tail_to_mean_ratio = float(getattr(
+        cfg, "frozen_std_max_tail_to_mean_ratio", 8.0))
+    frozen_std_max_value = float(getattr(
+        cfg, "frozen_std_max_value", 1e4))
     frozen_std_aux_loss_weight = float(getattr(
         cfg, "frozen_std_aux_loss_weight", 0.0))
     if frozen_std_aux_loss_weight < 0.0:
@@ -2102,12 +2117,36 @@ def main(args):
             raise ValueError(
                 "Frozen-std conversion must leave at least one training batch "
                 "to initialize every running standard deviation")
+        if frozen_std_progressive:
+            if not (hasattr(backbone.module, "begin_frozen_std_group")
+                    and hasattr(backbone.module,
+                                "set_frozen_std_group_blend")):
+                raise TypeError(
+                    "frozen_std_transition_steps requires a progressive "
+                    "frozen-std backbone")
+            group_gap = int(getattr(
+                cfg, "frozen_std_group_gap_steps", 200))
+            if group_gap < frozen_std_transition_steps:
+                raise ValueError(
+                    "frozen_std_group_gap_steps must be at least "
+                    "frozen_std_transition_steps so only one LayerNorm site "
+                    "transitions at a time")
+            if frozen_std_spatial_margin < 1.0:
+                raise ValueError(
+                    "frozen_std_spatial_margin must be at least 1")
+            if frozen_std_max_tail_to_mean_ratio <= 0.0:
+                raise ValueError(
+                    "frozen_std_max_tail_to_mean_ratio must be positive")
+            if frozen_std_max_value <= 0.0:
+                raise ValueError("frozen_std_max_value must be positive")
         total_scheduled_steps = scheduled_steps_per_epoch * int(cfg.num_epoch)
+        last_conversion_step = frozen_std_steps[-1] + (
+            frozen_std_transition_steps if frozen_std_progressive else 0)
         if (getattr(cfg, "frozen_std_require_full_conversion", True)
-                and frozen_std_steps[-1] > total_scheduled_steps):
+                and last_conversion_step > total_scheduled_steps):
             raise ValueError(
                 "Frozen-std schedule does not finish before training ends: "
-                f"last_switch={frozen_std_steps[-1]}, "
+                f"last_conversion={last_conversion_step}, "
                 f"total_steps={total_scheduled_steps}")
         if resumed_frozen_std_group_names is not None:
             checkpoint_names = tuple(
@@ -2123,6 +2162,12 @@ def main(args):
                     "Resume checkpoint frozen-std steps do not match the "
                     f"config: checkpoint={checkpoint_steps}, "
                     f"config={frozen_std_steps}")
+        if (resumed_frozen_std_transition_steps is not None
+                and int(resumed_frozen_std_transition_steps)
+                != frozen_std_transition_steps):
+            raise ValueError(
+                "Resume checkpoint frozen-std transition length does not "
+                "match the config")
         completed_frozen_std_groups = (
             backbone.module.frozen_std_frozen_count())
         if (resumed_completed_frozen_std_groups is not None
@@ -2132,23 +2177,59 @@ def main(args):
                 "Resume checkpoint frozen-std completion metadata does not "
                 "match its model buffers")
         expected_completed = sum(
-            global_step >= step for step in frozen_std_steps)
+            global_step >= step + (
+                frozen_std_transition_steps if frozen_std_progressive else 0)
+            for step in frozen_std_steps)
         if completed_frozen_std_groups != expected_completed:
             raise ValueError(
                 "Frozen-std checkpoint state is inconsistent with global_step: "
                 f"model={completed_frozen_std_groups}, "
                 f"schedule={expected_completed}, global_step={global_step}")
+        if frozen_std_progressive:
+            actual_blends = backbone.module.frozen_std_group_blends()
+            expected_blends = tuple(
+                0.0 if global_step < start else
+                min(1.0, (global_step - start)
+                    / frozen_std_transition_steps)
+                for start in frozen_std_steps)
+            if any(abs(actual - expected) > 1e-6
+                   for actual, expected in zip(
+                       actual_blends, expected_blends)):
+                raise ValueError(
+                    "Frozen-std checkpoint blends are inconsistent with "
+                    f"global_step={global_step}: model={actual_blends}, "
+                    f"schedule={expected_blends}")
+            for group_index, start in enumerate(frozen_std_steps):
+                should_have_started = global_step >= start
+                if (backbone.module.frozen_std_group_started(group_index)
+                        != should_have_started):
+                    raise ValueError(
+                        "Frozen-std checkpoint transition state is "
+                        f"inconsistent for group {group_index + 1}")
         backbone.module.set_frozen_std_auxiliary_loss(
             frozen_std_aux_loss_weight > 0.0)
         if rank == 0:
-            logging.info(
-                "Frozen-std schedule: %d LayerNorm sites, first step=%d, "
-                "last step=%d, gap=%d, already converted=%d, auxiliary "
-                "weight=%.6g",
-                len(frozen_std_group_names), frozen_std_steps[0],
-                frozen_std_steps[-1],
-                int(getattr(cfg, "frozen_std_group_gap_steps", 200)),
-                completed_frozen_std_groups, frozen_std_aux_loss_weight)
+            if frozen_std_progressive:
+                logging.info(
+                    "Progressive spatial frozen-std schedule: %d LayerNorm "
+                    "sites, first start=%d, last completion=%d, gap=%d, "
+                    "transition=%d, margin=%.4g, tail/mean limit=%.4g, "
+                    "magnitude limit=%.4g, already converted=%d",
+                    len(frozen_std_group_names), frozen_std_steps[0],
+                    last_conversion_step,
+                    int(getattr(cfg, "frozen_std_group_gap_steps", 200)),
+                    frozen_std_transition_steps, frozen_std_spatial_margin,
+                    frozen_std_max_tail_to_mean_ratio, frozen_std_max_value,
+                    completed_frozen_std_groups)
+            else:
+                logging.info(
+                    "Frozen-std hard-switch schedule: %d LayerNorm sites, "
+                    "first step=%d, last step=%d, gap=%d, already "
+                    "converted=%d, auxiliary weight=%.6g",
+                    len(frozen_std_group_names), frozen_std_steps[0],
+                    frozen_std_steps[-1],
+                    int(getattr(cfg, "frozen_std_group_gap_steps", 200)),
+                    completed_frozen_std_groups, frozen_std_aux_loss_weight)
     else:
         completed_frozen_std_groups = 0
     simple_gate_stats_interval = int(getattr(
@@ -2718,23 +2799,71 @@ def main(args):
             global_step += 1
             if (frozen_std_enabled
                     and completed_frozen_std_groups
-                    < len(frozen_std_steps)
-                    and global_step
-                    == frozen_std_steps[completed_frozen_std_groups]):
+                    < len(frozen_std_steps)):
                 group_index = completed_frozen_std_groups
-                diagnostics = backbone.module.freeze_frozen_std_group(
-                    group_index, distributed=True)
-                completed_frozen_std_groups += 1
-                if rank == 0:
-                    logging.info(
-                        "Hard-switched frozen-std group %d/%d at step %d: %s",
-                        completed_frozen_std_groups,
-                        len(frozen_std_group_names),
-                        global_step,
-                        ", ".join(
-                            f"{name} std={value:.6g}"
-                            for name, value in diagnostics),
-                    )
+                start_step = frozen_std_steps[group_index]
+                if frozen_std_progressive:
+                    completion_step = (
+                        start_step + frozen_std_transition_steps)
+                    if global_step == start_step:
+                        diagnostics = (
+                            backbone.module.begin_frozen_std_group(
+                                group_index,
+                                distributed=True,
+                                margin=frozen_std_spatial_margin,
+                                max_tail_to_mean_ratio=(
+                                    frozen_std_max_tail_to_mean_ratio),
+                                max_frozen_std=frozen_std_max_value,
+                            ))
+                        if rank == 0:
+                            logging.info(
+                                "Started spatial frozen-std group %d/%d at "
+                                "step %d: %s",
+                                group_index + 1,
+                                len(frozen_std_group_names), global_step,
+                                ", ".join(
+                                    f"{item['name']} tail="
+                                    f"{item['tail_max']:.6g} frozen_max="
+                                    f"{item['frozen_max']:.6g} tail/mean="
+                                    f"{item['tail_to_mean_max']:.6g}"
+                                    for item in diagnostics),
+                            )
+                    if start_step <= global_step <= completion_step:
+                        if not backbone.module.frozen_std_group_started(
+                                group_index):
+                            raise RuntimeError(
+                                "Missed frozen-std transition start for group "
+                                f"{group_index + 1} at step {start_step}")
+                        blend = min(
+                            1.0,
+                            (global_step - start_step)
+                            / frozen_std_transition_steps,
+                        )
+                        backbone.module.set_frozen_std_group_blend(
+                            group_index, blend)
+                        if global_step == completion_step:
+                            completed_frozen_std_groups += 1
+                            if rank == 0:
+                                logging.info(
+                                    "Completed spatial frozen-std group "
+                                    "%d/%d at step %d",
+                                    completed_frozen_std_groups,
+                                    len(frozen_std_group_names), global_step)
+                elif global_step == start_step:
+                    diagnostics = backbone.module.freeze_frozen_std_group(
+                        group_index, distributed=True)
+                    completed_frozen_std_groups += 1
+                    if rank == 0:
+                        logging.info(
+                            "Hard-switched frozen-std group %d/%d at step "
+                            "%d: %s",
+                            completed_frozen_std_groups,
+                            len(frozen_std_group_names),
+                            global_step,
+                            ", ".join(
+                                f"{name} std={value:.6g}"
+                                for name, value in diagnostics),
+                        )
             fractional_epoch = epoch + step_in_epoch / max(
                 scheduled_steps_per_epoch, 1)
             if precise_relu_schedule:
@@ -3364,6 +3493,7 @@ def main(args):
                     affine_group_names if affine_group_schedule else ()),
                 "frozen_std_group_names": frozen_std_group_names,
                 "frozen_std_group_steps": frozen_std_steps,
+                "frozen_std_transition_steps": frozen_std_transition_steps,
                 "completed_frozen_std_groups": completed_frozen_std_groups,
             }
             atomic_torch_save(
