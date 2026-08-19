@@ -537,13 +537,25 @@ class IResNet(_ProgressiveIResNet):
             for name, activation in self.named_progressive_activations()
         }
 
-    def herpn_range_penalty(self):
+    def herpn_range_penalty(self, activation_names=None):
+        selected = (
+            None if activation_names is None else set(activation_names)
+        )
         penalties = [
             activation.range_penalty()
-            for activation in self.progressive_activations()
+            for name, activation in self.named_progressive_activations()
+            if (selected is None or name in selected)
             if activation._scale_is_calibrated
             and activation.range_penalty() is not None
         ]
+        if selected is not None:
+            known = {
+                name for name, _ in self.named_progressive_activations()
+            }
+            unknown = sorted(selected.difference(known))
+            if unknown:
+                raise ValueError(
+                    f"Unknown layerwise polynomial activations: {unknown}")
         if not penalties:
             return next(self.parameters()).new_zeros(())
         return torch.stack(penalties).mean()

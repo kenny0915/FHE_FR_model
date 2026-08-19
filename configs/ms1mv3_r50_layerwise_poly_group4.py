@@ -1,10 +1,12 @@
 """MS1Mv3 R50 conversion with up to four PReLUs per stable group.
 
-Each group is calibrated in one representative-data pass. During local fit,
-only the current group's polynomial coefficients receive backbone gradients.
-The group then blends for one epoch with a 0.1x backbone learning rate, after
-which all BatchNorm modules downstream of the group's earliest activation are
-recalibrated. Seven final epochs jointly fine-tune the polynomial network.
+Each group is calibrated in one representative-data pass. A tail-heavy pending
+group is allowed a provisional interval while its blend remains zero. During
+local range conditioning, ordinary convolution/BatchNorm weights use a 0.01x
+learning rate, only the pending group's polynomial coefficients are trainable,
+and a strict calibration must pass before blending. Completed polynomial
+coefficients remain fixed. The group then blends for one epoch with a 0.1x
+backbone learning rate. Seven final epochs jointly fine-tune the network.
 
 The approximation target at activation i is its frozen channel-wise PReLU on
 [-S_i, S_i]. Degree 2 needs one sequential ciphertext square after folding.
@@ -41,7 +43,8 @@ config.layerwise_poly_distill_eps = 1e-4
 
 # One full distributed pass measures every activation in the pending group.
 # The larger 1.5 margin is retained from the earlier interval correction; the
-# tail guard remains active instead of trying to absorb genuine runaways.
+# tail guard remains mandatory before blending. Cross-stage scale growth is not
+# compared because width/resolution changes make adjacent stage scales unlike.
 config.layerwise_poly_range_calibration_batches = 0
 config.layerwise_poly_range_margin = 1.5
 config.layerwise_poly_min_scale = 1e-3
@@ -59,11 +62,16 @@ config.herpn_save_after_group = True
 config.herpn_require_full_conversion = True
 config.herpn_stage_epochs = ()
 
-# Freeze convolution/normalization affine gradients during local fit. The
-# current polynomial group and classifier remain trainable. During blending
-# and final joint fine-tuning, scale only the non-polynomial backbone LR.
+# Tail violations in a still-PReLU group become provisional instead of aborting
+# the known-good completed group. Its local-fit gap conditions upstream
+# convolution/BatchNorm weights at 0.01x LR with a stronger current-group range
+# loss. A fresh strict pass is required at the exact blend boundary.
 config.layerwise_poly_staged_training = True
-config.layerwise_poly_freeze_backbone_during_local_fit = True
+config.layerwise_poly_freeze_backbone_during_local_fit = False
+config.layerwise_poly_allow_provisional_tail_conditioning = True
+config.layerwise_poly_strict_recalibrate_before_blend = True
+config.layerwise_poly_conditioning_backbone_lr_scale = 0.01
+config.layerwise_poly_conditioning_range_loss_weight = 1.0
 config.layerwise_poly_blend_backbone_lr_scale = 0.1
 config.layerwise_poly_final_backbone_lr_scale = 0.1
 

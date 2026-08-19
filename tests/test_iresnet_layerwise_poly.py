@@ -250,6 +250,30 @@ def test_polynomial_parameter_selection_is_group_local():
     assert len(selected) == 4
 
 
+def test_range_conditioning_penalty_can_select_only_pending_group():
+    model = get_model(
+        "r18_layerwise_poly", dropout=0, fp16=False,
+        layerwise_poly_degree=2).train()
+    activations = dict(model.named_progressive_activations())
+    names = model.layerwise_poly_activation_names()[:2]
+    for index, name in enumerate(names):
+        activation = activations[name]
+        activation.set_input_scale(1.0)
+        channels = activation.prelu.num_parameters
+        activation(torch.full((2, channels, 2, 2), 2.0 + index))
+
+    first_penalty = model.herpn_range_penalty((names[0],))
+    second_penalty = model.herpn_range_penalty((names[1],))
+    combined_penalty = model.herpn_range_penalty(names)
+
+    assert torch.equal(first_penalty, activations[names[0]].range_penalty())
+    assert torch.equal(second_penalty, activations[names[1]].range_penalty())
+    assert torch.allclose(
+        combined_penalty, 0.5 * (first_penalty + second_penalty))
+    with pytest.raises(ValueError, match="Unknown layerwise"):
+        model.herpn_range_penalty(("missing.prelu",))
+
+
 def test_r50_config_converts_every_activation_singly_in_forward_order():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_layerwise_poly.py")
@@ -309,7 +333,13 @@ def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
         4, 4, 4, 4, 4, 2, 3]
     assert max(map(len, cfg.herpn_conversion_groups)) == 4
     assert cfg.layerwise_poly_staged_training
-    assert cfg.layerwise_poly_freeze_backbone_during_local_fit
+    assert not cfg.layerwise_poly_freeze_backbone_during_local_fit
+    assert cfg.layerwise_poly_allow_provisional_tail_conditioning
+    assert cfg.layerwise_poly_strict_recalibrate_before_blend
+    assert cfg.layerwise_poly_conditioning_backbone_lr_scale == pytest.approx(
+        0.01)
+    assert cfg.layerwise_poly_conditioning_range_loss_weight == pytest.approx(
+        1.0)
     assert cfg.layerwise_poly_blend_backbone_lr_scale == pytest.approx(0.1)
     assert cfg.layerwise_poly_final_backbone_lr_scale == pytest.approx(0.1)
     assert cfg.layerwise_poly_range_margin == pytest.approx(1.5)
@@ -317,6 +347,22 @@ def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
     final_conversion_epoch = (
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
     assert cfg.num_epoch - final_conversion_epoch == 7
+
+
+def test_r50_group4_epoch3_resume_config_keeps_output_and_schedule():
+    base_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4.py")
+    resume_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_group4_resume_epoch3.py")
+
+    assert resume_cfg.resume
+    assert resume_cfg.output == base_cfg.output
+    assert resume_cfg.herpn_conversion_groups == base_cfg.herpn_conversion_groups
+    assert resume_cfg.herpn_group_epochs == base_cfg.herpn_group_epochs
+    assert resume_cfg.num_epoch == base_cfg.num_epoch
+    assert (resume_cfg.herpn_group_epochs[0]
+            + resume_cfg.herpn_transition_epochs) == pytest.approx(3.0)
+    assert resume_cfg.herpn_group_epochs[1] == pytest.approx(4.0)
 
 
 def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():
