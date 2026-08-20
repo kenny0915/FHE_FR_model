@@ -240,6 +240,13 @@ def get_model(name, **kwargs):
         return iresnet34(False, **kwargs)
     elif name == "r50":
         return iresnet50(False, **kwargs)
+    elif name == "r50_nl13":
+        configured_arch = kwargs.setdefault("arch_config", "nl13")
+        if configured_arch != "nl13":
+            raise ValueError(
+                "r50_nl13 requires arch_config='nl13', "
+                f"got {configured_arch!r}")
+        return iresnet50(False, **kwargs)
     elif name == "r100":
         return iresnet100(False, **kwargs)
     elif name == "r200":

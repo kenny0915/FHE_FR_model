@@ -1356,6 +1356,8 @@ def main(args):
         "fp16": cfg.fp16,
         "num_features": cfg.embedding_size,
     }
+    if hasattr(cfg, "arch_config"):
+        model_kwargs["arch_config"] = str(cfg.arch_config)
 
     if (cfg.network.startswith("r")
             and cfg.network.endswith(("_no_relu", "_prelu_herpn"))):
