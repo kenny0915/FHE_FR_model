@@ -26,6 +26,18 @@ NL13_ACTIVE_PRELUS = {
     "layer4.2.prelu",
 }
 
+NL9_ACTIVE_PRELUS = {
+    "prelu",
+    "layer1.0.prelu",
+    "layer2.0.prelu",
+    "layer3.0.prelu",
+    "layer3.3.prelu",
+    "layer3.9.prelu",
+    "layer3.13.prelu",
+    "layer4.0.prelu",
+    "layer4.2.prelu",
+}
+
 
 def _custom_r18_mask():
     return {
@@ -81,8 +93,39 @@ def test_nl13_uses_the_required_activation_mask():
     )
 
 
-def test_nl13_stage_and_embedding_shapes():
-    model = get_model("r50_nl13", dropout=0, fp16=False).eval()
+def test_nl9_uses_a_nested_distributed_activation_mask():
+    model = get_model("r50_nl9", dropout=0, fp16=False)
+    active = {
+        name for name, module in model.named_modules()
+        if isinstance(module, nn.PReLU)
+    }
+    inactive = {
+        name for name, module in model.named_modules()
+        if isinstance(module, nn.Identity)
+    }
+
+    assert model.arch_config == "nl9"
+    assert model.nonlinear_depth == 9
+    assert active == NL9_ACTIVE_PRELUS
+    assert active < NL13_ACTIVE_PRELUS
+    assert len(inactive) == 16
+    assert all(
+        isinstance(stage[0].prelu, nn.PReLU)
+        for stage in (model.layer1, model.layer2, model.layer3, model.layer4)
+    )
+    assert all(
+        block.mid_channels == channels
+        for stage, channels in zip(
+            (model.layer1, model.layer2, model.layer3, model.layer4),
+            (64, 128, 256, 512),
+        )
+        for block in stage
+    )
+
+
+@pytest.mark.parametrize("network", ["r50_nl13", "r50_nl9"])
+def test_reduced_model_stage_and_embedding_shapes(network):
+    model = get_model(network, dropout=0, fp16=False).eval()
     stage_shapes = {}
     handles = [
         stage.register_forward_hook(
@@ -177,24 +220,36 @@ def test_invalid_architecture_configuration_fails_early(kwargs, error):
     [
         ("configs/ms1mv3_r50_nl13", "work_dirs/ms1mv3_r50/model.pt"),
         ("configs/casia_r50_nl13", "work_dirs/casia_r50/model.pt"),
+        ("configs/ms1mv3_r50_nl9", "work_dirs/ms1mv3_r50/model.pt"),
+        ("configs/casia_r50_nl9", "work_dirs/casia_r50/model.pt"),
     ],
 )
-def test_nl13_training_configs(config_path, expected_init):
+def test_reduced_nonlinearity_training_configs(config_path, expected_init):
     cfg = get_config(config_path)
-    assert cfg.network == "r50_nl13"
-    assert cfg.arch_config == "nl13"
+    expected_arch = config_path.rsplit("_", 1)[-1]
+    assert cfg.network == f"r50_{expected_arch}"
+    assert cfg.arch_config == expected_arch
     assert cfg.backbone_init == expected_init
-    assert cfg.output.endswith("_r50_nl13")
+    assert cfg.output.endswith(f"_r50_{expected_arch}")
 
 
-def test_nl13_preset_is_only_valid_for_iresnet50():
+@pytest.mark.parametrize("arch_config", ["nl13", "nl9"])
+def test_reduced_presets_are_only_valid_for_iresnet50(arch_config):
     with pytest.raises(ValueError, match="stage1 activation mask"):
-        iresnet18(arch_config="nl13")
+        iresnet18(arch_config=arch_config)
 
 
 def test_direct_iresnet50_nl13_selection_matches_factory():
     direct = iresnet50(arch_config="nl13")
     assert direct.activation_mask["stage3"] == (
         True, False, False, True, False, False, True,
+        False, False, True, False, False, False, True,
+    )
+
+
+def test_direct_iresnet50_nl9_selection_matches_factory():
+    direct = iresnet50(arch_config="nl9")
+    assert direct.activation_mask["stage3"] == (
+        True, False, False, True, False, False, False,
         False, False, True, False, False, False, True,
     )

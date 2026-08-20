@@ -10,8 +10,9 @@ using_ckpt = False
 _STAGE_NAMES = ('stage1', 'stage2', 'stage3', 'stage4')
 _STAGE_CHANNELS = (64, 128, 256, 512)
 
-# The first reduced-nonlinearity experiment retains every stage-transition
-# activation and distributes the remaining activations through the long stage.
+# Reduced-nonlinearity presets retain every stage-transition activation and
+# distribute the remaining activations through the long stage. Lower-depth
+# masks are nested subsets of higher-depth masks for controlled comparisons.
 _ACTIVATION_PRESETS = {
     'nl13': {
         'stem': True,
@@ -22,6 +23,16 @@ _ACTIVATION_PRESETS = {
             False, False, True, False, False, False, True,
         ),
         'stage4': (True, True, True),
+    },
+    'nl9': {
+        'stem': True,
+        'stage1': (True, False, False),
+        'stage2': (True, False, False, False),
+        'stage3': (
+            True, False, False, True, False, False, False,
+            False, False, True, False, False, False, True,
+        ),
+        'stage4': (True, False, True),
     },
 }
 
