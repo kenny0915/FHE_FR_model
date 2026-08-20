@@ -1,12 +1,14 @@
 """MS1Mv3 R50 conversion with up to four PReLUs per stable group.
 
-Each group is calibrated in one representative-data pass. A tail-heavy pending
-group is allowed a provisional interval while its blend remains zero. During
-local range conditioning, ordinary convolution/BatchNorm weights use a 0.01x
-learning rate, only the pending group's polynomial coefficients are trainable,
-and a strict calibration must pass before blending. Completed polynomial
-coefficients remain fixed. The group then blends for one epoch with a 0.1x
-backbone learning rate. Seven final epochs jointly fine-tune the network.
+Each pending group is provisionally calibrated in one representative-data pass
+while its blend remains zero. During local range conditioning, ordinary
+convolution/BatchNorm weights use a 0.01x learning rate and only the pending
+group's polynomial coefficients are trainable. Before blending, strict
+calibration walks the group in forward order with its already calibrated
+polynomial prefix enabled, then verifies the complete group on representative
+data. Completed polynomial coefficients remain fixed. The group then blends
+for one epoch with a 0.1x backbone learning rate. Seven final epochs jointly
+fine-tune the network.
 
 The approximation target at activation i is its frozen channel-wise PReLU on
 [-S_i, S_i]. Degree 2 needs one sequential ciphertext square after folding.
@@ -48,6 +50,8 @@ config.layerwise_poly_distill_eps = 1e-4
 # After conditioning, an isolated representative maximum may raise S just
 # enough to sit below the tail limit. The 1.1 safety margin targets an observed
 # tail ratio of 8/1.1=7.27, while the 2x cap still rejects a broad runaway.
+# Causal strict passes prevent four simultaneously converted quadratics from
+# being calibrated against an unrealistically all-PReLU within-group graph.
 config.layerwise_poly_range_calibration_batches = 0
 config.layerwise_poly_range_margin = 1.5
 config.layerwise_poly_min_scale = 1e-3
@@ -76,6 +80,8 @@ config.layerwise_poly_staged_training = True
 config.layerwise_poly_freeze_backbone_during_local_fit = False
 config.layerwise_poly_allow_provisional_tail_conditioning = True
 config.layerwise_poly_strict_recalibrate_before_blend = True
+config.layerwise_poly_causal_strict_calibration = True
+config.layerwise_poly_calibration_log_interval = 1000
 config.layerwise_poly_conditioning_backbone_lr_scale = 0.01
 config.layerwise_poly_conditioning_range_loss_weight = 1.0
 config.layerwise_poly_blend_backbone_lr_scale = 0.1

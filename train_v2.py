@@ -20,6 +20,7 @@ from utils.utils_callbacks import CallBackLogging, CallBackVerification
 from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
+from utils.utils_layerwise_poly import causally_calibrate_polynomial_group
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
     select_gradient_clip_parameters,
@@ -795,7 +796,7 @@ def calibrate_layerwise_poly_input_scales(
         max_tail_ratio=0.0, max_scale_growth=0.0, max_input_scale=0.0,
         allow_recalibration=False, allow_provisional_tail=False,
         enforce_tail_scale_floor=False, tail_scale_floor_margin=1.0,
-        max_tail_scale_expansion=0.0):
+        max_tail_scale_expansion=0.0, progress_interval_batches=0):
     """Fit separate intervals for one activation group in one loader pass.
 
     All requested activations are observed on the same current eval graph.
@@ -820,6 +821,7 @@ def calibrate_layerwise_poly_input_scales(
     max_input_scale = float(max_input_scale)
     tail_scale_floor_margin = float(tail_scale_floor_margin)
     max_tail_scale_expansion = float(max_tail_scale_expansion)
+    progress_interval_batches = int(progress_interval_batches)
     if not 0.0 < quantile <= 1.0:
         raise ValueError("layerwise_poly_range_quantile must be in (0, 1]")
     if quantile_samples <= 0:
@@ -839,6 +841,8 @@ def calibrate_layerwise_poly_input_scales(
     if enforce_tail_scale_floor and max_tail_ratio <= 0.0:
         raise ValueError(
             "Tail scale flooring requires layerwise_poly_max_tail_ratio > 0")
+    if progress_interval_batches < 0:
+        raise ValueError("Calibration progress interval must be non-negative")
 
     module = backbone.module
     activation_names = tuple(activation_names)
@@ -946,6 +950,12 @@ def calibrate_layerwise_poly_input_scales(
             else:
                 calibration_batches += 1
             completed += 1
+            if (rank == 0 and progress_interval_batches > 0
+                    and completed % progress_interval_batches == 0):
+                logging.info(
+                    "Layerwise polynomial calibration progress: group=%s "
+                    "batches/rank=%d",
+                    ", ".join(activation_names), completed)
             if num_batches > 0 and completed >= num_batches:
                 break
     finally:
@@ -1095,6 +1105,101 @@ def calibrate_layerwise_poly_input_scales(
         module.set_layerwise_poly_input_scale(
             result["activation"], result["input_scale"])
     return results
+
+
+@torch.no_grad()
+def verify_layerwise_poly_group_boundary(
+        backbone, train_loader, activation_names, num_batches, global_step,
+        max_boundary_abs, dali=False, progress_interval_batches=0):
+    """Verify the fully polynomial group at its immediate downstream input.
+
+    The caller temporarily enables the complete group.  For non-final groups
+    this profiles the next polynomial activation's input; for the final group
+    it profiles embeddings.  This catches finite but catastrophic cascades
+    before any training step uses the new blend.
+    """
+    module = backbone.module
+    names = tuple(activation_names)
+    model_order = tuple(module.layerwise_poly_activation_names())
+    last_index = model_order.index(names[-1])
+    boundary_name = (
+        model_order[last_index + 1]
+        if last_index + 1 < len(model_order) else "embeddings")
+    boundary_module = (
+        dict(module.named_modules())[boundary_name]
+        if boundary_name != "embeddings" else None)
+    device = next(module.parameters()).device
+    local_absmax = torch.zeros((), device=device, dtype=torch.float32)
+    local_nonfinite = torch.zeros((), device=device, dtype=torch.float32)
+    completed = 0
+
+    def capture_boundary(_, inputs):
+        values = inputs[0].detach().float()
+        finite = torch.isfinite(values)
+        if not bool(finite.all()):
+            local_nonfinite.fill_(1.0)
+        if bool(finite.any()):
+            local_absmax.copy_(torch.maximum(
+                local_absmax, values[finite].abs().amax()))
+
+    training_states = [
+        (submodule, submodule.training) for submodule in module.modules()
+    ]
+    handle = (
+        boundary_module.register_forward_pre_hook(capture_boundary)
+        if boundary_module is not None else None)
+    module.eval()
+    try:
+        for img, _ in train_loader:
+            embeddings = module(img)
+            if boundary_module is None:
+                finite = torch.isfinite(embeddings)
+                if not bool(finite.all()):
+                    local_nonfinite.fill_(1.0)
+                if bool(finite.any()):
+                    local_absmax.copy_(torch.maximum(
+                        local_absmax,
+                        embeddings.detach().float()[finite].abs().amax()))
+            completed += 1
+            if (rank == 0 and progress_interval_batches > 0
+                    and completed % progress_interval_batches == 0):
+                logging.info(
+                    "Causal polynomial verification progress: group=%s "
+                    "boundary=%s batches/rank=%d",
+                    ", ".join(names), boundary_name, completed)
+            if num_batches > 0 and completed >= num_batches:
+                break
+    finally:
+        if handle is not None:
+            handle.remove()
+        for submodule, was_training in training_states:
+            submodule.train(was_training)
+        if dali:
+            train_loader.reset()
+
+    if completed == 0:
+        raise RuntimeError(
+            f"Causal polynomial verification for {names} received no batches")
+    diagnostics = torch.stack((local_absmax, local_nonfinite))
+    if distributed.is_available() and distributed.is_initialized():
+        distributed.all_reduce(diagnostics, op=distributed.ReduceOp.MAX)
+    boundary_absmax = float(diagnostics[0].item())
+    nonfinite = bool(diagnostics[1].item())
+    if nonfinite or (
+            max_boundary_abs > 0.0 and boundary_absmax > max_boundary_abs):
+        reason = (
+            "non-finite values"
+            if nonfinite else
+            f"absmax={boundary_absmax:.7g}>{max_boundary_abs:.7g}")
+        raise FloatingPointError(
+            "Unsafe fully polynomial group boundary at "
+            f"global_step={global_step}, group={names}, "
+            f"boundary={boundary_name}: {reason}")
+    return {
+        "boundary": boundary_name,
+        "absmax": boundary_absmax,
+        "batches_per_rank": completed,
+    }
 
 
 @torch.no_grad()
@@ -1401,7 +1506,9 @@ def main(args):
             init_loader(init_checkpoint)
         if hasattr(backbone, "set_herpn_progress"):
             backbone.set_herpn_progress(
-                float(getattr(cfg, "herpn_initial_progress", 0.0)))
+                float(getattr(
+                    cfg, "backbone_init_herpn_progress",
+                    getattr(cfg, "herpn_initial_progress", 0.0))))
         if hasattr(backbone, "set_polynomial_progress"):
             backbone.set_polynomial_progress(float(getattr(
                 cfg, "precise_relu_initial_progress", 0.0)))
@@ -1954,8 +2061,14 @@ def main(args):
         getattr(cfg, "herpn_range_loss_weight", 0.0)))
     layerwise_poly_allow_provisional_tail = bool(getattr(
         cfg, "layerwise_poly_allow_provisional_tail_conditioning", False))
+    layerwise_poly_initial_calibration_provisional = bool(getattr(
+        cfg, "layerwise_poly_initial_calibration_provisional", False))
     layerwise_poly_strict_recalibrate_before_blend = bool(getattr(
         cfg, "layerwise_poly_strict_recalibrate_before_blend", False))
+    layerwise_poly_causal_strict_calibration = bool(getattr(
+        cfg, "layerwise_poly_causal_strict_calibration", False))
+    layerwise_poly_calibration_log_interval = int(getattr(
+        cfg, "layerwise_poly_calibration_log_interval", 0))
     layerwise_poly_strict_tail_scale_floor = bool(getattr(
         cfg, "layerwise_poly_strict_tail_scale_floor", False))
     layerwise_poly_tail_scale_floor_margin = float(getattr(
@@ -1977,6 +2090,14 @@ def main(args):
     if layerwise_poly_conditioning_range_loss_weight < 0.0:
         raise ValueError(
             "layerwise_poly_conditioning_range_loss_weight must be non-negative")
+    if layerwise_poly_calibration_log_interval < 0:
+        raise ValueError(
+            "layerwise_poly_calibration_log_interval must be non-negative")
+    if (layerwise_poly_causal_strict_calibration
+            and not layerwise_poly_strict_recalibrate_before_blend):
+        raise ValueError(
+            "Causal layerwise calibration requires strict pre-blend "
+            "recalibration")
     if layerwise_poly_tail_scale_floor_margin < 1.0:
         raise ValueError(
             "layerwise_poly_tail_scale_floor_margin must be at least 1")
@@ -1999,6 +2120,11 @@ def main(args):
             "Provisional layerwise intervals require staged training, a "
             "positive conditioning backbone LR/range weight, and strict "
             "recalibration before blending")
+    if (layerwise_poly_initial_calibration_provisional
+            and not layerwise_poly_allow_provisional_tail):
+        raise ValueError(
+            "Provisional initial layerwise calibration requires provisional "
+            "tail conditioning")
     layerwise_poly_local_fit_backbone_lr_scale = (
         layerwise_poly_conditioning_backbone_lr_scale
         if layerwise_poly_conditioning_backbone_lr_scale > 0.0
@@ -2413,30 +2539,47 @@ def main(args):
     def calibrate_layerwise_poly_group(
             target_names, *, allow_recalibration=False, provisional=False):
         target_names = tuple(target_names)
-        results = calibrate_layerwise_poly_input_scales(
-            backbone,
-            layerwise_poly_range_loader,
-            target_names,
-            layerwise_poly_range_batches,
-            layerwise_poly_range_margin,
-            layerwise_poly_min_scale,
-            global_step,
-            dali=cfg.dali,
-            quantile=layerwise_poly_range_quantile,
-            quantile_samples=layerwise_poly_quantile_samples,
-            holdout_fraction=layerwise_poly_range_holdout_fraction,
-            max_tail_ratio=layerwise_poly_max_tail_ratio,
-            max_scale_growth=layerwise_poly_max_scale_growth,
-            max_input_scale=layerwise_poly_max_input_scale,
-            allow_recalibration=allow_recalibration,
-            allow_provisional_tail=provisional,
-            enforce_tail_scale_floor=(
-                allow_recalibration
-                and not provisional
-                and layerwise_poly_strict_tail_scale_floor),
-            tail_scale_floor_margin=layerwise_poly_tail_scale_floor_margin,
-            max_tail_scale_expansion=layerwise_poly_max_tail_scale_expansion,
-        )
+        if rank == 0:
+            logging.info(
+                "Starting layerwise polynomial %s pass: %s",
+                ("provisional calibration" if provisional else
+                 "strict recalibration" if allow_recalibration else
+                 "calibration"),
+                ", ".join(target_names))
+        try:
+            results = calibrate_layerwise_poly_input_scales(
+                backbone,
+                layerwise_poly_range_loader,
+                target_names,
+                layerwise_poly_range_batches,
+                layerwise_poly_range_margin,
+                layerwise_poly_min_scale,
+                global_step,
+                dali=cfg.dali,
+                quantile=layerwise_poly_range_quantile,
+                quantile_samples=layerwise_poly_quantile_samples,
+                holdout_fraction=layerwise_poly_range_holdout_fraction,
+                max_tail_ratio=layerwise_poly_max_tail_ratio,
+                max_scale_growth=layerwise_poly_max_scale_growth,
+                max_input_scale=layerwise_poly_max_input_scale,
+                allow_recalibration=allow_recalibration,
+                allow_provisional_tail=provisional,
+                enforce_tail_scale_floor=(
+                    allow_recalibration
+                    and not provisional
+                    and layerwise_poly_strict_tail_scale_floor),
+                tail_scale_floor_margin=layerwise_poly_tail_scale_floor_margin,
+                max_tail_scale_expansion=(
+                    layerwise_poly_max_tail_scale_expansion),
+                progress_interval_batches=(
+                    layerwise_poly_calibration_log_interval),
+            )
+        except FloatingPointError as error:
+            if rank == 0:
+                logging.error(
+                    "Layerwise polynomial calibration failed for %s: %s",
+                    ", ".join(target_names), error)
+            raise
         if rank == 0:
             logging.info(
                 "Layerwise polynomial group %s in one pass: %s",
@@ -2498,6 +2641,56 @@ def main(args):
                     )
         return results
 
+    def strictly_calibrate_layerwise_poly_group(target_names, group_index):
+        target_names = tuple(target_names)
+        if not (layerwise_poly_causal_strict_calibration
+                and len(target_names) > 1):
+            return calibrate_layerwise_poly_group(
+                target_names, allow_recalibration=True, provisional=False)
+
+        if rank == 0:
+            logging.info(
+                "Starting causal strict calibration for group %d/%d: %s",
+                group_index + 1, len(herpn_conversion_groups),
+                ", ".join(target_names))
+
+        def calibrate_one(name, member_index, member_count):
+            if rank == 0:
+                logging.info(
+                    "Causal strict calibration member %d/%d: %s",
+                    member_index + 1, member_count, name)
+            return calibrate_layerwise_poly_group(
+                (name,), allow_recalibration=True, provisional=False)
+
+        def verify_group(names):
+            if rank == 0:
+                logging.info(
+                    "Verifying fully polynomial group %d/%d boundary: %s",
+                    group_index + 1, len(herpn_conversion_groups),
+                    ", ".join(names))
+            return verify_layerwise_poly_group_boundary(
+                backbone,
+                layerwise_poly_range_loader,
+                names,
+                layerwise_poly_range_batches,
+                global_step,
+                layerwise_poly_max_input_scale,
+                dali=cfg.dali,
+                progress_interval_batches=(
+                    layerwise_poly_calibration_log_interval),
+            )
+
+        results, verification = causally_calibrate_polynomial_group(
+            backbone.module, target_names, calibrate_one, verify_group)
+        if rank == 0:
+            logging.info(
+                "Causal strict calibration passed for group %d/%d: "
+                "boundary=%s absmax=%.7g batches/rank=%d",
+                group_index + 1, len(herpn_conversion_groups),
+                verification["boundary"], verification["absmax"],
+                verification["batches_per_rank"])
+        return results
+
     def calibrate_next_layerwise_poly_group(*, provisional=False):
         if not layerwise_poly_enabled:
             return []
@@ -2521,7 +2714,8 @@ def main(args):
     if layerwise_poly_enabled and not cfg.resume:
         if isinstance(layerwise_poly_range_loader, DataLoader):
             layerwise_poly_range_loader.sampler.set_epoch(start_epoch)
-        calibrate_next_layerwise_poly_group()
+        calibrate_next_layerwise_poly_group(
+            provisional=layerwise_poly_initial_calibration_provisional)
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
@@ -2747,11 +2941,8 @@ def main(args):
                             ", ".join(target_names),
                         )
                     try:
-                        calibrate_layerwise_poly_group(
-                            target_names,
-                            allow_recalibration=True,
-                            provisional=False,
-                        )
+                        strictly_calibrate_layerwise_poly_group(
+                            target_names, group_index)
                     except FloatingPointError as error:
                         raise FloatingPointError(
                             "Layerwise polynomial range conditioning did not "
