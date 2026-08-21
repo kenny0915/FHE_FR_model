@@ -141,3 +141,36 @@ def test_nl9_prelu_herpn_config_schedules_singletons_in_forward_order():
     final_conversion_epoch = (
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
     assert cfg.num_epoch - final_conversion_epoch == 6
+
+
+def test_fast_grouped_nl9_config_is_isolated_and_finishes_early():
+    original = _load_standalone_config(
+        "configs/ms1mv3_r50_nl9_prelu_herpn.py")
+    fast = _load_standalone_config(
+        "configs/ms1mv3_r50_nl9_prelu_herpn_fast_grouped.py")
+    flattened = tuple(
+        name for group in fast.herpn_conversion_groups for name in group)
+
+    assert fast.network == "r50_nl9_prelu_herpn"
+    assert fast.backbone_init == "work_dirs/ms1mv3_r50_nl9/model.pt"
+    assert fast.output == (
+        "work_dirs/ms1mv3_r50_nl9_prelu_herpn_fast_grouped")
+    assert fast.output != original.output
+    assert fast.embedding_distill_weight == 0.0
+    assert flattened == NL9_ACTIVATION_NAMES
+    assert len(fast.herpn_conversion_groups) == 6
+    assert fast.herpn_conversion_groups[0] == (
+        "prelu", "layer1.0.prelu")
+    assert fast.herpn_conversion_groups[-2:] == (
+        ("layer4.0.prelu",), ("layer4.2.prelu",))
+    assert fast.herpn_bn_recalibration_batches == 500
+    assert all(
+        right >= left + fast.herpn_transition_epochs
+        for left, right in zip(
+            fast.herpn_group_epochs, fast.herpn_group_epochs[1:])
+    )
+    final_conversion_epoch = (
+        fast.herpn_group_epochs[-1] + fast.herpn_transition_epochs)
+    assert final_conversion_epoch == 12
+    assert fast.num_epoch - final_conversion_epoch == 4
+    assert fast.num_epoch < original.num_epoch
