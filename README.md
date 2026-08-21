@@ -199,6 +199,32 @@ Argument notes:
 - `--network`: backbone name. This must match the architecture used during training.
 - `--job`: label used in result filenames and logs.
 
+### Per-layer weight and feature-map statistics
+
+Use `eval/layer_statistics.py` to inspect every leaf layer. The command prints
+the summary to the terminal and writes both CSV and JSON files. JSON preserves
+representative tensor values; `--sample-values` controls how many are retained
+per parameter or feature map.
+
+```bash
+python eval/layer_statistics.py \
+  --config configs/ms1mv3_r50.py \
+  --checkpoint work_dirs/ms1mv3_r50/model.pt \
+  --ijb-root ijb/IJBC \
+  --target IJBC \
+  --num-images 1000 \
+  --batch-size 64 \
+  --sample-values 128 \
+  --output work_dirs/ms1mv3_r50/ijbc_layer_statistics
+```
+
+The image count refers to source pictures. Add `--use-flip` to process each
+picture and its horizontal flip (2,000 model inputs for 1,000 pictures). Use
+`--module-scope all` to include composite blocks as well as leaf layers,
+`--capture both` to record layer inputs and outputs, or `--synthetic` for a
+quick pipeline check without IJB data. For a model whose constructor needs
+extra settings, pass JSON with `--model-kwargs`.
+
 ## TinyFace Evaluation
 
 The uploaded TinyFace tree can be evaluated with `eval_tinyface.py`. The script reads
