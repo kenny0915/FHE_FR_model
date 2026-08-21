@@ -86,6 +86,124 @@ default_cfgs = {
 }
 
 
+_STAGE_NAMES = ('stage1', 'stage2', 'stage3', 'stage4')
+
+# Experiment-A presets from ``poolformer_s24_reduced_gelu_experiment.md``.
+# GELU8 keeps an approximately one-third, spatially distributed subset while
+# retaining at least one explicit activation in every stage.
+_GELU_PRESETS = {
+    'gelu12': {
+        'stage1': (True, False, True, False),
+        'stage2': (True, False, True, False),
+        'stage3': (
+            True, False, True, False, True, False,
+            True, False, True, False, True, False,
+        ),
+        'stage4': (True, False, True, False),
+    },
+    'gelu8': {
+        'stage1': (True, False, False, False),
+        'stage2': (True, False, False, False),
+        'stage3': (
+            True, False, False, True, False, False,
+            True, False, False, True, False, False,
+        ),
+        'stage4': (True, False, True, False),
+    },
+}
+
+
+def _validate_gelu_mask(gelu_mask, layers):
+    expected_keys = set(_STAGE_NAMES)
+    actual_keys = set(gelu_mask)
+    if actual_keys != expected_keys:
+        missing = sorted(expected_keys - actual_keys)
+        extra = sorted(actual_keys - expected_keys)
+        raise ValueError(
+            'gelu_mask must contain exactly stage1-stage4; '
+            f'missing={missing}, extra={extra}')
+
+    validated = {}
+    for stage_name, block_count in zip(_STAGE_NAMES, layers):
+        stage_mask = tuple(gelu_mask[stage_name])
+        if len(stage_mask) != block_count:
+            raise ValueError(
+                f'{stage_name} GELU mask must have {block_count} entries, '
+                f'got {len(stage_mask)}')
+        if not all(isinstance(value, bool) for value in stage_mask):
+            raise TypeError(f'{stage_name} GELU mask entries must be bools')
+        validated[stage_name] = stage_mask
+    return validated
+
+
+def _resolve_gelu_mask(layers, arch_config, gelu_mask):
+    arch_config = 'baseline' if arch_config is None else str(arch_config)
+    if gelu_mask is not None:
+        if arch_config != 'baseline':
+            raise ValueError(
+                'Specify either a named arch_config or a custom gelu_mask, '
+                'not both')
+        return 'custom', _validate_gelu_mask(gelu_mask, layers)
+
+    if arch_config == 'baseline':
+        return arch_config, {
+            stage_name: (True,) * block_count
+            for stage_name, block_count in zip(_STAGE_NAMES, layers)
+        }
+    if arch_config not in _GELU_PRESETS:
+        available = ', '.join(('baseline', *_GELU_PRESETS))
+        raise ValueError(
+            f'Unknown PoolFormer arch_config {arch_config!r}; '
+            f'available: {available}')
+    return arch_config, _validate_gelu_mask(
+        _GELU_PRESETS[arch_config], layers)
+
+
+def _resolve_block_mlp_ratios(layers, mlp_ratios, block_mlp_ratios):
+    """Return a validated ratio tuple for every block in every stage."""
+    if len(mlp_ratios) != len(layers):
+        raise ValueError(
+            f'mlp_ratios must have {len(layers)} stage entries, '
+            f'got {len(mlp_ratios)}')
+    if block_mlp_ratios is None:
+        block_mlp_ratios = {
+            stage_name: (stage_ratio,) * block_count
+            for stage_name, stage_ratio, block_count in zip(
+                _STAGE_NAMES, mlp_ratios, layers)
+        }
+    else:
+        expected_keys = set(_STAGE_NAMES)
+        actual_keys = set(block_mlp_ratios)
+        if actual_keys != expected_keys:
+            missing = sorted(expected_keys - actual_keys)
+            extra = sorted(actual_keys - expected_keys)
+            raise ValueError(
+                'block_mlp_ratios must contain exactly stage1-stage4; '
+                f'missing={missing}, extra={extra}')
+
+    validated = {}
+    for stage_name, block_count in zip(_STAGE_NAMES, layers):
+        stage_ratios = tuple(block_mlp_ratios[stage_name])
+        if len(stage_ratios) != block_count:
+            raise ValueError(
+                f'{stage_name} MLP ratios must have {block_count} entries, '
+                f'got {len(stage_ratios)}')
+        if not all(
+                isinstance(ratio, (int, float)) and ratio > 0
+                for ratio in stage_ratios):
+            raise ValueError(
+                f'{stage_name} MLP ratios must be positive numbers')
+        validated[stage_name] = stage_ratios
+    return validated
+
+
+def _format_gelu_mask(gelu_mask):
+    return ' '.join(
+        f"{stage_name}={''.join('G' if value else '-' for value in gelu_mask[stage_name])}"
+        for stage_name in _STAGE_NAMES
+    )
+
+
 class PatchEmbed(nn.Module):
     """
     Patch Embedding that is implemented by a layer of conv. 
@@ -156,13 +274,16 @@ class Mlp(nn.Module):
     Implementation of MLP with 1*1 convolutions.
     Input: tensor with shape [B, C, H, W]
     """
-    def __init__(self, in_features, hidden_features=None, 
-                 out_features=None, act_layer=nn.GELU, drop=0.):
+    def __init__(self, in_features, hidden_features=None,
+                 out_features=None, act_layer=nn.GELU, drop=0.,
+                 use_activation=True):
         super().__init__()
+        if not isinstance(use_activation, bool):
+            raise TypeError('use_activation must be a bool')
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
         self.fc1 = nn.Conv2d(in_features, hidden_features, 1)
-        self.act = act_layer()
+        self.act = act_layer() if use_activation else nn.Identity()
         self.fc2 = nn.Conv2d(hidden_features, out_features, 1)
         self.drop = nn.Dropout(drop)
         self.apply(self._init_weights)
@@ -196,10 +317,11 @@ class PoolFormerBlock(nn.Module):
     --use_layer_scale, --layer_scale_init_value: LayerScale, 
         refer to https://arxiv.org/abs/2103.17239
     """
-    def __init__(self, dim, pool_size=3, mlp_ratio=4., 
+    def __init__(self, dim, pool_size=3, mlp_ratio=4.,
                  act_layer=nn.GELU, norm_layer=GroupNorm, 
                  drop=0., drop_path=0., 
-                 use_layer_scale=True, layer_scale_init_value=1e-5):
+                 use_layer_scale=True, layer_scale_init_value=1e-5,
+                 use_activation=True):
 
         super().__init__()
 
@@ -207,8 +329,13 @@ class PoolFormerBlock(nn.Module):
         self.token_mixer = Pooling(pool_size=pool_size)
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, 
-                       act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(
+            in_features=dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=act_layer,
+            drop=drop,
+            use_activation=use_activation,
+        )
 
         # The following two techniques are useful to train deep PoolFormers.
         self.drop_path = DropPath(drop_path) if drop_path > 0. \
@@ -234,25 +361,44 @@ class PoolFormerBlock(nn.Module):
         return x
 
 
-def basic_blocks(dim, index, layers, 
-                 pool_size=3, mlp_ratio=4., 
+def basic_blocks(dim, index, layers,
+                 pool_size=3, mlp_ratio=4.,
                  act_layer=nn.GELU, norm_layer=GroupNorm, 
                  drop_rate=.0, drop_path_rate=0., 
-                 use_layer_scale=True, layer_scale_init_value=1e-5):
+                 use_layer_scale=True, layer_scale_init_value=1e-5,
+                 use_activations=None):
     """
     generate PoolFormer blocks for a stage
     return: PoolFormer blocks 
     """
     blocks = []
+    block_count = layers[index]
+    if isinstance(mlp_ratio, (int, float)):
+        mlp_ratio = (mlp_ratio,) * block_count
+    else:
+        mlp_ratio = tuple(mlp_ratio)
+    if len(mlp_ratio) != block_count:
+        raise ValueError(
+            f'stage{index + 1} MLP ratios must have {block_count} entries, '
+            f'got {len(mlp_ratio)}')
+    if use_activations is None:
+        use_activations = (True,) * block_count
+    else:
+        use_activations = tuple(use_activations)
+    if len(use_activations) != block_count:
+        raise ValueError(
+            f'stage{index + 1} GELU mask must have {block_count} entries, '
+            f'got {len(use_activations)}')
     for block_idx in range(layers[index]):
         block_dpr = drop_path_rate * (
             block_idx + sum(layers[:index])) / (sum(layers) - 1)
         blocks.append(PoolFormerBlock(
-            dim, pool_size=pool_size, mlp_ratio=mlp_ratio, 
+            dim, pool_size=pool_size, mlp_ratio=mlp_ratio[block_idx],
             act_layer=act_layer, norm_layer=norm_layer, 
             drop=drop_rate, drop_path=block_dpr, 
             use_layer_scale=use_layer_scale, 
-            layer_scale_init_value=layer_scale_init_value, 
+            layer_scale_init_value=layer_scale_init_value,
+            use_activation=use_activations[block_idx],
             ))
     blocks = nn.Sequential(*blocks)
 
@@ -288,6 +434,9 @@ class PoolFormer(nn.Module):
                  fork_feat=False,
                  face_embedding=True,
                  fp16=False,
+                 arch_config='baseline',
+                 gelu_mask=None,
+                 block_mlp_ratios=None,
                  init_cfg=None, 
                  pretrained=None, 
                  **kwargs):
@@ -299,6 +448,17 @@ class PoolFormer(nn.Module):
         self.fork_feat = fork_feat
         self.face_embedding = face_embedding
         self.fp16 = fp16
+        self.arch_config, self.gelu_mask = _resolve_gelu_mask(
+            layers, arch_config, gelu_mask)
+        self.block_mlp_ratios = _resolve_block_mlp_ratios(
+            layers, mlp_ratios, block_mlp_ratios)
+        self.gelu_depth = sum(
+            sum(self.gelu_mask[stage_name])
+            for stage_name in _STAGE_NAMES)
+        self.gelu_count_by_stage = {
+            stage_name: sum(self.gelu_mask[stage_name])
+            for stage_name in _STAGE_NAMES
+        }
 
         self.patch_embed = PatchEmbed(
             patch_size=in_patch_size, stride=in_stride, padding=in_pad, 
@@ -307,13 +467,16 @@ class PoolFormer(nn.Module):
         # set the main block in network
         network = []
         for i in range(len(layers)):
-            stage = basic_blocks(embed_dims[i], i, layers, 
-                                 pool_size=pool_size, mlp_ratio=mlp_ratios[i],
+            stage_name = _STAGE_NAMES[i]
+            stage = basic_blocks(embed_dims[i], i, layers,
+                                 pool_size=pool_size,
+                                 mlp_ratio=self.block_mlp_ratios[stage_name],
                                  act_layer=act_layer, norm_layer=norm_layer, 
                                  drop_rate=drop_rate, 
                                  drop_path_rate=drop_path_rate,
                                  use_layer_scale=use_layer_scale, 
-                                 layer_scale_init_value=layer_scale_init_value)
+                                 layer_scale_init_value=layer_scale_init_value,
+                                 use_activations=self.gelu_mask[stage_name])
             network.append(stage)
             if i >= len(layers) - 1:
                 break
@@ -367,6 +530,22 @@ class PoolFormer(nn.Module):
         if self.fork_feat and (
                 self.init_cfg is not None or pretrained is not None):
             self.init_weights()
+
+        if int(os.environ.get('RANK', '0')) == 0:
+            print(
+                f'PoolFormer arch_config={self.arch_config} '
+                f'GELU depth={self.gelu_depth} '
+                f'per-stage GELU count={self.gelu_count_by_stage} '
+                f'{_format_gelu_mask(self.gelu_mask)}')
+
+    def load_backbone_init_state_dict(self, state_dict):
+        """Load an equal-width baseline after GELUs become parameterless identities."""
+        translated = dict(state_dict)
+        if translated and all(key.startswith('module.') for key in translated):
+            translated = {
+                key[len('module.'):]: value for key, value in translated.items()
+            }
+        return self.load_state_dict(translated, strict=True)
 
     # init for classification
     def cls_init_weights(self, m):
@@ -508,6 +687,36 @@ def poolformer_s24(pretrained=False, **kwargs):
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu", check_hash=True)
         model.load_state_dict(checkpoint)
     return model
+
+
+def _poolformer_s24_reduced_gelu(preset, pretrained=False, **kwargs):
+    if pretrained:
+        raise ValueError(
+            'Reduced-GELU face backbones do not provide pretrained weights')
+    configured_arch = kwargs.pop('arch_config', preset)
+    if configured_arch != preset:
+        raise ValueError(
+            f'poolformer_s24_{preset} requires '
+            f'arch_config={preset!r}, got {configured_arch!r}')
+    return poolformer_s24(
+        pretrained=False,
+        arch_config=preset,
+        **kwargs,
+    )
+
+
+@register_model
+def poolformer_s24_gelu12(pretrained=False, **kwargs):
+    """PoolFormer-S24 retaining the mandatory alternating 12-GELU mask."""
+    return _poolformer_s24_reduced_gelu(
+        'gelu12', pretrained=pretrained, **kwargs)
+
+
+@register_model
+def poolformer_s24_gelu8(pretrained=False, **kwargs):
+    """PoolFormer-S24 retaining eight GELUs distributed across all stages."""
+    return _poolformer_s24_reduced_gelu(
+        'gelu8', pretrained=pretrained, **kwargs)
 
 
 @register_model

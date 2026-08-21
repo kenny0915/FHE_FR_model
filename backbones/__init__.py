@@ -292,6 +292,8 @@ def get_model(name, **kwargs):
     elif name in (
         "poolformer_s12",
         "poolformer_s24",
+        "poolformer_s24_gelu12",
+        "poolformer_s24_gelu8",
         "poolformer_s24_mlp2",
         "poolformer_s36",
         "poolformer_m36",
@@ -300,6 +302,8 @@ def get_model(name, **kwargs):
         from .poolformer import (
             poolformer_s12,
             poolformer_s24,
+            poolformer_s24_gelu12,
+            poolformer_s24_gelu8,
             poolformer_s24_mlp2,
             poolformer_s36,
             poolformer_m36,
@@ -308,6 +312,8 @@ def get_model(name, **kwargs):
         poolformer_factory = {
             "poolformer_s12": poolformer_s12,
             "poolformer_s24": poolformer_s24,
+            "poolformer_s24_gelu12": poolformer_s24_gelu12,
+            "poolformer_s24_gelu8": poolformer_s24_gelu8,
             "poolformer_s24_mlp2": poolformer_s24_mlp2,
             "poolformer_s36": poolformer_s36,
             "poolformer_m36": poolformer_m36,
@@ -320,6 +326,8 @@ def get_model(name, **kwargs):
             num_classes=num_features,
             face_embedding=True,
             fp16=fp16,
+            **({"arch_config": kwargs["arch_config"]}
+               if "arch_config" in kwargs else {}),
         )
 
     elif name in (
