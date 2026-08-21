@@ -58,6 +58,13 @@ def get_iresnet_nl9_prelu_herpn(
         pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_iresnet_nl13_prelu_herpn(
+        pretrained=False, progress=True, **kwargs):
+    from .iresnet_nl13_prelu_herpn import iresnet50
+    return iresnet50(
+        pretrained=pretrained, progress=progress, **kwargs)
+
+
 def get_iresnet_layerwise_poly(depth, pretrained=False, progress=True, **kwargs):
     from . import iresnet_layerwise_poly
     factory = {
@@ -172,6 +179,8 @@ def get_model(name, **kwargs):
         return get_iresnet_prelu_herpn(200, False, **kwargs)
     elif name in ("r50_nl9_prelu_herpn",):
         return get_iresnet_nl9_prelu_herpn(False, **kwargs)
+    elif name in ("r50_nl13_prelu_herpn",):
+        return get_iresnet_nl13_prelu_herpn(False, **kwargs)
     elif name in ("r18_layerwise_poly",):
         return get_iresnet_layerwise_poly(18, False, **kwargs)
     elif name in ("r34_layerwise_poly",):

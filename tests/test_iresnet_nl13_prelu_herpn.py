@@ -8,7 +8,7 @@ import torch
 from torch import nn
 
 from backbones import get_model
-from backbones.iresnet_nl9_prelu_herpn import NL9_ACTIVATION_NAMES
+from backbones.iresnet_nl13_prelu_herpn import NL13_ACTIVATION_NAMES
 from backbones.iresnet_no_relu import FoldedHerPN
 from backbones.iresnet_prelu_herpn import PReLUHerPNActivation
 
@@ -25,7 +25,7 @@ def _load_standalone_config(path):
     sys.modules["easydict"] = fake_easydict
     try:
         spec = importlib.util.spec_from_file_location(
-            "_test_nl9_prelu_herpn_config", path)
+            "_test_nl13_prelu_herpn_config", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module.config
@@ -38,39 +38,38 @@ def _load_standalone_config(path):
 
 def _model(**kwargs):
     return get_model(
-        "r50_nl9_prelu_herpn",
+        "r50_nl13_prelu_herpn",
         dropout=0,
         fp16=False,
-        arch_config="nl9",
+        arch_config="nl13",
         **kwargs,
     )
 
 
-def test_nl9_prelu_herpn_wraps_only_the_nine_retained_activations():
+def test_nl13_prelu_herpn_wraps_only_thirteen_retained_activations():
     model = _model(herpn_progress=0.0)
     progressive = {
         name for name, module in model.named_modules()
         if isinstance(module, PReLUHerPNActivation)
     }
-    identities = {
-        name for name, module in model.named_modules()
-        if isinstance(module, nn.Identity)
-    }
-
-    assert model.arch_config == "nl9"
-    assert model.nonlinear_depth == 9
-    assert progressive == set(NL9_ACTIVATION_NAMES)
-    assert len(identities) == 16
+    identities = [
+        module for module in model.modules() if isinstance(module, nn.Identity)
+    ]
     frozen_teachers = [
         module for module in model.modules() if isinstance(module, nn.PReLU)
     ]
-    assert len(frozen_teachers) == 9
+
+    assert model.arch_config == "nl13"
+    assert model.nonlinear_depth == 13
+    assert progressive == set(NL13_ACTIVATION_NAMES)
+    assert len(identities) == 12
+    assert len(frozen_teachers) == 13
     assert all(not module.weight.requires_grad for module in frozen_teachers)
 
 
-def test_temporary_nl9_checkpoint_loads_strictly_at_exact_blend_zero():
+def test_temporary_nl13_checkpoint_loads_strictly_at_blend_zero():
     teacher = get_model(
-        "r50_nl9", dropout=0, fp16=False, arch_config="nl9").eval()
+        "r50_nl13", dropout=0, fp16=False, arch_config="nl13").eval()
     student = _model(herpn_progress=0.0).eval()
     teacher_state = copy.deepcopy(teacher.state_dict())
 
@@ -78,14 +77,13 @@ def test_temporary_nl9_checkpoint_loads_strictly_at_exact_blend_zero():
 
     student_activations = dict(student.named_progressive_activations())
     teacher_modules = dict(teacher.named_modules())
-    for name in NL9_ACTIVATION_NAMES:
+    for name in NL13_ACTIVATION_NAMES:
         torch.testing.assert_close(
             student_activations[name].prelu.weight,
             teacher_modules[name].weight,
             rtol=0,
             atol=0,
         )
-        assert student_activations[name]._blend == 0.0
 
     inputs = torch.randn(1, 3, 112, 112)
     with torch.no_grad():
@@ -94,45 +92,52 @@ def test_temporary_nl9_checkpoint_loads_strictly_at_exact_blend_zero():
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
 
 
-def test_nl9_prelu_herpn_folds_all_nine_activations_to_quadratics():
+def test_nl13_prelu_herpn_folds_to_thirteen_quadratics():
     model = _model(herpn_progress=5.0).eval()
-    assert len(model.progressive_activations()) == 9
-
     model.fold_herpn_for_inference()
 
     assert sum(isinstance(module, FoldedHerPN)
-               for module in model.modules()) == 9
+               for module in model.modules()) == 13
     assert not any(isinstance(module, PReLUHerPNActivation)
                    for module in model.modules())
     assert not any(isinstance(module, nn.PReLU)
                    for module in model.modules())
 
 
-def test_nl9_prelu_herpn_requires_complete_conversion_before_folding():
-    model = _model(herpn_progress=0.0).eval()
-    with pytest.raises(RuntimeError, match="All 9 NL9 activations"):
-        model.fold_herpn_for_inference()
+def test_nl13_prelu_herpn_rejects_wrong_architecture():
+    with pytest.raises(ValueError, match="requires arch_config='nl13'"):
+        get_model(
+            "r50_nl13_prelu_herpn",
+            dropout=0,
+            fp16=False,
+            arch_config="nl9",
+        )
 
 
-def test_nl9_prelu_herpn_config_schedules_singletons_in_forward_order():
+def test_fast_nl13_config_groups_shallow_activations_and_finishes_early():
     cfg = _load_standalone_config(
-        "configs/ms1mv3_r50_nl9_prelu_herpn.py")
+        "configs/ms1mv3_r50_nl13_prelu_herpn.py")
     model = _model(
         herpn_range_limit=cfg.herpn_range_limit,
         herpn_bn_eps=cfg.herpn_bn_eps,
         herpn_progress=cfg.herpn_initial_progress,
         prelu_herpn_distill_eps=cfg.prelu_herpn_distill_eps,
     )
+    flattened = tuple(
+        name for group in cfg.herpn_conversion_groups for name in group)
 
-    assert cfg.network == "r50_nl9_prelu_herpn"
-    assert cfg.backbone_init == "work_dirs/ms1mv3_r50_nl9/model.pt"
-    assert cfg.embedding_teacher_network == "r50_nl9"
-    assert cfg.embedding_teacher_checkpoint == cfg.backbone_init
-    assert tuple(group[0] for group in cfg.herpn_conversion_groups) == (
-        NL9_ACTIVATION_NAMES)
-    assert all(len(group) == 1 for group in cfg.herpn_conversion_groups)
+    assert cfg.network == "r50_nl13_prelu_herpn"
+    assert cfg.backbone_init == "work_dirs/ms1mv3_r50_nl13/model.pt"
+    assert cfg.embedding_distill_weight == 0.0
+    assert flattened == NL13_ACTIVATION_NAMES
+    assert len(cfg.herpn_conversion_groups) == 8
+    assert cfg.herpn_conversion_groups[0] == (
+        "prelu", "layer1.0.prelu", "layer1.2.prelu")
+    assert cfg.herpn_conversion_groups[1] == (
+        "layer2.0.prelu", "layer2.3.prelu")
+    assert all(len(group) == 1 for group in cfg.herpn_conversion_groups[-4:])
     assert set(dict(model.named_progressive_activations())) == set(
-        NL9_ACTIVATION_NAMES)
+        NL13_ACTIVATION_NAMES)
     assert all(
         right >= left + cfg.herpn_transition_epochs
         for left, right in zip(
@@ -140,4 +145,6 @@ def test_nl9_prelu_herpn_config_schedules_singletons_in_forward_order():
     )
     final_conversion_epoch = (
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
-    assert cfg.num_epoch - final_conversion_epoch == 6
+    assert final_conversion_epoch == 16
+    assert cfg.num_epoch - final_conversion_epoch == 4
+    assert cfg.num_epoch < 34

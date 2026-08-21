@@ -56,17 +56,24 @@ def _parent_and_child(module, qualified_name):
 class IResNet(_ReducedIResNet):
     """NL9 IResNet50 with nine progressive PReLU-aware HerPN students."""
 
-    def __init__(self, *args, arch_config="nl9", activation_mask=None,
+    arch_config_name = "nl9"
+    activation_names = NL9_ACTIVATION_NAMES
+
+    def __init__(self, *args, arch_config=None, activation_mask=None,
                  herpn_range_limit=6.0, herpn_bn_eps=1e-4,
                  herpn_progress=0.0, prelu_herpn_distill_eps=1e-4,
                  **kwargs):
-        if str(arch_config) != "nl9":
+        if arch_config is None:
+            arch_config = self.arch_config_name
+        if str(arch_config) != self.arch_config_name:
             raise ValueError(
-                "NL9 PReLU-HerPN requires arch_config='nl9', got {!r}".format(
+                "{} PReLU-HerPN requires arch_config={!r}, got {!r}".format(
+                    self.arch_config_name.upper(), self.arch_config_name,
                     arch_config))
         if activation_mask is not None:
             raise ValueError(
-                "NL9 PReLU-HerPN uses the fixed nl9 activation mask")
+                "{} PReLU-HerPN uses the fixed {} activation mask".format(
+                    self.arch_config_name.upper(), self.arch_config_name))
         if herpn_range_limit <= 0.0:
             raise ValueError("herpn_range_limit must be positive")
         if herpn_bn_eps <= 0.0:
@@ -76,7 +83,7 @@ class IResNet(_ReducedIResNet):
 
         super().__init__(
             *args,
-            arch_config="nl9",
+            arch_config=self.arch_config_name,
             activation_mask=None,
             **kwargs,
         )
@@ -96,13 +103,14 @@ class IResNet(_ReducedIResNet):
             name for name, module in self.named_modules()
             if isinstance(module, nn.PReLU)
         }
-        expected = set(NL9_ACTIVATION_NAMES)
+        expected = set(self.activation_names)
         if actual != expected:
             raise RuntimeError(
-                "NL9 PReLU locations changed; missing={}, extra={}".format(
-                    sorted(expected - actual), sorted(actual - expected)))
+                "{} PReLU locations changed; missing={}, extra={}".format(
+                    self.arch_config_name.upper(), sorted(expected - actual),
+                    sorted(actual - expected)))
 
-        for activation_name in NL9_ACTIVATION_NAMES:
+        for activation_name in self.activation_names:
             parent, child_name = _parent_and_child(self, activation_name)
             original = getattr(parent, child_name)
             stage_name = (
@@ -142,12 +150,13 @@ class IResNet(_ReducedIResNet):
                 min(max(progress - activation.stage_index, 0.0), 1.0))
 
     def set_herpn_blends(self, blends):
-        """Set the nine activation blends used by forward-order conversion."""
+        """Set activation blends used by forward-order group conversion."""
         activations = dict(self.named_progressive_activations())
         unknown = sorted(set(blends).difference(activations))
         if unknown:
             raise ValueError(
-                "Unknown NL9 PReLU-HerPN activations: {}".format(unknown))
+                "Unknown {} PReLU-HerPN activations: {}".format(
+                    self.arch_config_name.upper(), unknown))
         for name, activation in activations.items():
             activation.set_blend(float(blends.get(name, 0.0)))
         converted_fraction = sum(
@@ -224,13 +233,16 @@ class IResNet(_ReducedIResNet):
 
     @torch.no_grad()
     def fold_herpn_for_inference(self):
-        """Replace all nine converted wrappers by exact quadratics."""
+        """Replace every converted wrapper by its exact quadratic."""
         if self.training:
-            raise RuntimeError("Call eval() before folding NL9 PReLU-HerPN")
+            raise RuntimeError(
+                "Call eval() before folding {} PReLU-HerPN".format(
+                    self.arch_config_name.upper()))
         activations = self.progressive_activations()
         if any(activation._blend < 1.0 for activation in activations):
             raise RuntimeError(
-                "All nine NL9 activations must be converted before folding")
+                "All {} {} activations must be converted before folding".format(
+                    len(self.activation_names), self.arch_config_name.upper()))
 
         def replace(module):
             for name, child in list(module.named_children()):
