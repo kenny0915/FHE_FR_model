@@ -291,6 +291,17 @@ def test_layerwise_scaled_r50_config_schedules_forward_order_and_augmentation():
     assert cfg.layerwise_poly_range_margin == 2.0
     assert cfg.range_augmentation["enabled"]
     assert cfg.range_augmentation["probability"] >= 0.5
+    assert cfg.herpn_group_epochs == tuple(
+        index + 0.5 for index in range(25))
+    assert cfg.herpn_transition_epochs == 0.5
+    assert all(
+        right - left == 1.0
+        for left, right in zip(
+            cfg.herpn_group_epochs, cfg.herpn_group_epochs[1:]))
+    final_conversion_epoch = (
+        cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
+    assert final_conversion_epoch == 25.0
+    assert cfg.num_epoch - final_conversion_epoch == 4.0
     assert cfg.output.endswith("layerwise_scale_range_aug")
 
 

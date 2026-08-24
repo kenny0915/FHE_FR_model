@@ -15,7 +15,23 @@ from backbones.iresnet_layerwise_poly import (
     LayerwisePolynomialActivation,
 )
 from eval.non_linear_replacement import PReLU_Approx
-from utils.utils_layerwise_poly import causally_calibrate_polynomial_group
+from utils.utils_layerwise_poly import (
+    causally_calibrate_polynomial_group,
+    fractional_group_starts_crossed,
+)
+
+
+def test_fractional_group_starts_trigger_once_at_half_epoch_boundary():
+    starts = (0.5, 1.5, 2.5)
+
+    assert fractional_group_starts_crossed(0, 0.49, starts) == ()
+    assert fractional_group_starts_crossed(0, 0.5, starts) == (0,)
+    assert fractional_group_starts_crossed(
+        0, 0.9, starts, already_handled={0}) == ()
+    assert fractional_group_starts_crossed(1, 1.5, starts) == (1,)
+
+    with pytest.raises(ValueError, match="must not precede"):
+        fractional_group_starts_crossed(2, 1.9, starts)
 
 
 class _EasyDict(dict):

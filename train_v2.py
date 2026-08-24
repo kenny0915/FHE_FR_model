@@ -20,7 +20,10 @@ from utils.utils_callbacks import CallBackLogging, CallBackVerification
 from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
-from utils.utils_layerwise_poly import causally_calibrate_polynomial_group
+from utils.utils_layerwise_poly import (
+    causally_calibrate_polynomial_group,
+    fractional_group_starts_crossed,
+)
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
     nonfinite_gradient_diagnostics,
@@ -1360,19 +1363,18 @@ def main(args):
     layerwise_poly_range_loader = train_loader
     if (hasattr(cfg, "layerwise_poly_range_calibration_batches")
             and not cfg.dali):
-        # Training drops the final incomplete batch. Interval calibration must
-        # instead see every representative image; DistributedSampler may pad a
-        # few samples across ranks, but none are omitted.
-        layerwise_poly_range_loader = get_dataloader(
-            cfg.rec,
-            local_rank,
-            cfg.batch_size,
-            False,
-            cfg.dali_aug,
-            cfg.seed,
-            cfg.num_workers,
+        # A finite calibration pass abandons its iterator after N batches.
+        # DataLoaderX would leave its background prefetch thread blocked on a
+        # full queue after every initial/strict interval fit, so use a regular
+        # loader whose iterator workers are released at the end of each pass.
+        layerwise_poly_range_loader = DataLoader(
+            dataset=train_loader.dataset,
+            batch_size=cfg.batch_size,
+            sampler=train_loader.sampler,
+            num_workers=cfg.num_workers,
+            pin_memory=True,
             drop_last=False,
-            range_augmentation=getattr(cfg, "range_augmentation", None),
+            worker_init_fn=train_loader.worker_init_fn,
         )
 
     model_kwargs = {
@@ -2249,6 +2251,19 @@ def main(args):
                 layerwise_poly_max_input_scale) < 0.0:
             raise ValueError(
                 "Layerwise polynomial safety limits must be non-negative")
+        fractional_group_starts = tuple(
+            start for start in herpn_group_epochs
+            if abs(float(start) - round(float(start))) > 1e-9)
+        if (fractional_group_starts
+                and layerwise_poly_strict_recalibrate_before_blend
+                and cfg.dali):
+            raise ValueError(
+                "Mid-epoch layerwise calibration requires config.dali=False")
+        if (fractional_group_starts
+                and layerwise_poly_strict_recalibrate_before_blend
+                and int(getattr(cfg, "gradient_acc", 1)) != 1):
+            raise ValueError(
+                "Mid-epoch layerwise calibration requires gradient_acc=1")
     if herpn_group_schedule and cfg.resume:
         completed_herpn_groups = (
             int(resumed_completed_herpn_groups)
@@ -2750,6 +2765,33 @@ def main(args):
                 verification["batches_per_rank"])
         return results
 
+    strictly_revalidated_layerwise_groups = set()
+
+    def strictly_revalidate_layerwise_group_before_blend(group_index):
+        if group_index in strictly_revalidated_layerwise_groups:
+            return []
+        target_names = herpn_conversion_groups[group_index]
+        if rank == 0:
+            logging.info(
+                "Strictly revalidating conditioned layerwise polynomial "
+                "group %d/%d before blend: %s",
+                group_index + 1,
+                len(herpn_conversion_groups),
+                ", ".join(target_names),
+            )
+        try:
+            results = strictly_calibrate_layerwise_poly_group(
+                target_names, group_index)
+        except FloatingPointError as error:
+            raise FloatingPointError(
+                "Layerwise polynomial range conditioning did not make "
+                f"group {group_index + 1} safe before its blend. Keep the "
+                "saved completed-group checkpoint and increase the local-fit "
+                "fraction before this group's blend."
+            ) from error
+        strictly_revalidated_layerwise_groups.add(group_index)
+        return results
+
     def calibrate_next_layerwise_poly_group(*, provisional=False):
         if not layerwise_poly_enabled:
             return []
@@ -2990,26 +3032,8 @@ def main(args):
                     if abs(float(epoch) - float(start)) < 1e-9
                 ]
                 for group_index in starting_group_indices:
-                    target_names = herpn_conversion_groups[group_index]
-                    if rank == 0:
-                        logging.info(
-                            "Strictly revalidating conditioned layerwise "
-                            "polynomial group %d/%d before blend: %s",
-                            group_index + 1,
-                            len(herpn_conversion_groups),
-                            ", ".join(target_names),
-                        )
-                    try:
-                        strictly_calibrate_layerwise_poly_group(
-                            target_names, group_index)
-                    except FloatingPointError as error:
-                        raise FloatingPointError(
-                            "Layerwise polynomial range conditioning did not "
-                            f"make group {group_index + 1} safe before its "
-                            "blend. Keep the saved completed-group checkpoint "
-                            "and increase the gap before this group's start "
-                            "epoch to add another conditioning epoch."
-                        ) from error
+                    strictly_revalidate_layerwise_group_before_blend(
+                        group_index)
             newly_completed = sum(
                 float(epoch) >= float(start) + herpn_transition_epochs
                 for start in herpn_group_epochs)
@@ -3245,6 +3269,17 @@ def main(args):
             if herpn_group_schedule:
                 fractional_epoch = epoch + step_in_epoch / max(
                     scheduled_steps_per_epoch, 1)
+                if (layerwise_poly_enabled
+                        and layerwise_poly_strict_recalibrate_before_blend):
+                    crossed_group_indices = fractional_group_starts_crossed(
+                        epoch,
+                        fractional_epoch,
+                        herpn_group_epochs,
+                        strictly_revalidated_layerwise_groups,
+                    )
+                    for group_index in crossed_group_indices:
+                        strictly_revalidate_layerwise_group_before_blend(
+                            group_index)
                 backbone.module.set_herpn_blends(herpn_group_blends_at_epoch(
                     fractional_epoch, herpn_conversion_groups,
                     herpn_group_epochs, herpn_transition_epochs))

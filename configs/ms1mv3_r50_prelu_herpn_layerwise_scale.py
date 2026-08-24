@@ -113,10 +113,12 @@ config.herpn_conversion_groups = (
     ("layer4.2.prelu",),
 )
 
-# One local-fit epoch followed by one blend epoch per activation. The stem gets
-# two initial local-fit epochs; four fully converted epochs finish the run.
-config.herpn_group_epochs = tuple(range(2, 52, 2))
-config.herpn_transition_epochs = 1.0
+# Each activation now occupies one epoch: local fit at blend zero during the
+# first half, then a linear blend during the second half. Group i completes at
+# the next integer epoch boundary, where BN refresh and calibration of group
+# i+1 run before its local-fit half. Four fully converted epochs finish the run.
+config.herpn_group_epochs = tuple(index + 0.5 for index in range(25))
+config.herpn_transition_epochs = 0.5
 
 config.sync_bn = True
 config.broadcast_buffers = True
@@ -131,6 +133,6 @@ config.epoch_model_interval = 1
 config.rec = "./ms1m-retinaface-t1"
 config.num_classes = 93431
 config.num_image = 5179510
-config.num_epoch = 55
+config.num_epoch = 29
 config.warmup_epoch = 1
 config.val_targets = ["lfw", "cfp_fp", "agedb_30"]
