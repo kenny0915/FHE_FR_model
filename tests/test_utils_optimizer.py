@@ -3,9 +3,53 @@ import pytest
 
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
+    nonfinite_gradient_diagnostics,
+    nonfinite_gradient_tensor_count,
     select_gradient_clip_parameters,
     temporary_optimizer_lr_scale,
 )
+
+
+def test_nonfinite_gradient_diagnostics_reports_parameter_and_counts():
+    backbone = torch.nn.Linear(3, 2)
+    classifier = torch.nn.Linear(2, 2)
+    backbone.weight.grad = torch.tensor([
+        [1.0, float("inf"), 2.0],
+        [float("nan"), -3.0, 4.0],
+    ])
+    classifier.bias.grad = torch.tensor([float("-inf"), 5.0])
+
+    count, diagnostics = nonfinite_gradient_diagnostics((
+        ("backbone", backbone),
+        ("partial_fc", classifier),
+    ))
+
+    assert count == 2
+    assert [item["name"] for item in diagnostics] == [
+        "backbone.weight", "partial_fc.bias"]
+    assert diagnostics[0]["nonfinite_elements"] == 2
+    assert diagnostics[0]["finite_absmax"] == pytest.approx(4.0)
+    assert diagnostics[1]["nonfinite_elements"] == 1
+    assert diagnostics[1]["finite_absmax"] == pytest.approx(5.0)
+
+    device_count = nonfinite_gradient_tensor_count((
+        ("backbone", backbone),
+        ("partial_fc", classifier),
+    ))
+    assert device_count.device == backbone.weight.device
+    assert int(device_count) == 2
+
+
+def test_nonfinite_gradient_diagnostics_limits_details_not_count():
+    module = torch.nn.Linear(2, 2)
+    module.weight.grad = torch.full_like(module.weight, float("nan"))
+    module.bias.grad = torch.full_like(module.bias, float("inf"))
+
+    count, diagnostics = nonfinite_gradient_diagnostics(
+        (("model", module),), max_diagnostics=1)
+
+    assert count == 2
+    assert len(diagnostics) == 1
 
 
 def test_stable_gradient_clip_handles_finite_fp32_norm_overflow():

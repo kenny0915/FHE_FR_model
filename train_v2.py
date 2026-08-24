@@ -23,6 +23,8 @@ from utils.utils_logging import AverageMeter, init_logging
 from utils.utils_layerwise_poly import causally_calibrate_polynomial_group
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
+    nonfinite_gradient_diagnostics,
+    nonfinite_gradient_tensor_count,
     select_gradient_clip_parameters,
     split_weight_decay_parameters,
     temporary_optimizer_lr_scale,
@@ -1924,6 +1926,32 @@ def main(args):
         init_scale=float(getattr(cfg, "amp_init_scale", 65536.0)),
         growth_interval=int(getattr(cfg, "amp_growth_interval", 100)),
     )
+    skip_nonfinite_gradients = bool(getattr(
+        cfg, "skip_nonfinite_gradients", cfg.fp16))
+    nonfinite_gradient_scale_backoff = float(getattr(
+        cfg, "nonfinite_gradient_scale_backoff", 0.5))
+    min_amp_scale = float(getattr(cfg, "min_amp_scale", 1.0))
+    max_nonfinite_gradient_skips = int(getattr(
+        cfg, "max_nonfinite_gradient_skips", 0))
+    if not 0.0 < nonfinite_gradient_scale_backoff < 1.0:
+        raise ValueError(
+            "nonfinite_gradient_scale_backoff must be in (0, 1)")
+    if min_amp_scale <= 0.0:
+        raise ValueError("min_amp_scale must be positive")
+    if max_nonfinite_gradient_skips < 0:
+        raise ValueError(
+            "max_nonfinite_gradient_skips must be non-negative")
+    nonfinite_gradient_skips = 0
+    if rank == 0 and cfg.fp16:
+        logging.info(
+            "FP16 non-finite gradient policy: %s, scale_backoff=%.4g, "
+            "minimum_scale=%.4g, maximum_skips=%s",
+            "warn and skip" if skip_nonfinite_gradients else "fail fast",
+            nonfinite_gradient_scale_backoff,
+            min_amp_scale,
+            (str(max_nonfinite_gradient_skips)
+             if max_nonfinite_gradient_skips > 0 else "unlimited"),
+        )
     grad_clip = float(getattr(cfg, "gradient_clip", 5.0))
     gradient_clip_scope = str(getattr(cfg, "gradient_clip_scope", "all"))
     clipped_params = select_gradient_clip_parameters(
@@ -3490,6 +3518,7 @@ def main(args):
                 raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
 
             backward_loss = loss
+            nonfinite_gradient_step_skipped = False
             if (cfg.gradient_acc > 1
                     and getattr(cfg, "normalize_gradient_accumulation", False)):
                 backward_loss = loss / cfg.gradient_acc
@@ -3504,7 +3533,19 @@ def main(args):
                         elif layerwise_poly_freeze_backbone_during_local_fit:
                             retain_only_layerwise_poly_group_gradients(
                                 backbone.module, active_layerwise_group)
-                    if getattr(cfg, "check_finite_grads", False):
+                    named_gradient_modules = (
+                        ("backbone", backbone),
+                        ("partial_fc", module_partial_fc),
+                    )
+                    local_nonfinite_tensor_count = torch.zeros(
+                        (), device=local_embeddings.device, dtype=torch.long)
+                    gradient_diagnostics = ()
+                    if skip_nonfinite_gradients:
+                        local_nonfinite_tensor_count = (
+                            nonfinite_gradient_tensor_count(
+                                named_gradient_modules,
+                                device=local_embeddings.device))
+                    elif getattr(cfg, "check_finite_grads", False):
                         check_finite_gradients(backbone, "backbone", global_step)
                         check_finite_gradients(module_partial_fc, "partial_fc", global_step)
                     if getattr(cfg, "gradient_clip_type", "norm") == "value":
@@ -3518,7 +3559,21 @@ def main(args):
                         total_norm = torch.nn.utils.clip_grad_norm_(
                             clipped_params, grad_clip, error_if_nonfinite=False
                         )
-                    if getattr(cfg, "gradient_clip_type", "norm") == "value" or torch.isfinite(total_norm):
+                    local_bad_gradient = (
+                        local_nonfinite_tensor_count > 0
+                    ) | (~torch.isfinite(total_norm).to(
+                        device=local_embeddings.device))
+                    bad_gradient_rank = (
+                        local_bad_gradient.to(dtype=torch.long) * (rank + 1))
+                    if (distributed.is_available()
+                            and distributed.is_initialized()):
+                        distributed.all_reduce(
+                            bad_gradient_rank,
+                            op=distributed.ReduceOp.MAX)
+                    bad_gradient_rank_code = int(bad_gradient_rank.item())
+                    global_bad_gradient = bool(bad_gradient_rank_code)
+                    source_rank = bad_gradient_rank_code - 1
+                    if not global_bad_gradient:
                         with temporary_optimizer_lr_scale(
                                 opt, effective_simple_gate_lr_scale):
                             if layerwise_poly_staged_training:
@@ -3529,12 +3584,72 @@ def main(args):
                                     amp.step(opt)
                             else:
                                 amp.step(opt)
-                    else:
-                        logging.warning(
-                            "Skipping optimizer step at global_step=%d due to non-finite grad norm: %s",
-                            global_step, total_norm.item()
+                        amp.update()
+                    elif skip_nonfinite_gradients:
+                        nonfinite_gradient_step_skipped = True
+                        nonfinite_gradient_skips += 1
+                        local_bad_gradient = bool(local_bad_gradient.item())
+                        local_nonfinite_tensors = int(
+                            local_nonfinite_tensor_count.item())
+                        if local_nonfinite_tensors:
+                            _, gradient_diagnostics = (
+                                nonfinite_gradient_diagnostics(
+                                    named_gradient_modules))
+                        current_scale = torch.tensor(
+                            float(amp.get_scale()),
+                            device=local_embeddings.device,
+                            dtype=torch.float64,
                         )
-                    amp.update()
+                        if (distributed.is_available()
+                                and distributed.is_initialized()):
+                            distributed.all_reduce(
+                                current_scale, op=distributed.ReduceOp.MIN)
+                        new_scale = max(
+                            float(current_scale.item())
+                            * nonfinite_gradient_scale_backoff,
+                            min_amp_scale,
+                        )
+                        local_details = "; ".join(
+                            f"{item['name']} shape={item['shape']} "
+                            f"nonfinite={item['nonfinite_elements']} "
+                            f"finite_absmax={item['finite_absmax']:.6g}"
+                            for item in gradient_diagnostics
+                        )
+                        if rank == 0:
+                            logging.warning(
+                                "Skipping synchronized FP16 optimizer step "
+                                "at global_step=%d: source_rank=%d, "
+                                "nonfinite_tensors_on_rank0=%d, grad_norm=%s, "
+                                "amp_scale=%.7g->%.7g, skip_count=%d%s%s",
+                                global_step, source_rank,
+                                local_nonfinite_tensors,
+                                str(float(total_norm.item())),
+                                float(current_scale.item()), new_scale,
+                                nonfinite_gradient_skips,
+                                "; " if local_details else "",
+                                local_details,
+                            )
+                        elif local_bad_gradient:
+                            logging.warning(
+                                "Rank %d detected non-finite FP16 gradients "
+                                "at global_step=%d; optimizer step skipped%s%s",
+                                rank, global_step,
+                                "; " if local_details else "",
+                                local_details,
+                            )
+                        amp.update(new_scale=new_scale)
+                        if (max_nonfinite_gradient_skips > 0
+                                and nonfinite_gradient_skips
+                                > max_nonfinite_gradient_skips):
+                            raise FloatingPointError(
+                                "Exceeded max_nonfinite_gradient_skips="
+                                f"{max_nonfinite_gradient_skips} at "
+                                f"global_step={global_step}")
+                    else:
+                        raise FloatingPointError(
+                            "Non-finite FP16 gradient norm at "
+                            f"global_step={global_step}: "
+                            f"{float(total_norm.item())}")
                     opt.zero_grad()
             else:
                 backward_loss.backward()
@@ -3584,7 +3699,8 @@ def main(args):
                         else:
                             opt.step()
                     opt.zero_grad()
-            if not lr_scheduler_step_per_epoch:
+            if (not lr_scheduler_step_per_epoch
+                    and not nonfinite_gradient_step_skipped):
                 lr_scheduler.step()
 
             with torch.no_grad():

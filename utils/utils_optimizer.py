@@ -106,6 +106,82 @@ def select_gradient_clip_parameters(optimizer, backbone, scope="all"):
     return parameters
 
 
+@torch.no_grad()
+def nonfinite_gradient_tensor_count(named_modules, device=None):
+    """Return a device scalar counting gradient tensors with NaN or Inf.
+
+    The count remains on-device, avoiding one CPU synchronization per model
+    parameter on healthy training steps. ``named_modules`` may be iterated
+    only once, so callers that later need details should pass it again.
+    """
+    count = None
+    for _, module in named_modules:
+        for parameter in module.parameters():
+            gradient = parameter.grad
+            if gradient is None:
+                continue
+            values = (
+                gradient.detach().coalesce().values()
+                if gradient.is_sparse else gradient.detach()
+            )
+            if count is None:
+                count = torch.zeros((), device=values.device, dtype=torch.long)
+            elif values.device != count.device:
+                raise ValueError(
+                    "Gradient finiteness check requires one gradient device")
+            count.add_((~torch.isfinite(values)).any().to(dtype=torch.long))
+    if count is None:
+        count = torch.zeros((), device=device, dtype=torch.long)
+    elif device is not None and count.device != torch.device(device):
+        raise ValueError(
+            "Requested gradient count device does not match gradient device")
+    return count
+
+
+@torch.no_grad()
+def nonfinite_gradient_diagnostics(named_modules, max_diagnostics=4):
+    """Count non-finite gradient tensors and describe the first few.
+
+    ``named_modules`` is an iterable of ``(prefix, module)`` pairs. Sparse
+    gradients are inspected through their coalesced values. The returned
+    diagnostics are plain dictionaries so callers can log them without
+    retaining gradient tensors or autograd graphs.
+    """
+    max_diagnostics = int(max_diagnostics)
+    if max_diagnostics < 0:
+        raise ValueError("max_diagnostics must be non-negative")
+
+    nonfinite_tensors = 0
+    diagnostics = []
+    for module_name, module in named_modules:
+        for parameter_name, parameter in module.named_parameters():
+            gradient = parameter.grad
+            if gradient is None:
+                continue
+            values = (
+                gradient.detach().coalesce().values()
+                if gradient.is_sparse else gradient.detach()
+            )
+            finite = torch.isfinite(values)
+            if bool(finite.all()):
+                continue
+            nonfinite_tensors += 1
+            if len(diagnostics) >= max_diagnostics:
+                continue
+            finite_values = values[finite]
+            finite_absmax = (
+                float(finite_values.abs().amax().item())
+                if finite_values.numel() else float("nan")
+            )
+            diagnostics.append({
+                "name": f"{module_name}.{parameter_name}",
+                "shape": tuple(gradient.shape),
+                "nonfinite_elements": int((~finite).sum().item()),
+                "finite_absmax": finite_absmax,
+            })
+    return nonfinite_tensors, tuple(diagnostics)
+
+
 def clip_grad_norm_stable(parameters, max_norm, error_if_nonfinite=False):
     """Clip an L2 gradient norm using FP64 reductions.
 
