@@ -302,7 +302,7 @@ def test_layerwise_scaled_r50_config_schedules_forward_order_and_augmentation():
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
     assert final_conversion_epoch == 25.0
     assert cfg.num_epoch - final_conversion_epoch == 4.0
-    assert cfg.output.endswith("layerwise_scale_range_aug")
+    assert cfg.output.endswith("layerwise_scale_range_aug_one_epoch")
 
 
 def test_selective_weight_decay_protects_herpn_norm_and_bias():

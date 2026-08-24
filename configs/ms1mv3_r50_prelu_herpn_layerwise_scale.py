@@ -23,7 +23,7 @@ config.margin_list = (1.0, 0.5, 0.0)
 config.network = "r50_prelu_herpn"
 config.resume = False
 config.output = (
-    "work_dirs/ms1mv3_r50_prelu_herpn_layerwise_scale_range_aug")
+    "work_dirs/ms1mv3_r50_prelu_herpn_layerwise_scale_range_aug_one_epoch")
 config.embedding_size = 512
 config.sample_rate = 1.0
 config.fp16 = False
