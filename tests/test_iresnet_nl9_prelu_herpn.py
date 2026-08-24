@@ -164,6 +164,7 @@ def test_fast_grouped_nl9_config_is_isolated_and_finishes_early():
     assert fast.herpn_conversion_groups[-2:] == (
         ("layer4.0.prelu",), ("layer4.2.prelu",))
     assert fast.herpn_bn_recalibration_batches == 500
+    assert fast.fail_on_nonfinite_val is False
     assert all(
         right >= left + fast.herpn_transition_epochs
         for left, right in zip(
