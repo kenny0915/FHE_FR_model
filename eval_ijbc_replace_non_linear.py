@@ -66,17 +66,17 @@ parser.add_argument('--activation-debug-batches', default=10, type=int,
                     help='number of forward_db batches to record when activation debugging is enabled; <=0 records all batches')
 parser.add_argument('--skip-activation-plot', action='store_true',
                     help='skip writing the activation approximation comparison plot')
-parser.add_argument('--relu-poly-input-scale', default=32.0, type=float,
+parser.add_argument('--relu-poly-input-scale', default=8.0, type=float,
                     help='single scale used only when --relu-poly-scale-mode=fixed')
 parser.add_argument('--relu-poly-precise-alpha', choices=(7, 10), type=int,
-                    default=None,
+                    default=10,
                     help='use the reference paper PreciseReLU with this alpha; '
                          'when omitted, use ChebyReLU selected by --relu-poly-degree')
 parser.add_argument('--relu-poly-degree', choices=(4, 8, 16), default=4,
                     type=int,
                     help='ChebyReLU polynomial degree; degrees 4, 8, and 16 have multiplicative depths 2, 3, and 4')
 parser.add_argument('--relu-poly-scale-mode', choices=('layerwise', 'fixed'),
-                    default='layerwise',
+                    default='fixed',
                     help='calibrate a fixed scale for each PReLU (default), or use one fixed scale for all PReLUs')
 parser.add_argument('--relu-poly-scale-margin', default=2.0, type=float,
                     help='layerwise scale is the observed input absmax times this margin; must be >1')
@@ -138,7 +138,7 @@ class Embedding(object):
         #if network == "r50" and not args.skip_activation_plot and not activation_plot_written:
         #    write_activation_comparison_plot(resnet, save_path, input_scale=args.relu_poly_input_scale)
         #    activation_plot_written = True
-        if network == "r50":
+        if network == "r50" or network == "r50_nl13":
             if args.relu_poly_layer_scales:
                 with open(args.relu_poly_layer_scales) as scale_file:
                     scale_data = json.load(scale_file)

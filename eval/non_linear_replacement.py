@@ -254,7 +254,7 @@ _PRECISE_RELU_BY_ALPHA = {
 
 class PReLU_Approx(torch.nn.Module):
     def __init__(self, slope, input_scale=1.0, polynomial_degree=4,
-                 precise_alpha=None):
+                 precise_alpha=10):
         super().__init__()
         slope = slope.detach().clone().float().reshape(-1)
         if precise_alpha is None:

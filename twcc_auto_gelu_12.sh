@@ -6,8 +6,8 @@ echo "1. Do Computation"
 # Your code
 CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun \
     --nproc_per_node=4 \
-    train_v2.py configs/ms1mv3_poolformer_s24_gelu8_fp32
+    train_v2.py configs/ms1mv3_poolformer_s24_gelu12_fp32
 
 echo "2. Delete Interactive Container"
-$TWCC_CLI_CMD rm ccs -f -s 6093677
+$TWCC_CLI_CMD rm ccs -f -s 6093659
 #<CCS_ID>：using "twccli ls ccs" to find
