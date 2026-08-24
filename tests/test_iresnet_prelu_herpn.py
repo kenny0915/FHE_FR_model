@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import types
 
+import pytest
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -100,6 +101,84 @@ def test_prelu_herpn_folds_to_the_same_degree_two_polynomial():
     assert folded.coefficient2.shape == (3, 1, 1)
 
 
+def test_layerwise_scaled_prelu_herpn_uses_normalized_hermite_input():
+    torch.manual_seed(31)
+    activation = PReLUHerPNActivation(
+        channels=3, blend=0.0, layerwise_scale=True).eval()
+    activation.set_input_scale(4.5)
+    activation.set_blend(1.0)
+    with torch.no_grad():
+        activation.prelu.weight.copy_(torch.tensor([0.1, -0.2, 0.4]))
+        activation.herpn.weight.uniform_(0.5, 1.3)
+        activation.herpn.bias.uniform_(-0.2, 0.2)
+
+    inputs = 3.0 * torch.randn(2, 3, 4, 4)
+    scale = activation.input_scale
+    slope = activation.prelu.weight.reshape(1, -1, 1, 1)
+    expected = (
+        slope * inputs
+        + (1.0 - slope) * scale * activation.herpn(inputs / scale)
+    )
+
+    torch.testing.assert_close(
+        activation(inputs), expected, rtol=1e-6, atol=1e-6)
+
+
+def test_layerwise_scaled_prelu_herpn_folds_exactly():
+    torch.manual_seed(32)
+    activation = PReLUHerPNActivation(
+        channels=3, blend=0.0, layerwise_scale=True).eval()
+    activation.set_input_scale(7.25)
+    activation.set_blend(1.0)
+    with torch.no_grad():
+        activation.prelu.weight.copy_(torch.tensor([0.1, -0.2, 0.4]))
+        activation.herpn.weight.uniform_(0.5, 1.3)
+        activation.herpn.bias.uniform_(-0.2, 0.2)
+        for batchnorm in (
+                activation.herpn.bn0,
+                activation.herpn.bn1,
+                activation.herpn.bn2):
+            batchnorm.running_mean.uniform_(-0.3, 0.3)
+            batchnorm.running_var.uniform_(0.5, 1.5)
+
+    inputs = 5.0 * torch.randn(2, 3, 4, 4)
+    folded = activation.folded().eval()
+    torch.testing.assert_close(
+        folded(inputs), activation(inputs), rtol=1e-5, atol=1e-5)
+
+
+def test_scaled_checkpoint_restores_scaling_without_constructor_flag():
+    source = PReLUHerPNActivation(
+        channels=2, blend=0.0, layerwise_scale=True).eval()
+    source.set_input_scale(5.0)
+    source.set_blend(1.0)
+    with torch.no_grad():
+        source.herpn.weight.copy_(torch.tensor([[[0.7]], [[1.1]]]))
+        source.herpn.bias.copy_(torch.tensor([[[0.2]], [[-0.1]]]))
+
+    restored = PReLUHerPNActivation(channels=2, blend=0.0).eval()
+    restored.load_state_dict(source.state_dict(), strict=True)
+    inputs = torch.randn(2, 2, 4, 4)
+
+    assert bool(restored.layerwise_scale_enabled)
+    assert restored._scale_is_calibrated
+    torch.testing.assert_close(
+        restored(inputs), source(inputs), rtol=0.0, atol=0.0)
+
+
+def test_layerwise_scaled_prelu_herpn_requires_calibration_before_blend():
+    activation = PReLUHerPNActivation(
+        channels=2, blend=0.0, layerwise_scale=True)
+
+    with pytest.raises(RuntimeError, match="Calibrate"):
+        activation.set_blend(0.1)
+
+    activation.set_input_scale(3.0)
+    activation.set_blend(0.1)
+    assert activation._scale_is_calibrated
+    assert float(activation.blend) == pytest.approx(0.1)
+
+
 def test_relative_distillation_remains_active_at_full_conversion():
     activation = PReLUHerPNActivation(
         channels=2, blend=1.0).train()
@@ -184,6 +263,35 @@ def test_r50_config_schedules_every_prelu_herpn_activation():
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
     assert cfg.num_epoch - final_conversion_epoch == 4
     assert cfg.output == "work_dirs/ms1mv3_r50_prelu_herpn"
+
+
+def test_layerwise_scaled_r50_config_schedules_forward_order_and_augmentation():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_prelu_herpn_layerwise_scale.py")
+    model = get_model(
+        cfg.network,
+        dropout=0,
+        fp16=False,
+        herpn_range_limit=cfg.herpn_range_limit,
+        herpn_bn_eps=cfg.herpn_bn_eps,
+        herpn_progress=cfg.herpn_initial_progress,
+        prelu_herpn_distill_eps=cfg.prelu_herpn_distill_eps,
+        prelu_herpn_layerwise_scale=cfg.prelu_herpn_layerwise_scale,
+        prelu_herpn_initial_scale=cfg.prelu_herpn_initial_scale,
+    )
+    model_order = tuple(model.layerwise_poly_activation_names())
+    configured_order = tuple(
+        name for group in cfg.herpn_conversion_groups for name in group)
+
+    assert model.layerwise_input_scale_enabled
+    assert len(model_order) == 25
+    assert configured_order == model_order
+    assert all(len(group) == 1 for group in cfg.herpn_conversion_groups)
+    assert cfg.herpn_range_limit == 1.0
+    assert cfg.layerwise_poly_range_margin == 2.0
+    assert cfg.range_augmentation["enabled"]
+    assert cfg.range_augmentation["probability"] >= 0.5
+    assert cfg.output.endswith("layerwise_scale_range_aug")
 
 
 def test_selective_weight_decay_protects_herpn_norm_and_bias():

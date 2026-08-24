@@ -9,6 +9,11 @@ AESPA:
 
     student_a(x) = a*x + (1-a)*HerPN_ReLU(x).
 
+The optional layerwise-scaled form calibrates a public ``S_i`` at every
+activation and evaluates ``S_i*HerPN_ReLU(x/S_i)``. PReLU's positive
+homogeneity keeps the teacher target unchanged while the Hermite square sees
+the normalized interval ``[-1, 1]``.
+
 After calibration, ``HerPN_ReLU(x)`` folds to ``A*x^2+B*x+C``.  Therefore
 the complete student folds exactly to
 
@@ -86,14 +91,18 @@ class PReLUHerPNActivation(nn.Module):
     """Progressively blend a frozen PReLU teacher into its HerPN student."""
 
     is_progressive_polynomial_activation = True
+    is_layerwise_rescaled_polynomial = True
 
     def __init__(self, channels, range_limit=6.0, bn_eps=1e-4,
-                 distill_eps=1e-4, stage_index=0, blend=1.0):
+                 distill_eps=1e-4, stage_index=0, blend=1.0,
+                 layerwise_scale=False, initial_scale=1.0):
         super().__init__()
         if range_limit <= 0:
             raise ValueError("range_limit must be positive")
         if distill_eps <= 0:
             raise ValueError("distill_eps must be positive")
+        if initial_scale <= 0:
+            raise ValueError("initial_scale must be positive")
 
         self.prelu = nn.PReLU(channels)
         # The pretrained PReLU is the fixed teacher and supplies the
@@ -109,19 +118,46 @@ class PReLUHerPNActivation(nn.Module):
         self.register_buffer(
             "distill_eps",
             torch.tensor(float(distill_eps), dtype=torch.float32))
+        self.register_buffer(
+            "input_scale",
+            torch.tensor(float(initial_scale), dtype=torch.float32))
+        self.register_buffer(
+            "scale_calibrated", torch.tensor(False, dtype=torch.bool))
+        self.register_buffer(
+            "layerwise_scale_enabled",
+            torch.tensor(bool(layerwise_scale), dtype=torch.bool))
         self._last_range_penalty = None
         self._last_distillation_loss = None
         self._last_input_absmax = None
         self._last_outside_fraction = None
         self._blend = 0.0
+        self._scale_is_calibrated = False
         self.set_blend(blend)
 
     def set_blend(self, blend):
         blend = float(blend)
         if not 0.0 <= blend <= 1.0:
             raise ValueError("blend must be in [0, 1]")
+        if (blend > 0.0 and bool(self.layerwise_scale_enabled.item())
+                and not self._scale_is_calibrated):
+            raise RuntimeError(
+                "Calibrate this HerPN activation's input scale before conversion")
         self._blend = blend
         self.blend.fill_(blend)
+
+    @torch.no_grad()
+    def set_input_scale(self, scale):
+        scale = float(scale)
+        if not math.isfinite(scale) or scale <= 0.0:
+            raise ValueError("input scale must be finite and positive")
+        if not bool(self.layerwise_scale_enabled.item()):
+            raise RuntimeError("Layerwise scaling is disabled for this activation")
+        if self._blend > 0.0:
+            raise RuntimeError(
+                "Cannot change a HerPN interval after conversion starts")
+        self.input_scale.fill_(scale)
+        self.scale_calibrated.fill_(True)
+        self._scale_is_calibrated = True
 
     def range_penalty(self):
         return self._last_range_penalty
@@ -134,6 +170,8 @@ class PReLUHerPNActivation(nn.Module):
             "absmax": self._last_input_absmax,
             "outside_fraction": self._last_outside_fraction,
             "blend": self.blend.detach(),
+            "input_scale": self.input_scale.detach(),
+            "scale_calibrated": self.scale_calibrated.detach(),
         }
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
@@ -148,6 +186,20 @@ class PReLUHerPNActivation(nn.Module):
         herpn_prefix = prefix + "herpn."
         has_herpn_state = any(
             key.startswith(herpn_prefix) for key in state_dict)
+        scaled_key = prefix + "layerwise_scale_enabled"
+        scale_key = prefix + "input_scale"
+        calibrated_key = prefix + "scale_calibrated"
+        if scaled_key not in state_dict:
+            state_dict[scaled_key] = self.layerwise_scale_enabled.detach()
+        if scale_key not in state_dict:
+            state_dict[scale_key] = self.input_scale.detach()
+        if calibrated_key not in state_dict:
+            # Old HerPN checkpoints represent the unscaled S=1 graph. Mark
+            # that interval usable only when loading them in legacy mode.
+            legacy_calibrated = (
+                has_herpn_state
+                and not bool(self.layerwise_scale_enabled.item()))
+            state_dict[calibrated_key] = torch.tensor(legacy_calibrated)
         if not has_herpn_state:
             # A baseline PReLU checkpoint has no student or progressive state.
             # Fill all new state so strict loading still rejects a partially
@@ -161,9 +213,19 @@ class PReLUHerPNActivation(nn.Module):
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
         self._blend = float(self.blend.item())
+        self._scale_is_calibrated = bool(self.scale_calibrated.item())
+
+    def _normalized_input_and_scale(self, x):
+        if not bool(self.layerwise_scale_enabled.item()):
+            return x, None
+        scale = self.input_scale.to(device=x.device, dtype=x.dtype)
+        return x / scale, scale
 
     def _student(self, x):
-        relu_student = self.herpn(x)
+        normalized_x, scale = self._normalized_input_and_scale(x)
+        relu_student = self.herpn(normalized_x)
+        if scale is not None:
+            relu_student = scale * relu_student
         slope = self.prelu.weight.reshape(1, -1, 1, 1).to(
             device=x.device, dtype=x.dtype)
         return slope * x + (1.0 - slope) * relu_student
@@ -176,7 +238,10 @@ class PReLUHerPNActivation(nn.Module):
         basis and input, so activation distillation updates HerPN's scale and
         bias without modifying earlier pretrained backbone layers.
         """
-        relu_student, basis = self.herpn.forward_with_basis(x)
+        normalized_x, scale = self._normalized_input_and_scale(x)
+        relu_student, basis = self.herpn.forward_with_basis(normalized_x)
+        if scale is not None:
+            relu_student = scale * relu_student
         slope = self.prelu.weight.reshape(1, -1, 1, 1).to(
             device=x.device, dtype=x.dtype)
         student = slope * x + (1.0 - slope) * relu_student
@@ -186,6 +251,8 @@ class PReLUHerPNActivation(nn.Module):
             self.herpn.weight.to(dtype=compute_dtype) * basis.detach()
             + self.herpn.bias.to(dtype=compute_dtype)
         ).to(dtype=x.dtype)
+        if scale is not None:
+            local_relu_student = scale * local_relu_student
         local_student = (
             slope.detach() * x.detach()
             + (1.0 - slope.detach()) * local_relu_student
@@ -199,16 +266,24 @@ class PReLUHerPNActivation(nn.Module):
                 if x.dtype in (torch.float16, torch.bfloat16)
                 else x
             )
-            limit = self.range_limit.to(
-                device=x.device, dtype=compute_x.dtype)
+            scaled = bool(self.layerwise_scale_enabled.item())
+            calibrated = self._scale_is_calibrated
+            limit = (
+                self.input_scale if scaled else self.range_limit
+            ).to(device=x.device, dtype=compute_x.dtype)
             excess = torch.relu(compute_x.abs() - limit)
-            self._last_range_penalty = (
-                excess.square().mean()
-                + 0.1 * excess.flatten(1).amax(dim=1).square().mean()
-            )
-            self._last_input_absmax = compute_x.detach().abs().amax()
-            self._last_outside_fraction = (
-                (excess.detach() > 0).float().mean())
+            if not scaled or calibrated:
+                self._last_range_penalty = (
+                    excess.square().mean()
+                    + 0.1 * excess.flatten(1).amax(dim=1).square().mean()
+                )
+                self._last_input_absmax = compute_x.detach().abs().amax()
+                self._last_outside_fraction = (
+                    (excess.detach() > 0).float().mean())
+            else:
+                self._last_range_penalty = compute_x.sum() * 0.0
+                self._last_input_absmax = None
+                self._last_outside_fraction = None
         else:
             self._last_range_penalty = None
             self._last_distillation_loss = None
@@ -229,8 +304,12 @@ class PReLUHerPNActivation(nn.Module):
             denominator = target.square().mean().detach()
             denominator = denominator + self.distill_eps.to(
                 device=x.device, dtype=denominator.dtype)
-            self._last_distillation_loss = (
-                local_student.float() - target).square().mean() / denominator
+            if (not bool(self.layerwise_scale_enabled.item())
+                    or self._scale_is_calibrated):
+                self._last_distillation_loss = (
+                    local_student.float() - target).square().mean() / denominator
+            else:
+                self._last_distillation_loss = local_student.sum() * 0.0
         else:
             student = self._student(x)
 
@@ -250,6 +329,14 @@ class PReLUHerPNActivation(nn.Module):
                 "Only a fully converted PReLU-HerPN activation can be folded")
         coefficient2, coefficient1, coefficient0 = (
             self.herpn.folded_coefficients())
+        if bool(self.layerwise_scale_enabled.item()):
+            if not self._scale_is_calibrated:
+                raise RuntimeError(
+                    "Cannot fold a HerPN activation with no calibrated interval")
+            scale = self.input_scale.to(
+                device=coefficient2.device, dtype=coefficient2.dtype)
+            coefficient2 = coefficient2 / scale
+            coefficient0 = coefficient0 * scale
         slope = self.prelu.weight.detach().reshape(-1, 1, 1).to(
             device=coefficient1.device, dtype=coefficient1.dtype)
         residual = 1.0 - slope
@@ -263,10 +350,18 @@ class PReLUHerPNActivation(nn.Module):
 class IResNet(_HerPNIResNet):
     """IResNet topology with channel-wise PReLU-aware HerPN students."""
 
-    def __init__(self, *args, prelu_herpn_distill_eps=1e-4, **kwargs):
+    def __init__(self, *args, prelu_herpn_distill_eps=1e-4,
+                 prelu_herpn_layerwise_scale=False,
+                 prelu_herpn_initial_scale=1.0, **kwargs):
         object.__setattr__(
             self, "prelu_herpn_distill_eps",
             float(prelu_herpn_distill_eps))
+        object.__setattr__(
+            self, "layerwise_input_scale_enabled",
+            bool(prelu_herpn_layerwise_scale))
+        object.__setattr__(
+            self, "prelu_herpn_initial_scale",
+            float(prelu_herpn_initial_scale))
         super().__init__(*args, **kwargs)
 
     def _make_activation(self, channels, stage_name):
@@ -277,6 +372,8 @@ class IResNet(_HerPNIResNet):
             distill_eps=self.prelu_herpn_distill_eps,
             stage_index=_STAGE_NAMES.index(stage_name),
             blend=0.0,
+            layerwise_scale=self.layerwise_input_scale_enabled,
+            initial_scale=self.prelu_herpn_initial_scale,
         )
 
     def progressive_activations(self):
@@ -284,6 +381,28 @@ class IResNet(_HerPNIResNet):
             module for module in self.modules()
             if isinstance(module, PReLUHerPNActivation)
         ]
+
+    def named_progressive_activations(self):
+        return [
+            (name, module) for name, module in self.named_modules()
+            if isinstance(module, PReLUHerPNActivation)
+        ]
+
+    def layerwise_poly_activation_names(self):
+        return [name for name, _ in self.named_progressive_activations()]
+
+    def uncalibrated_layerwise_poly_names(self):
+        return [
+            name for name, activation in self.named_progressive_activations()
+            if not activation._scale_is_calibrated
+        ]
+
+    @torch.no_grad()
+    def set_layerwise_poly_input_scale(self, name, scale):
+        activations = dict(self.named_progressive_activations())
+        if name not in activations:
+            raise ValueError(f"Unknown PReLU-HerPN activation: {name}")
+        activations[name].set_input_scale(scale)
 
     def set_herpn_blends(self, blends):
         activations = {
@@ -308,6 +427,56 @@ class IResNet(_HerPNIResNet):
             for name, module in self.named_modules()
             if isinstance(module, PReLUHerPNActivation)
         }
+
+    def herpn_range_penalty(self, activation_names=None):
+        selected = None if activation_names is None else set(activation_names)
+        penalties = [
+            activation.range_penalty()
+            for name, activation in self.named_progressive_activations()
+            if (selected is None or name in selected)
+            and (not self.layerwise_input_scale_enabled
+                 or activation._scale_is_calibrated)
+            and activation.range_penalty() is not None
+        ]
+        if not penalties:
+            return next(self.parameters()).new_zeros(())
+        return torch.stack(penalties).mean()
+
+    def herpn_distillation_loss(self, activation_names=None):
+        selected = None if activation_names is None else set(activation_names)
+        losses = [
+            activation.distillation_loss()
+            for name, activation in self.named_progressive_activations()
+            if (selected is None or name in selected)
+            and (not self.layerwise_input_scale_enabled
+                 or activation._scale_is_calibrated)
+            and activation.distillation_loss() is not None
+        ]
+        if not losses:
+            return next(self.parameters()).new_zeros(())
+        return torch.stack(losses).mean()
+
+    def begin_batchnorm_recalibration_after(self, activation_name, reset=True):
+        """Refresh only BatchNorms downstream of a converted activation."""
+        named_modules = list(self.named_modules())
+        module_names = [name for name, _ in named_modules]
+        if activation_name not in module_names:
+            raise ValueError(
+                f"Unknown activation for downstream BN refresh: {activation_name}")
+        activation_index = module_names.index(activation_name)
+        batchnorm_state = [
+            (module, module.training, module.momentum)
+            for _, module in named_modules[activation_index + 1:]
+            if isinstance(module, nn.modules.batchnorm._BatchNorm)
+        ]
+        state = {"model_training": self.training, "batchnorm": batchnorm_state}
+        self.eval()
+        for module, _, _ in batchnorm_state:
+            if reset:
+                module.reset_running_stats()
+            module.momentum = None
+            module.train()
+        return state
 
     @torch.no_grad()
     def fold_herpn_for_inference(self):

@@ -718,9 +718,10 @@ def recalibrate_herpn_batchnorm(backbone, train_loader, num_batches, global_step
     else:
         state = module.begin_batchnorm_recalibration(reset=True)
     completed = 0
+    device = next(module.parameters()).device
     try:
         for batch in train_loader:
-            img = batch[0]
+            img = batch[0].to(device=device, non_blocking=True)
             # Bypass DDP so broadcast_buffers cannot overwrite independently
             # accumulated ordinary-BN statistics before every forward.
             # SyncBatchNorm collectives still run through the wrapped module.
@@ -1318,8 +1319,27 @@ def main(args):
         cfg.dali,
         cfg.dali_aug,
         cfg.seed,
-        cfg.num_workers
+        cfg.num_workers,
+        range_augmentation=getattr(cfg, "range_augmentation", None),
     )
+    herpn_recalibration_loader = train_loader
+    if (not cfg.dali
+            and (int(getattr(cfg, "herpn_bn_recalibration_batches", 0)) > 0
+                 or int(getattr(
+                     cfg, "precise_relu_bn_recalibration_batches", 0)) > 0)):
+        # DataLoaderX cannot safely abandon a partially consumed iterator: its
+        # background prefetch thread remains blocked on a full queue. HerPN
+        # conversion does this after every group, so use a regular loader whose
+        # iterator and workers are released after each short calibration pass.
+        herpn_recalibration_loader = DataLoader(
+            dataset=train_loader.dataset,
+            batch_size=cfg.batch_size,
+            sampler=train_loader.sampler,
+            num_workers=cfg.num_workers,
+            pin_memory=True,
+            drop_last=True,
+            worker_init_fn=train_loader.worker_init_fn,
+        )
     affine_calibration_loader = train_loader
     if (cfg.network.startswith("poolformer_fully_gated_affine")
             and not cfg.dali):
@@ -1336,7 +1356,8 @@ def main(args):
             worker_init_fn=train_loader.worker_init_fn,
         )
     layerwise_poly_range_loader = train_loader
-    if (cfg.network.endswith("_layerwise_poly") and not cfg.dali):
+    if (hasattr(cfg, "layerwise_poly_range_calibration_batches")
+            and not cfg.dali):
         # Training drops the final incomplete batch. Interval calibration must
         # instead see every representative image; DistributedSampler may pad a
         # few samples across ranks, but none are omitted.
@@ -1349,6 +1370,7 @@ def main(args):
             cfg.seed,
             cfg.num_workers,
             drop_last=False,
+            range_augmentation=getattr(cfg, "range_augmentation", None),
         )
 
     model_kwargs = {
@@ -1373,6 +1395,11 @@ def main(args):
         if cfg.network.endswith("_prelu_herpn"):
             model_kwargs["prelu_herpn_distill_eps"] = float(getattr(
                 cfg, "prelu_herpn_distill_eps", 1e-4))
+            if hasattr(cfg, "prelu_herpn_layerwise_scale"):
+                model_kwargs["prelu_herpn_layerwise_scale"] = bool(
+                    cfg.prelu_herpn_layerwise_scale)
+                model_kwargs["prelu_herpn_initial_scale"] = float(getattr(
+                    cfg, "prelu_herpn_initial_scale", 1.0))
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_herpn_residual_scale")):
         model_kwargs.update(
@@ -2032,8 +2059,10 @@ def main(args):
                 float(getattr(cfg, "precise_relu_input_scale", 8.0)),
                 str(getattr(cfg, "precise_relu_backward_mode", "exact")),
             )
-    layerwise_poly_enabled = hasattr(
-        backbone.module, "layerwise_poly_activation_names")
+    layerwise_poly_enabled = (
+        hasattr(backbone.module, "layerwise_poly_activation_names")
+        and bool(getattr(
+            backbone.module, "layerwise_input_scale_enabled", True)))
     layerwise_poly_range_batches = int(getattr(
         cfg, "layerwise_poly_range_calibration_batches", 0))
     layerwise_poly_range_margin = float(getattr(
@@ -2912,7 +2941,7 @@ def main(args):
                     )
                 recalibrate_herpn_batchnorm(
                     backbone,
-                    train_loader,
+                    herpn_recalibration_loader,
                     precise_relu_bn_recalibration_batches,
                     global_step,
                 )
@@ -2971,7 +3000,8 @@ def main(args):
                         ", ".join(completed_names),
                         herpn_bn_recalibration_batches)
                 recalibrate_herpn_batchnorm(
-                    backbone, train_loader, herpn_bn_recalibration_batches,
+                    backbone, herpn_recalibration_loader,
+                    herpn_bn_recalibration_batches,
                     global_step,
                     after_activation_name=(
                         # A multi-activation group changes every BN downstream
@@ -3043,7 +3073,8 @@ def main(args):
                         "HerPN stage %d/5 completed; recalibrating BatchNorm with %d batches",
                         newly_completed, herpn_bn_recalibration_batches)
                 recalibrate_herpn_batchnorm(
-                    backbone, train_loader, herpn_bn_recalibration_batches, global_step)
+                    backbone, herpn_recalibration_loader,
+                    herpn_bn_recalibration_batches, global_step)
                 if cfg.dali:
                     train_loader.reset()
                 completed_herpn_stages = newly_completed

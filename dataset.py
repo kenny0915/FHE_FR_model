@@ -44,6 +44,26 @@ from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from utils.utils_distributed_sampler import DistributedSampler
 from utils.utils_distributed_sampler import get_dist_info, worker_init_fn
+from utils.utils_range_augmentation import (
+    RangeStressAugmentation,
+    range_augmentation_enabled,
+)
+
+
+def _face_training_transform(range_augmentation=None, to_pil=False):
+    operations = []
+    if to_pil:
+        operations.append(transforms.ToPILImage())
+    operations.extend((
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+    ))
+    if range_augmentation_enabled(range_augmentation):
+        operations.append(RangeStressAugmentation(range_augmentation))
+    operations.append(
+        transforms.Normalize(
+            mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]))
+    return transforms.Compose(operations)
 
 
 def get_dataloader(
@@ -55,6 +75,7 @@ def get_dataloader(
     seed = 2048,
     num_workers = 2,
     drop_last = True,
+    range_augmentation = None,
     ) -> Iterable:
 
     rec = os.path.join(root_dir, 'train.rec')
@@ -68,19 +89,21 @@ def get_dataloader(
 
     # Mxnet RecordIO
     elif os.path.exists(rec) and os.path.exists(idx):
-        train_set = MXFaceDataset(root_dir=root_dir, local_rank=local_rank)
+        train_set = MXFaceDataset(
+            root_dir=root_dir,
+            local_rank=local_rank,
+            range_augmentation=range_augmentation)
 
     # Image Folder
     else:
-        transform = transforms.Compose([
-             transforms.RandomHorizontalFlip(),
-             transforms.ToTensor(),
-             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-             ])
+        transform = _face_training_transform(range_augmentation)
         train_set = ImageFolder(root_dir, transform)
 
     # DALI
     if dali:
+        if range_augmentation_enabled(range_augmentation):
+            raise ValueError(
+                "range_augmentation currently requires config.dali=False")
         return dali_data_iter(
             batch_size=batch_size, rec_file=rec, idx_file=idx,
             num_threads=2, local_rank=local_rank, dali_aug=dali_aug)
@@ -166,14 +189,10 @@ class DataLoaderX(DataLoader):
 
 
 class MXFaceDataset(Dataset):
-    def __init__(self, root_dir, local_rank):
+    def __init__(self, root_dir, local_rank, range_augmentation=None):
         super(MXFaceDataset, self).__init__()
-        self.transform = transforms.Compose(
-            [transforms.ToPILImage(),
-             transforms.RandomHorizontalFlip(),
-             transforms.ToTensor(),
-             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-             ])
+        self.transform = _face_training_transform(
+            range_augmentation, to_pil=True)
         self.root_dir = root_dir
         self.local_rank = local_rank
         path_imgrec = os.path.join(root_dir, 'train.rec')

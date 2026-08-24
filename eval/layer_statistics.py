@@ -286,6 +286,11 @@ def model_kwargs_from_config(cfg):
         if network.endswith("_prelu_herpn"):
             kwargs["prelu_herpn_distill_eps"] = float(getattr(
                 cfg, "prelu_herpn_distill_eps", 1e-4))
+            if hasattr(cfg, "prelu_herpn_layerwise_scale"):
+                kwargs["prelu_herpn_layerwise_scale"] = bool(
+                    cfg.prelu_herpn_layerwise_scale)
+                kwargs["prelu_herpn_initial_scale"] = float(getattr(
+                    cfg, "prelu_herpn_initial_scale", 1.0))
     if network.startswith("r") and network.endswith("_herpn_residual_scale"):
         kwargs.update(
             herpn_range_limit=float(getattr(cfg, "herpn_range_limit", 6.0)),
