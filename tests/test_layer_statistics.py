@@ -1,12 +1,15 @@
 import csv
 import json
 
+import numpy as np
+import pytest
 import torch
 from torch import nn
 
 from eval.layer_statistics import (
     LayerStatisticsRecorder,
     RunningTensorStats,
+    estimate_similarity_transform,
     parameter_rows,
     write_results,
 )
@@ -70,3 +73,31 @@ def test_write_results_creates_csv_and_json(tmp_path):
     assert result["metadata"]["source_images"] == 3
     assert result["statistics"][0]["layer"] == "layer"
     assert result["statistics"][0]["abs_p99"] is None
+
+
+def test_estimate_similarity_transform_recovers_known_mapping():
+    source = np.array([
+        [1.0, 2.0],
+        [4.0, 2.0],
+        [1.0, 5.0],
+        [3.0, 4.0],
+    ], dtype=np.float32)
+    angle = np.deg2rad(25.0)
+    rotation = np.array([
+        [np.cos(angle), -np.sin(angle)],
+        [np.sin(angle), np.cos(angle)],
+    ])
+    destination = (1.7 * (rotation @ source.T)).T + [8.0, -3.0]
+
+    matrix = estimate_similarity_transform(source, destination)
+    homogeneous_source = np.column_stack((source, np.ones(len(source))))
+
+    np.testing.assert_allclose(
+        (matrix @ homogeneous_source.T).T, destination, atol=1e-5)
+
+
+def test_estimate_similarity_transform_rejects_degenerate_points():
+    points = np.ones((5, 2), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="degenerate"):
+        estimate_similarity_transform(points, points)

@@ -19,7 +19,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import torch
-from skimage import transform as trans
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -442,6 +441,43 @@ def load_model(checkpoint_path, config_path, network, embedding_size,
     return model.float().to(device).eval(), network
 
 
+def estimate_similarity_transform(source, destination):
+    """Return a 2-D similarity transform mapping source to destination.
+
+    This is the least-squares Umeyama solution used for face alignment.  It is
+    kept local so the statistics collector does not require scikit-image.
+    """
+    source = np.asarray(source, dtype=np.float64)
+    destination = np.asarray(destination, dtype=np.float64)
+    if source.shape != destination.shape or source.ndim != 2:
+        raise ValueError("source and destination must have the same 2-D shape")
+    if source.shape[0] < 2 or source.shape[1] != 2:
+        raise ValueError("at least two 2-D point pairs are required")
+    if not (np.isfinite(source).all() and np.isfinite(destination).all()):
+        raise ValueError("alignment points must be finite")
+
+    source_mean = source.mean(axis=0)
+    destination_mean = destination.mean(axis=0)
+    source_centered = source - source_mean
+    destination_centered = destination - destination_mean
+    source_variance = np.mean(np.sum(source_centered ** 2, axis=1))
+    if source_variance <= np.finfo(np.float64).eps:
+        raise ValueError("source alignment points are degenerate")
+
+    covariance = destination_centered.T @ source_centered / source.shape[0]
+    left, singular_values, right_transpose = np.linalg.svd(covariance)
+    signs = np.ones(source.shape[1], dtype=np.float64)
+    if np.linalg.det(left) * np.linalg.det(right_transpose) < 0:
+        signs[-1] = -1.0
+    rotation = (left * signs) @ right_transpose
+    scale = float(np.dot(singular_values, signs) / source_variance)
+    translation = destination_mean - scale * rotation @ source_mean
+    matrix = np.column_stack((scale * rotation, translation))
+    if not np.isfinite(matrix).all():
+        raise ValueError("could not estimate a finite alignment transform")
+    return matrix.astype(np.float32)
+
+
 def align_ijb_image(image, landmark, use_flip=False):
     source = np.array([
         [30.2946, 51.6963],
@@ -451,11 +487,9 @@ def align_ijb_image(image, landmark, use_flip=False):
         [62.7299, 92.2041],
     ], dtype=np.float32)
     source[:, 0] += 8.0
-    transform = trans.SimilarityTransform()
-    if not transform.estimate(landmark, source):
-        raise ValueError("Could not estimate face alignment transform")
+    matrix = estimate_similarity_transform(landmark, source)
     aligned = cv2.warpAffine(
-        image, transform.params[:2, :], (112, 112), borderValue=0.0)
+        image, matrix, (112, 112), borderValue=0.0)
     aligned = cv2.cvtColor(aligned, cv2.COLOR_BGR2RGB)
     images = [aligned]
     if use_flip:
