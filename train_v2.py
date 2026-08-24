@@ -943,6 +943,8 @@ def calibrate_layerwise_poly_input_scales(
     module.eval()
     try:
         for img, _ in train_loader:
+            if img.device != device:
+                img = img.to(device=device, non_blocking=True)
             current_is_holdout = (
                 holdout_stride > 0 and completed % holdout_stride == holdout_stride - 1)
             embeddings = module(img)
@@ -1157,6 +1159,8 @@ def verify_layerwise_poly_group_boundary(
     module.eval()
     try:
         for img, _ in train_loader:
+            if img.device != device:
+                img = img.to(device=device, non_blocking=True)
             embeddings = module(img)
             if boundary_module is None:
                 finite = torch.isfinite(embeddings)
