@@ -39,6 +39,18 @@ def get_iresnet_quadratic(depth, pretrained=False, progress=True, **kwargs):
     return factory(pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_iresnet_pillar(depth, pretrained=False, progress=True, **kwargs):
+    from . import iresnet_pillar
+    factory = {
+        18: iresnet_pillar.iresnet18,
+        34: iresnet_pillar.iresnet34,
+        50: iresnet_pillar.iresnet50,
+        100: iresnet_pillar.iresnet100,
+        200: iresnet_pillar.iresnet200,
+    }[depth]
+    return factory(pretrained=pretrained, progress=progress, **kwargs)
+
+
 def get_iresnet_prelu_herpn(depth, pretrained=False, progress=True, **kwargs):
     from . import iresnet_prelu_herpn
     factory = {
@@ -167,6 +179,16 @@ def get_model(name, **kwargs):
         return get_iresnet_quadratic(100, False, **kwargs)
     elif name in ("r200_quadratic",):
         return get_iresnet_quadratic(200, False, **kwargs)
+    elif name in ("r18_pillar",):
+        return get_iresnet_pillar(18, False, **kwargs)
+    elif name in ("r34_pillar",):
+        return get_iresnet_pillar(34, False, **kwargs)
+    elif name in ("r50_pillar",):
+        return get_iresnet_pillar(50, False, **kwargs)
+    elif name in ("r100_pillar",):
+        return get_iresnet_pillar(100, False, **kwargs)
+    elif name in ("r200_pillar",):
+        return get_iresnet_pillar(200, False, **kwargs)
     elif name in ("r18_prelu_herpn",):
         return get_iresnet_prelu_herpn(18, False, **kwargs)
     elif name in ("r34_prelu_herpn",):

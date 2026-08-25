@@ -1,3 +1,5 @@
+import math
+
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim import SGD
 import torch
@@ -40,6 +42,46 @@ class PolynomialLRWarmup(_LRScheduler):
                 )
                 for base_lr in self.base_lrs
             ]
+
+
+class CosineLRWarmup(_LRScheduler):
+    """Per-step cosine annealing with linear warm-up and a minimum LR ratio."""
+
+    def __init__(self, optimizer, warmup_iters, total_iters,
+                 min_lr_ratio=0.01, last_epoch=-1, verbose=False):
+        if warmup_iters < 0:
+            raise ValueError("warmup_iters must be non-negative")
+        if total_iters <= warmup_iters:
+            raise ValueError("total_iters must be greater than warmup_iters")
+        if not 0.0 <= min_lr_ratio <= 1.0:
+            raise ValueError("min_lr_ratio must be in [0, 1]")
+        self.warmup_iters = int(warmup_iters)
+        self.total_iters = int(total_iters)
+        self.min_lr_ratio = float(min_lr_ratio)
+        if verbose:
+            super().__init__(
+                optimizer, last_epoch=last_epoch, verbose=verbose)
+        else:
+            super().__init__(optimizer, last_epoch=last_epoch)
+
+    def _scale(self, step):
+        step = min(max(int(step), 0), self.total_iters)
+        if self.warmup_iters > 0 and step <= self.warmup_iters:
+            return step / self.warmup_iters
+        progress = (
+            (step - self.warmup_iters)
+            / (self.total_iters - self.warmup_iters)
+        )
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return self.min_lr_ratio + (1.0 - self.min_lr_ratio) * cosine
+
+    def get_lr(self):
+        scale = self._scale(self.last_epoch)
+        return [base_lr * scale for base_lr in self.base_lrs]
+
+    def _get_closed_form_lr(self):
+        scale = self._scale(self.last_epoch)
+        return [base_lr * scale for base_lr in self.base_lrs]
 
     
 if __name__ == "__main__":

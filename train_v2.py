@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from backbones import get_model
 from dataset import get_dataloader
 from losses import build_margin_loss
-from lr_scheduler import PolynomialLRWarmup
+from lr_scheduler import CosineLRWarmup, PolynomialLRWarmup
 from partial_fc_v2 import PartialFC_V2
 from torch import distributed
 from torch.utils.data import DataLoader
@@ -32,6 +32,7 @@ from utils.utils_optimizer import (
     split_weight_decay_parameters,
     temporary_optimizer_lr_scale,
 )
+from utils.utils_pillar import pillar_regularization_at_epoch
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
 assert torch.__version__ >= "1.12.0", "In order to enjoy the features of the new torch, \
@@ -1431,6 +1432,17 @@ def main(args):
             quadratic_progress=float(getattr(
                 cfg, "herpn_initial_progress", 0.0)),
         )
+    if cfg.network.startswith("r") and cfg.network.endswith("_pillar"):
+        model_kwargs.update(
+            pillar_approximation_range=float(getattr(
+                cfg, "pillar_approximation_range", 5.0)),
+            pillar_regularization_range=float(getattr(
+                cfg, "pillar_regularization_range", 4.8)),
+            pillar_regularization_exponent=int(getattr(
+                cfg, "pillar_regularization_exponent", 10)),
+            pillar_training_clip=bool(getattr(
+                cfg, "pillar_training_clip", True)),
+        )
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_layerwise_poly")):
         model_kwargs.update(
@@ -1833,19 +1845,30 @@ def main(args):
             "RepBatchNorm transition does not finish before training ends: "
             f"decay_steps={prepbn_decay_steps}, total_steps={cfg.total_step}")
 
-    lr_scheduler_name = getattr(cfg, "lr_scheduler", "polynomial")
-    lr_scheduler_step_per_epoch = cryptoface_patch_training and lr_scheduler_name == "multistep"
+    lr_scheduler_name = str(getattr(cfg, "lr_scheduler", "polynomial"))
+    lr_scheduler_step_per_epoch = lr_scheduler_name == "multistep"
     if lr_scheduler_step_per_epoch:
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(
             opt,
             milestones=list(getattr(cfg, "lr_milestones", [12, 20, 24])),
             gamma=float(getattr(cfg, "lr_gamma", 0.1)),
         )
-    else:
+    elif lr_scheduler_name == "polynomial":
         lr_scheduler = PolynomialLRWarmup(
             optimizer=opt,
             warmup_iters=cfg.warmup_step,
             total_iters=cfg.total_step)
+    elif lr_scheduler_name == "cosine":
+        lr_scheduler = CosineLRWarmup(
+            optimizer=opt,
+            warmup_iters=cfg.warmup_step,
+            total_iters=cfg.total_step,
+            min_lr_ratio=float(getattr(cfg, "min_lr_ratio", 0.01)),
+        )
+    else:
+        raise ValueError(
+            f"Unknown lr_scheduler {lr_scheduler_name!r}; expected "
+            "'polynomial', 'cosine', or 'multistep'")
 
     start_epoch = 0
     global_step = 0
@@ -1978,7 +2001,48 @@ def main(args):
         getattr(cfg, "herpn_bn_recalibration_batches", 0))
     herpn_save_after_group = bool(
         getattr(cfg, "herpn_save_after_group", False))
-    herpn_enabled = hasattr(backbone.module, "set_herpn_progress")
+    pillar_enabled = hasattr(backbone.module, "pillar_range_penalty")
+    # PILLAR reuses the activation-factory iResNet class, whose dormant HerPN
+    # methods are implementation details rather than a conversion curriculum.
+    herpn_enabled = (
+        hasattr(backbone.module, "set_herpn_progress")
+        and not pillar_enabled)
+    pillar_target_coefficient = float(getattr(
+        cfg, "pillar_regularization_coefficient", 0.0))
+    pillar_target_exponent = int(getattr(
+        cfg, "pillar_regularization_exponent", 10))
+    pillar_regularization_warmup = bool(getattr(
+        cfg, "pillar_regularization_warmup", True))
+    pillar_effective_coefficient = pillar_target_coefficient
+    pillar_effective_exponent = pillar_target_exponent
+    if pillar_target_coefficient < 0.0:
+        raise ValueError(
+            "pillar_regularization_coefficient must be non-negative")
+    if pillar_target_exponent < 4 or pillar_target_exponent % 2:
+        raise ValueError(
+            "pillar_regularization_exponent must be an even integer >= 4")
+    if pillar_target_coefficient > 0.0 and not pillar_enabled:
+        raise ValueError(
+            "pillar_regularization_coefficient requires a PILLAR backbone")
+    if pillar_enabled:
+        pillar_effective_coefficient, pillar_effective_exponent = (
+            pillar_regularization_at_epoch(
+                start_epoch,
+                pillar_target_coefficient,
+                pillar_target_exponent,
+                warmup=pillar_regularization_warmup,
+            )
+        )
+        backbone.module.set_pillar_regularization_exponent(
+            pillar_effective_exponent)
+        if rank == 0:
+            logging.info(
+                "PILLAR regularization: target_beta=%g target_gamma=%d "
+                "warmup=%s current_beta=%g current_gamma=%d",
+                pillar_target_coefficient, pillar_target_exponent,
+                pillar_regularization_warmup,
+                pillar_effective_coefficient, pillar_effective_exponent,
+            )
     precise_relu_enabled = hasattr(
         backbone.module, "set_polynomial_progress")
     precise_relu_stage_epochs = tuple(getattr(
@@ -2824,6 +2888,24 @@ def main(args):
 
     for epoch in range(start_epoch, cfg.num_epoch):
 
+        if pillar_enabled:
+            pillar_effective_coefficient, pillar_effective_exponent = (
+                pillar_regularization_at_epoch(
+                    epoch,
+                    pillar_target_coefficient,
+                    pillar_target_exponent,
+                    warmup=pillar_regularization_warmup,
+                )
+            )
+            backbone.module.set_pillar_regularization_exponent(
+                pillar_effective_exponent)
+            if rank == 0:
+                logging.info(
+                    "PILLAR epoch %d: beta=%g gamma=%d",
+                    epoch, pillar_effective_coefficient,
+                    pillar_effective_exponent,
+                )
+
         if isinstance(train_loader, DataLoader):
             train_loader.sampler.set_epoch(epoch)
         if (layerwise_poly_enabled
@@ -3457,6 +3539,7 @@ def main(args):
             simple_gate_distillation_loss = local_embeddings.new_zeros(())
             nf_range_penalty = local_embeddings.new_zeros(())
             precise_relu_range_penalty = local_embeddings.new_zeros(())
+            pillar_range_penalty = local_embeddings.new_zeros(())
             frozen_std_auxiliary_loss = local_embeddings.new_zeros(())
             if embedding_teacher is not None:
                 loss = loss + (
@@ -3508,6 +3591,16 @@ def main(args):
                 loss = loss + (
                     precise_relu_range_loss_weight
                     * precise_relu_range_penalty)
+            if pillar_enabled and pillar_effective_coefficient > 0.0:
+                pillar_range_penalty = (
+                    backbone.module.pillar_range_penalty())
+                if not torch.isfinite(pillar_range_penalty):
+                    raise FloatingPointError(
+                        "Non-finite PILLAR range penalty at "
+                        f"global_step={global_step}")
+                loss = loss + (
+                    pillar_effective_coefficient
+                    * pillar_range_penalty)
             if herpn_enabled and herpn_distill_loss_weight > 0:
                 distillation_names = (
                     active_layerwise_group
@@ -3776,6 +3869,8 @@ def main(args):
                         'Loss/NF Range Penalty': nf_range_penalty.item(),
                         'Loss/PreciseReLU Range Penalty': (
                             precise_relu_range_penalty.item()),
+                        'Loss/PILLAR Range Penalty': (
+                            pillar_range_penalty.item()),
                         'Loss/Embedding Distillation': (
                             embedding_distillation_loss.item()),
                         'Loss/Frozen Std Auxiliary': (
@@ -3793,6 +3888,8 @@ def main(args):
                         'Process/PreciseReLU Progress': (
                             float(backbone.module.polynomial_progress.item())
                             if precise_relu_enabled else 0.0),
+                        'Process/PILLAR Beta': pillar_effective_coefficient,
+                        'Process/PILLAR Gamma': pillar_effective_exponent,
                         'Process/Step': global_step,
                         'Process/Epoch': epoch
                     })
@@ -3806,11 +3903,38 @@ def main(args):
                         'Loss/PreciseReLU Range Penalty',
                         precise_relu_range_penalty.item(), global_step)
                     summary_writer.add_scalar(
+                        'Loss/PILLAR Range Penalty',
+                        pillar_range_penalty.item(), global_step)
+                    summary_writer.add_scalar(
                         'Loss/Embedding Distillation',
                         embedding_distillation_loss.item(), global_step)
                     summary_writer.add_scalar(
                         'Loss/Frozen Std Auxiliary',
                         frozen_std_auxiliary_loss.item(), global_step)
+
+                if (summary_writer is not None and pillar_enabled and
+                        global_step % cfg.frequent == 0):
+                    pillar_summary = backbone.module.pillar_range_summary()
+                    summary_writer.add_scalar(
+                        'PILLAR/Input Abs Max',
+                        float(pillar_summary['input_absmax'].item()),
+                        global_step)
+                    summary_writer.add_scalar(
+                        'PILLAR/Approximation Outside Fraction',
+                        float(pillar_summary[
+                            'approximation_outside_fraction'].item()),
+                        global_step)
+                    summary_writer.add_scalar(
+                        'PILLAR/Regularization Outside Fraction',
+                        float(pillar_summary[
+                            'regularization_outside_fraction'].item()),
+                        global_step)
+                    summary_writer.add_scalar(
+                        'Process/PILLAR Beta',
+                        pillar_effective_coefficient, global_step)
+                    summary_writer.add_scalar(
+                        'Process/PILLAR Gamma',
+                        pillar_effective_exponent, global_step)
 
                 if (summary_writer is not None and herpn_enabled and
                         global_step % cfg.frequent == 0):
