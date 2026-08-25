@@ -305,6 +305,45 @@ def test_layerwise_scaled_r50_config_schedules_forward_order_and_augmentation():
     assert cfg.output.endswith("layerwise_scale_range_aug_one_epoch")
 
 
+def test_layerwise_scaled_r50_group4_recovery_conditions_layer2_before_blend():
+    cfg = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_prelu_herpn_layerwise_scale_recover_group4.py")
+
+    assert not cfg.resume
+    assert cfg.backbone_init.endswith(
+        "model_herpn_group_04_bnrecalibrated.pt")
+    assert cfg.output.endswith("range_aug_recover_group4")
+    assert cfg.backbone_init_herpn_progress == pytest.approx(2.0)
+
+    assert cfg.layerwise_poly_initial_calibration_provisional
+    assert cfg.layerwise_poly_staged_training
+    assert not cfg.layerwise_poly_freeze_backbone_during_local_fit
+    assert cfg.layerwise_poly_allow_provisional_tail_conditioning
+    assert cfg.layerwise_poly_conditioning_backbone_lr_scale == pytest.approx(
+        0.01)
+    assert cfg.layerwise_poly_conditioning_range_loss_weight == pytest.approx(
+        1.0)
+    assert cfg.layerwise_poly_strict_recalibrate_before_blend
+    assert cfg.layerwise_poly_strict_tail_scale_floor
+    assert cfg.layerwise_poly_tail_scale_floor_margin == pytest.approx(1.1)
+    assert cfg.layerwise_poly_max_tail_scale_expansion == pytest.approx(2.0)
+
+    starts = cfg.herpn_group_epochs
+    transition = cfg.herpn_transition_epochs
+    assert len(starts) == len(cfg.herpn_conversion_groups) == 25
+    assert all(start + transition <= 0.0 for start in starts[:4])
+    assert starts[4] == pytest.approx(1.0)
+    assert starts[5] == pytest.approx(2.5)
+    assert cfg.herpn_conversion_groups[4] == (("layer2.0.prelu",))
+    assert all(
+        right >= left + transition
+        for left, right in zip(starts, starts[1:]))
+    final_conversion_epoch = starts[-1] + transition
+    assert final_conversion_epoch == pytest.approx(22.0)
+    assert cfg.num_epoch - final_conversion_epoch == pytest.approx(4.0)
+
+
 def test_selective_weight_decay_protects_herpn_norm_and_bias():
     class TinyModel(nn.Module):
         def __init__(self):
