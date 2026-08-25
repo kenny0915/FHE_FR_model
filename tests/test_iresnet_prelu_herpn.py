@@ -147,6 +147,35 @@ def test_layerwise_scaled_prelu_herpn_folds_exactly():
         folded(inputs), activation(inputs), rtol=1e-5, atol=1e-5)
 
 
+def test_prelu_herpn_polynomial_parameter_selection_is_group_local():
+    model = get_model(
+        "r18_prelu_herpn",
+        dropout=0,
+        fp16=False,
+        herpn_progress=0.0,
+        prelu_herpn_layerwise_scale=True,
+    )
+    activations = dict(model.named_progressive_activations())
+    names = model.layerwise_poly_activation_names()
+
+    selected = model.layerwise_poly_parameters(names[:2])
+    expected = [
+        parameter
+        for name in names[:2]
+        for parameter in (
+            activations[name].herpn.weight,
+            activations[name].herpn.bias,
+        )
+    ]
+
+    assert {id(parameter) for parameter in selected} == {
+        id(parameter) for parameter in expected}
+    assert len(selected) == 4
+    assert len(model.layerwise_poly_parameters()) == 2 * len(names)
+    with pytest.raises(ValueError, match="Unknown PReLU-HerPN activations"):
+        model.layerwise_poly_parameters(("missing.prelu",))
+
+
 def test_scaled_checkpoint_restores_scaling_without_constructor_flag():
     source = PReLUHerPNActivation(
         channels=2, blend=0.0, layerwise_scale=True).eval()

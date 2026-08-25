@@ -391,6 +391,34 @@ class IResNet(_HerPNIResNet):
     def layerwise_poly_activation_names(self):
         return [name for name, _ in self.named_progressive_activations()]
 
+    def layerwise_poly_parameters(self, activation_names=None):
+        """Return trainable HerPN coefficients for selected activations.
+
+        Staged range conditioning keeps ordinary backbone gradients while
+        suppressing polynomial updates outside the pending group.  The frozen
+        PReLU slopes are teachers, and the internal Hermite BatchNorms are
+        non-affine, so only the HerPN output weight and bias belong here.
+        """
+        selected = (
+            None if activation_names is None else set(activation_names)
+        )
+        named_activations = self.named_progressive_activations()
+        known = {name for name, _ in named_activations}
+        if selected is not None:
+            unknown = sorted(selected.difference(known))
+            if unknown:
+                raise ValueError(
+                    f"Unknown PReLU-HerPN activations: {unknown}")
+
+        parameters = []
+        for name, activation in named_activations:
+            if selected is None or name in selected:
+                parameters.extend((
+                    activation.herpn.weight,
+                    activation.herpn.bias,
+                ))
+        return parameters
+
     def uncalibrated_layerwise_poly_names(self):
         return [
             name for name, activation in self.named_progressive_activations()
