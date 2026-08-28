@@ -1293,7 +1293,7 @@ def main(args):
 
     summary_writer = (
         SummaryWriter(log_dir=os.path.join(cfg.output, "tensorboard"))
-        if rank == 0
+        if rank == 0 and getattr(cfg, "tensorboard", True)
         else None
     )
     
