@@ -16,7 +16,9 @@ cd /work/u8798807/FHE_FR_model
 
 checkpoint="${1:-work_dirs/ms1mv3_r50_nl13_prelu_herpn/model.pt}"
 tag="${2:-latest}"
-result_dir="work_dirs/ms1mv3_r50_nl13_prelu_herpn/ijbc_${tag}"
+output_root="${3:-work_dirs/ms1mv3_r50_nl13_prelu_herpn}"
+network="${4:-r50_nl13_prelu_herpn}"
+result_dir="${output_root}/ijbc_${tag}"
 
 export CUDA_VISIBLE_DEVICES=0
 export OMP_NUM_THREADS=12
@@ -28,5 +30,5 @@ export OMP_NUM_THREADS=12
     --batch-size 128 \
     --job "nl13_herpn_${tag}" \
     --target IJBC \
-    --network r50_nl13_prelu_herpn \
+    --network "${network}" \
     --fail-on-nonfinite
