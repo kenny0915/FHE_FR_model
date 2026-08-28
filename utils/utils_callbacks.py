@@ -40,8 +40,12 @@ class CallBackVerification(object):
             logging.info('[%s][%d]XNorm: %f' % (self.ver_name_list[i], global_step, xnorm))
             logging.info('[%s][%d]Accuracy-Flip: %1.5f+-%1.5f' % (self.ver_name_list[i], global_step, acc2, std2))
 
-            self.summary_writer: SummaryWriter
-            self.summary_writer.add_scalar(tag=self.ver_name_list[i], scalar_value=acc2, global_step=global_step, )
+            if self.summary_writer is not None:
+                self.summary_writer.add_scalar(
+                    tag=self.ver_name_list[i],
+                    scalar_value=acc2,
+                    global_step=global_step,
+                )
             if self.wandb_logger:
                 import wandb
                 self.wandb_logger.log({
