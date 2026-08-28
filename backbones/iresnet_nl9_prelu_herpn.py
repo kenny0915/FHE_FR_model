@@ -62,6 +62,8 @@ class IResNet(_ReducedIResNet):
     def __init__(self, *args, arch_config=None, activation_mask=None,
                  herpn_range_limit=6.0, herpn_bn_eps=1e-4,
                  herpn_progress=0.0, prelu_herpn_distill_eps=1e-4,
+                 prelu_herpn_layerwise_scale=False,
+                 prelu_herpn_initial_scale=1.0,
                  **kwargs):
         if arch_config is None:
             arch_config = self.arch_config_name
@@ -90,6 +92,10 @@ class IResNet(_ReducedIResNet):
         self.herpn_range_limit = float(herpn_range_limit)
         self.herpn_bn_eps = float(herpn_bn_eps)
         self.prelu_herpn_distill_eps = float(prelu_herpn_distill_eps)
+        self.layerwise_input_scale_enabled = bool(
+            prelu_herpn_layerwise_scale)
+        self.prelu_herpn_initial_scale = float(
+            prelu_herpn_initial_scale)
         self.register_buffer(
             "herpn_progress",
             torch.tensor(float(herpn_progress), dtype=torch.float32),
@@ -124,6 +130,8 @@ class IResNet(_ReducedIResNet):
                 distill_eps=self.prelu_herpn_distill_eps,
                 stage_index=_STAGE_INDEX[stage_name],
                 blend=0.0,
+                layerwise_scale=self.layerwise_input_scale_enabled,
+                initial_scale=self.prelu_herpn_initial_scale,
             )
             with torch.no_grad():
                 replacement.prelu.weight.copy_(original.weight)
@@ -140,6 +148,43 @@ class IResNet(_ReducedIResNet):
             (name, module) for name, module in self.named_modules()
             if isinstance(module, PReLUHerPNActivation)
         ]
+
+    def layerwise_poly_activation_names(self):
+        return [name for name, _ in self.named_progressive_activations()]
+
+    def layerwise_poly_parameters(self, activation_names=None):
+        selected = None if activation_names is None else set(activation_names)
+        named = self.named_progressive_activations()
+        known = {name for name, _ in named}
+        if selected is not None:
+            unknown = sorted(selected.difference(known))
+            if unknown:
+                raise ValueError(
+                    "Unknown {} PReLU-HerPN activations: {}".format(
+                        self.arch_config_name.upper(), unknown))
+        parameters = []
+        for name, activation in named:
+            if selected is None or name in selected:
+                parameters.extend((
+                    activation.herpn.weight,
+                    activation.herpn.bias,
+                ))
+        return parameters
+
+    def uncalibrated_layerwise_poly_names(self):
+        return [
+            name for name, activation in self.named_progressive_activations()
+            if not activation._scale_is_calibrated
+        ]
+
+    @torch.no_grad()
+    def set_layerwise_poly_input_scale(self, name, scale):
+        activations = dict(self.named_progressive_activations())
+        if name not in activations:
+            raise ValueError(
+                "Unknown {} PReLU-HerPN activation: {}".format(
+                    self.arch_config_name.upper(), name))
+        activations[name].set_input_scale(scale)
 
     def set_herpn_progress(self, progress):
         """Set coarse five-stage progress; singleton schedules use blends."""

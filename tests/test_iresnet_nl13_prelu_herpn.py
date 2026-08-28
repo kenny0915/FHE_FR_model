@@ -104,6 +104,43 @@ def test_nl13_prelu_herpn_folds_to_thirteen_quadratics():
                    for module in model.modules())
 
 
+def test_scaled_nl13_requires_and_uses_public_intervals():
+    model = _model(
+        herpn_progress=0.0,
+        prelu_herpn_layerwise_scale=True,
+        prelu_herpn_initial_scale=1.0,
+    )
+    assert model.layerwise_poly_activation_names() == list(
+        NL13_ACTIVATION_NAMES)
+    assert model.uncalibrated_layerwise_poly_names() == list(
+        NL13_ACTIVATION_NAMES)
+
+    first = NL13_ACTIVATION_NAMES[0]
+    model.set_layerwise_poly_input_scale(first, 7.5)
+    assert model.uncalibrated_layerwise_poly_names() == list(
+        NL13_ACTIVATION_NAMES[1:])
+    model.set_herpn_blends({first: 1.0})
+    activation = dict(model.named_progressive_activations())[first]
+    assert activation._blend == 1.0
+    assert float(activation.input_scale) == 7.5
+
+
+def test_scaled_nl13_config_is_causal_and_finishes_conversion():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_nl13_prelu_herpn_scaled.py")
+    flattened = tuple(
+        name for group in cfg.herpn_conversion_groups for name in group)
+
+    assert cfg.prelu_herpn_layerwise_scale is True
+    assert cfg.layerwise_poly_causal_strict_calibration is True
+    assert cfg.layerwise_poly_strict_recalibrate_before_blend is True
+    assert flattened == NL13_ACTIVATION_NAMES
+    assert all(len(group) == 1 for group in cfg.herpn_conversion_groups)
+    assert cfg.herpn_group_epochs[0] == 0.5
+    assert (cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs
+            < cfg.num_epoch)
+
+
 def test_nl13_prelu_herpn_rejects_wrong_architecture():
     with pytest.raises(ValueError, match="requires arch_config='nl13'"):
         get_model(
