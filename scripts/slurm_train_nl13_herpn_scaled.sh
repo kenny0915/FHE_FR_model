@@ -17,7 +17,9 @@ mkdir -p work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled
 export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export OMP_NUM_THREADS=4
 
+config="${1:-configs/ms1mv3_r50_nl13_prelu_herpn_scaled}"
+
 /home/u8798807/.conda/envs/face_recog/bin/torchrun \
     --standalone \
     --nproc_per_node=8 \
-    train_v2.py configs/ms1mv3_r50_nl13_prelu_herpn_scaled
+    train_v2.py "${config}"
