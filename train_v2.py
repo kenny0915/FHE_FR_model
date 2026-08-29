@@ -1545,15 +1545,24 @@ def main(args):
     backbone_init = getattr(cfg, "backbone_init", "")
     if backbone_init and not cfg.resume:
         init_checkpoint = torch.load(backbone_init, map_location="cpu")
-        if "state_dict_backbone" in init_checkpoint:
-            init_checkpoint = init_checkpoint["state_dict_backbone"]
+        init_metadata = (
+            init_checkpoint if isinstance(init_checkpoint, dict) else {})
+        init_state = init_metadata.get(
+            "state_dict_backbone", init_checkpoint)
         init_loader = getattr(
             backbone, "load_backbone_init_state_dict", None)
         if init_loader is None:
-            backbone.load_state_dict(init_checkpoint, strict=True)
+            backbone.load_state_dict(init_state, strict=True)
         else:
-            init_loader(init_checkpoint)
-        if hasattr(backbone, "set_herpn_progress"):
+            init_loader(init_state)
+        serialized_herpn_blends = init_metadata.get("herpn_blends")
+        if (isinstance(serialized_herpn_blends, dict)
+                and hasattr(backbone, "set_herpn_blends")):
+            backbone.set_herpn_blends(serialized_herpn_blends)
+            logging.info(
+                "Restored %d exact HerPN blends from backbone snapshot",
+                len(serialized_herpn_blends))
+        elif hasattr(backbone, "set_herpn_progress"):
             backbone.set_herpn_progress(
                 float(getattr(
                     cfg, "backbone_init_herpn_progress",
@@ -1562,7 +1571,7 @@ def main(args):
             backbone.set_polynomial_progress(float(getattr(
                 cfg, "precise_relu_initial_progress", 0.0)))
         logging.info("Initialized backbone from %s", backbone_init)
-        del init_checkpoint
+        del init_checkpoint, init_metadata, init_state
     layerwise_poly_scale_file = getattr(
         cfg, "layerwise_poly_scale_file", "")
     if layerwise_poly_scale_file and not cfg.resume:
