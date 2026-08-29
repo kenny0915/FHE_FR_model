@@ -209,20 +209,40 @@ class IResNet(_ReducedIResNet):
         ) / len(activations)
         self.herpn_progress.fill_(5.0 * converted_fraction)
 
-    def herpn_range_penalty(self):
+    def _selected_progressive_activations(self, activation_names=None):
+        named = self.named_progressive_activations()
+        if activation_names is None:
+            return named
+        selected = set(activation_names)
+        known = {name for name, _ in named}
+        unknown = sorted(selected.difference(known))
+        if unknown:
+            raise ValueError(
+                "Unknown {} PReLU-HerPN activations: {}".format(
+                    self.arch_config_name.upper(), unknown))
+        return [(name, activation) for name, activation in named
+                if name in selected]
+
+    def herpn_range_penalty(self, activation_names=None):
         penalties = [
             activation.range_penalty()
-            for activation in self.progressive_activations()
+            for _, activation in self._selected_progressive_activations(
+                activation_names)
+            if (not self.layerwise_input_scale_enabled
+                or activation._scale_is_calibrated)
             if activation.range_penalty() is not None
         ]
         if not penalties:
             return next(self.parameters()).new_zeros(())
         return torch.stack(penalties).mean()
 
-    def herpn_distillation_loss(self):
+    def herpn_distillation_loss(self, activation_names=None):
         losses = [
             activation.distillation_loss()
-            for activation in self.progressive_activations()
+            for _, activation in self._selected_progressive_activations(
+                activation_names)
+            if (not self.layerwise_input_scale_enabled
+                or activation._scale_is_calibrated)
             if activation.distillation_loss() is not None
         ]
         if not losses:

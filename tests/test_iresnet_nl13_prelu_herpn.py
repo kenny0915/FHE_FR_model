@@ -125,6 +125,29 @@ def test_scaled_nl13_requires_and_uses_public_intervals():
     assert float(activation.input_scale) == 7.5
 
 
+def test_scaled_nl13_losses_can_target_one_conditioning_activation():
+    model = _model(
+        herpn_progress=0.0,
+        prelu_herpn_layerwise_scale=True,
+    )
+    activations = dict(model.named_progressive_activations())
+    first, second = NL13_ACTIVATION_NAMES[:2]
+    model.set_layerwise_poly_input_scale(first, 2.0)
+    model.set_layerwise_poly_input_scale(second, 3.0)
+    activations[first]._last_range_penalty = torch.tensor(2.0)
+    activations[second]._last_range_penalty = torch.tensor(6.0)
+    activations[first]._last_distillation_loss = torch.tensor(3.0)
+    activations[second]._last_distillation_loss = torch.tensor(9.0)
+
+    torch.testing.assert_close(model.herpn_range_penalty(), torch.tensor(4.0))
+    torch.testing.assert_close(
+        model.herpn_range_penalty((second,)), torch.tensor(6.0))
+    torch.testing.assert_close(
+        model.herpn_distillation_loss((first,)), torch.tensor(3.0))
+    with pytest.raises(ValueError, match="Unknown NL13"):
+        model.herpn_range_penalty(("missing.activation",))
+
+
 def test_scaled_nl13_config_is_causal_and_finishes_conversion():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_nl13_prelu_herpn_scaled.py")
