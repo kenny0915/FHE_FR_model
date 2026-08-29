@@ -33,6 +33,6 @@ config.herpn_group_epochs = (
     -1.5,
     -0.5,
     1.0,
-    *tuple(index + 2.5 for index in range(9)),
+    *tuple(3.0 + 1.5 * index for index in range(9)),
 )
-config.num_epoch = 16
+config.num_epoch = 20
