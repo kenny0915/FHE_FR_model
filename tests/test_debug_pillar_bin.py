@@ -1,6 +1,10 @@
 import torch
 
-from eval.debug_pillar_bin import first_nonfinite_activation, tensor_summary
+from eval.debug_pillar_bin import (
+    compact_activation_trace,
+    first_nonfinite_activation,
+    tensor_summary,
+)
 
 
 def test_tensor_summary_and_first_nonfinite_activation():
@@ -17,3 +21,17 @@ def test_tensor_summary_and_first_nonfinite_activation():
         {"output": {"finite": 0, "numel": 4}},
     ]
     assert first_nonfinite_activation(trace) == 1
+
+
+def test_compact_activation_trace():
+    trace = [{
+        "name": "layer1.0.prelu",
+        "input": {"finite_absmax": 6.0},
+        "output": {"finite_absmax": 8.0, "finite": 3, "numel": 4},
+    }]
+    assert compact_activation_trace(trace) == [{
+        "name": "layer1.0.prelu",
+        "input_absmax": 6.0,
+        "output_absmax": 8.0,
+        "output_nonfinite": 1,
+    }]

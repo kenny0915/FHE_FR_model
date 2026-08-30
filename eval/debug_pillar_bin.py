@@ -40,6 +40,20 @@ def first_nonfinite_activation(trace):
     return None
 
 
+def compact_activation_trace(trace):
+    """Keep the range cascade readable while retaining every PILLAR site."""
+    return [
+        {
+            "name": item["name"],
+            "input_absmax": item["input"]["finite_absmax"],
+            "output_absmax": item["output"]["finite_absmax"],
+            "output_nonfinite": (
+                item["output"]["numel"] - item["output"]["finite"]),
+        }
+        for item in trace
+    ]
+
+
 class PILLARTrace:
     def __init__(self, model):
         self.trace = []
@@ -126,6 +140,7 @@ def debug_rows(model, data, flip, start, end, batch_size, max_bad_rows):
             "previous_activation": (
                 trace.trace[first - 1]
                 if first is not None and first > 0 else None),
+            "activation_trace": compact_activation_trace(trace.trace),
         }
         print(json.dumps(result, sort_keys=True))
     return bad_rows
