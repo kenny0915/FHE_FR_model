@@ -208,3 +208,29 @@ def test_fast_nl13_config_groups_shallow_activations_and_finishes_early():
     assert final_conversion_epoch == 16
     assert cfg.num_epoch - final_conversion_epoch == 4
     assert cfg.num_epoch < 34
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    (
+        ("configs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer41.py",
+         "layer4.1.prelu"),
+        ("configs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42.py",
+         "layer4.2.prelu"),
+    ),
+)
+def test_selective_seventh_nl13_config_preserves_safe_prefix(path, target):
+    cfg = _load_standalone_config(path)
+    order = tuple(
+        name for group in cfg.herpn_conversion_groups for name in group)
+
+    assert order[:6] == NL13_ACTIVATION_NAMES[:6]
+    assert order[6] == target
+    assert set(order) == set(NL13_ACTIVATION_NAMES)
+    assert len(order) == len(set(order)) == 13
+    assert cfg.layerwise_poly_allow_selective_order
+    assert cfg.layerwise_poly_training_group_limit == 7
+    assert cfg.herpn_group_epochs[6] == pytest.approx(1.0)
+    assert cfg.herpn_group_epochs[7] == pytest.approx(100.0)
+    assert not cfg.herpn_require_full_conversion
+    assert cfg.num_epoch == 8

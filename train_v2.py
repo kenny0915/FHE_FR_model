@@ -2317,6 +2317,8 @@ def main(args):
         cfg, "layerwise_poly_blend_backbone_lr_scale", 1.0))
     layerwise_poly_final_backbone_lr_scale = float(getattr(
         cfg, "layerwise_poly_final_backbone_lr_scale", 1.0))
+    layerwise_poly_allow_selective_order = bool(getattr(
+        cfg, "layerwise_poly_allow_selective_order", False))
     if min(
             layerwise_poly_blend_backbone_lr_scale,
             layerwise_poly_final_backbone_lr_scale) <= 0.0:
@@ -2402,7 +2404,8 @@ def main(args):
             backbone.module.layerwise_poly_activation_names())
         configured_order = tuple(
             name for group in herpn_conversion_groups for name in group)
-        if configured_order != expected_order:
+        if (configured_order != expected_order
+                and not layerwise_poly_allow_selective_order):
             raise ValueError(
                 "Layerwise polynomial activations must convert in forward order; "
                 f"configured={configured_order}, expected={expected_order}")
@@ -2441,6 +2444,19 @@ def main(args):
                 and int(getattr(cfg, "gradient_acc", 1)) != 1):
             raise ValueError(
                 "Mid-epoch layerwise calibration requires gradient_acc=1")
+    layerwise_poly_training_group_limit = int(getattr(
+        cfg, "layerwise_poly_training_group_limit",
+        len(herpn_conversion_groups)))
+    if (herpn_group_schedule
+            and not 1 <= layerwise_poly_training_group_limit <= len(
+                herpn_conversion_groups)):
+        raise ValueError(
+            "layerwise_poly_training_group_limit must select between one "
+            "and all configured conversion groups")
+    layerwise_poly_training_groups = herpn_conversion_groups[
+        :layerwise_poly_training_group_limit]
+    layerwise_poly_training_group_epochs = herpn_group_epochs[
+        :layerwise_poly_training_group_limit]
     if herpn_group_schedule and cfg.resume:
         completed_herpn_groups = (
             int(resumed_completed_herpn_groups)
@@ -2976,14 +2992,15 @@ def main(args):
         if not pending:
             return []
         target_names = None
-        for group in herpn_conversion_groups:
+        for group in layerwise_poly_training_groups:
             uncalibrated = tuple(name for name in group if name in pending)
             if uncalibrated:
                 target_names = uncalibrated
                 break
         if not target_names:
-            raise RuntimeError(
-                f"Unscheduled layerwise polynomial activations: {sorted(pending)}")
+            # A selective run may intentionally leave activations beyond its
+            # requested conversion frontier as PReLUs.
+            return []
         return calibrate_layerwise_poly_group(
             target_names, provisional=provisional)
 
@@ -3305,7 +3322,8 @@ def main(args):
                     distributed.barrier()
                 completed_herpn_groups = newly_completed
                 if (layerwise_poly_enabled
-                        and newly_completed < len(herpn_conversion_groups)):
+                        and newly_completed
+                        < layerwise_poly_training_group_limit):
                     # Tail-only violations are accepted provisionally while
                     # blend remains zero. The local-fit gap then uses the range
                     # loss to condition upstream convolution/BN weights before
@@ -3330,10 +3348,11 @@ def main(args):
                 completed_herpn_stages = newly_completed
         if layerwise_poly_staged_training and rank == 0:
             phase, active_group_index = layerwise_poly_group_phase_at_epoch(
-                epoch, herpn_conversion_groups, herpn_group_epochs,
+                epoch, layerwise_poly_training_groups,
+                layerwise_poly_training_group_epochs,
                 herpn_transition_epochs)
             active_names = (
-                herpn_conversion_groups[active_group_index]
+                layerwise_poly_training_groups[active_group_index]
                 if active_group_index is not None else ())
             logging.info(
                 "Layerwise polynomial phase=%s active_group=%s "
@@ -3485,14 +3504,14 @@ def main(args):
                     phase, active_group_index = (
                         layerwise_poly_group_phase_at_epoch(
                             fractional_epoch,
-                            herpn_conversion_groups,
-                            herpn_group_epochs,
+                            layerwise_poly_training_groups,
+                            layerwise_poly_training_group_epochs,
                             herpn_transition_epochs,
                         )
                     )
                     layerwise_training_phase = phase
                     if active_group_index is not None:
-                        active_layerwise_group = herpn_conversion_groups[
+                        active_layerwise_group = layerwise_poly_training_groups[
                             active_group_index]
                     if phase == "blend":
                         effective_layerwise_backbone_lr_scale = (
