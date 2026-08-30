@@ -328,6 +328,28 @@ def end_batchnorm_recalibration(module: torch.nn.Module, state):
         submodule.train(was_training)
 
 
+def freeze_batchnorm_for_training(module: torch.nn.Module, *, affine=False):
+    """Keep checkpoint BatchNorm statistics fixed during optimization.
+
+    Calling ``Module.train()`` recursively re-enables every BatchNorm layer,
+    including after verification callbacks.  This helper is therefore safe to
+    call before each training forward.  It changes only module mode unless
+    ``affine`` is requested, in which case gamma and beta are frozen too.
+    """
+    count = 0
+    for submodule in module.modules():
+        if not isinstance(submodule, nn.modules.batchnorm._BatchNorm):
+            continue
+        submodule.eval()
+        if affine:
+            if submodule.weight is not None:
+                submodule.weight.requires_grad_(False)
+            if submodule.bias is not None:
+                submodule.bias.requires_grad_(False)
+        count += 1
+    return count
+
+
 def snapshot_batchnorm_running_stats(module: torch.nn.Module):
     """Copy mutable BN buffers so a rejected forward can be rolled back."""
     snapshots = []
@@ -1651,6 +1673,23 @@ def main(args):
     if getattr(cfg, "sync_bn", False):
         backbone = torch.nn.SyncBatchNorm.convert_sync_batchnorm(backbone)
 
+    freeze_batchnorm_running_stats = bool(getattr(
+        cfg, "freeze_batchnorm_running_stats", False))
+    freeze_batchnorm_affine = bool(getattr(
+        cfg, "freeze_batchnorm_affine", False))
+    if freeze_batchnorm_affine and not freeze_batchnorm_running_stats:
+        raise ValueError(
+            "freeze_batchnorm_affine requires "
+            "freeze_batchnorm_running_stats")
+    if freeze_batchnorm_running_stats:
+        frozen_batchnorm_count = freeze_batchnorm_for_training(
+            backbone, affine=freeze_batchnorm_affine)
+        logging.info(
+            "Freezing running statistics for %d BatchNorm modules%s",
+            frozen_batchnorm_count,
+            " and their affine parameters" if freeze_batchnorm_affine else "",
+        )
+
     backbone = torch.nn.parallel.DistributedDataParallel(
         module=backbone,
         broadcast_buffers=bool(getattr(cfg, "broadcast_buffers", True)),
@@ -1660,6 +1699,9 @@ def main(args):
         backbone.register_comm_hook(None, fp16_compress_hook)
 
     backbone.train()
+    if freeze_batchnorm_running_stats:
+        freeze_batchnorm_for_training(
+            backbone.module, affine=freeze_batchnorm_affine)
     # FIXME using gradient checkpoint if there are some unused parameters will cause error
     simple_gate_current_group_auxiliary = bool(getattr(
         cfg, "simple_gate_current_group_auxiliary", False))
@@ -3490,6 +3532,11 @@ def main(args):
             batchnorm_snapshot = (
                 snapshot_batchnorm_running_stats(backbone.module)
                 if max_nonfinite_embedding_skips > 0 else None)
+            if freeze_batchnorm_running_stats:
+                # Verification restores the whole backbone to train mode.
+                # Reassert the frozen-stat policy before every forward.
+                freeze_batchnorm_for_training(
+                    backbone.module, affine=freeze_batchnorm_affine)
             backbone_output = backbone(img)
             if cryptoface_patch_training:
                 local_embeddings, patch_pred, patch_target = backbone_output

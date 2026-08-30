@@ -193,5 +193,35 @@ the next branch keeps 24 sites at scale 4 and widens only
 single change into a frozen checkpoint invalidates BatchNorm statistics, so
 Slurm `316640` co-trains it from the scale-4 epoch-9 optimizer state.
 
-Final finite counts, TAR values, and accepted checkpoint will be added after
-these jobs complete.
+That targeted branch retained useful verification accuracy at step `27500`
+(99.45% LFW, 93.24% CFP-FP, and 94.48% AgeDB-30), but did not reduce the
+failure plateau: the respective non-finite counts were `0/50/76`. A trace
+after adaptation showed why a local interval patch does not compose cleanly.
+The same CFP-FP row now reached `39.10` at the widened `layer1.0.prelu` and
+`75` at the following activation; changing one polynomial shifts the
+distribution and BatchNorm statistics seen by the next site.
+
+## Exact training/inference graph control
+
+Slurm `316682` disabled PILLAR's training-only activation clipping while
+retaining the range loss and gradient cap. It therefore trained the exact
+uniform-scale-4 quartic inference graph from the scale-4 epoch-10 state. The
+first batches exposed inputs up to `45.23` and a pre-clip gradient norm over
+`9000`, but the range objective reduced ordinary batch maxima to roughly
+`23--27` and training stayed finite for about 2,200 updates.
+
+This did not solve the rare-tail problem. At step `27500`, the exact graph
+abruptly produced `23,420/27,039/21,495` non-finite augmented rows on
+LFW/CFP-FP/AgeDB-30 and all three accuracies fell to approximately 50%.
+Training-batch activation absmax at the same step was only `25.53`, with
+`4.75e-8` of values outside the nominal `[-20,20]` interval. The job was
+stopped and its checkpoint retained.
+
+Taken together, these controls show why the published PILLAR ImageNet result
+does not transfer automatically to strict IJB-C face inference. Training-only
+clipping keeps the optimization graph stable but hides the inference tail;
+removing it lets rare quartic excursions corrupt the normalization state.
+Widening the public interval merely moves the first escape downstream. The
+large IJB-C corpus makes the rare event observable, but the underlying cause
+is unbounded quartic extrapolation compounded through a pre-activation
+iResNet, not dataset size by itself.

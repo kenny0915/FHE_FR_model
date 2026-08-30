@@ -355,6 +355,12 @@ def test_nl9_fixed_recovery_keeps_all_nine_quadratics_from_epoch_zero():
     assert augmented.range_augmentation["enabled"]
     assert augmented.range_augmentation["probability"] == pytest.approx(0.5)
 
+    bnfreeze = _load_standalone_config(
+        "configs/ms1mv3_r50_nl9_prelu_herpn_fixed_recovery_bnfreeze.py")
+    assert bnfreeze.lr == pytest.approx(5.0e-5)
+    assert bnfreeze.freeze_batchnorm_running_stats
+    assert bnfreeze.freeze_batchnorm_affine
+
 
 def test_layerwise_scaled_r50_group4_recovery_conditions_layer2_before_blend():
     cfg = _load_standalone_config(
