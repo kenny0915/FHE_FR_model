@@ -22,6 +22,7 @@ result_dir="${output_root}/ijbc_${tag}"
 
 export CUDA_VISIBLE_DEVICES=0
 export OMP_NUM_THREADS=12
+export PYTHONUNBUFFERED=1
 
 /home/u8798807/.conda/envs/face_recog/bin/python eval_ijbc.py \
     --model-prefix "${checkpoint}" \
