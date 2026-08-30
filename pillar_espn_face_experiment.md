@@ -165,5 +165,33 @@ first training batches were finite; initial activation maxima were 16.23 to
 26.43 and the outside-interval fraction was below `4e-8`. Three adaptation
 epochs are scheduled before diagnostic verification.
 
+The scale-1 control did not converge monotonically toward safety. Its
+CFP-FP/AgeDB non-finite counts moved from `31/49` at step `20000` to `40/66`
+at step `22500`, then abruptly expanded to `2212/2251` at step `25000`; LFW
+simultaneously jumped from zero to 3889 failed rows. Training-batch activation
+statistics still looked ordinary. Slurm `316391` was stopped after this
+decisive recurrence, with its checkpoints preserved.
+
+Uniform scale 4 recovered from stale BatchNorm statistics after one adaptation
+epoch, but its verification failures plateaued:
+
+| checkpoint | LFW | CFP-FP | AgeDB-30 |
+|---|---:|---:|---:|
+| scale-4 epoch 8 | 0 | 51 | 79 |
+| scale-4 epoch 9 | 0 | 42 | 71 |
+| scale-4 epoch 10 | 0 | 53 | 74 |
+
+The counts combine both flip passes. A diagnostic replay that enabled the
+training clip while keeping all BatchNorm layers in evaluation mode localized
+the remaining problem. For a failed CFP-FP row, raw stem and `layer1.0`
+inputs were 22.46 and 26.72; clipping those values to the scale-4 interval
+kept every later site below 21 and produced a finite embedding. A failed
+AgeDB row likewise became completely finite when its `layer1.0` input 23.59
+was contained; the next-layer input fell from 31.87 to 17.25. Consequently,
+the next branch keeps 24 sites at scale 4 and widens only
+`layer1.0.prelu` to scale 6, target interval `[-30,30]`. Inserting even this
+single change into a frozen checkpoint invalidates BatchNorm statistics, so
+Slurm `316640` co-trains it from the scale-4 epoch-9 optimizer state.
+
 Final finite counts, TAR values, and accepted checkpoint will be added after
 these jobs complete.
