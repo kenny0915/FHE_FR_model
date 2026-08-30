@@ -107,5 +107,50 @@ Post-warm-up verification now runs diagnostically through epoch 11 so this
 single row cannot terminate further range conditioning; strict fail-fast
 validation starts at epoch 12, and every full IJB-C evaluation remains strict.
 
+Recovery Slurm `316391` quantified the tail rather than hiding it. At step
+`15000`, the unclipped graph produced 2 non-finite augmented LFW rows, 81
+CFP-FP rows, and 87 AgeDB-30 rows. At step `17500`, the respective counts were
+0, 63, and 79. Finite embeddings remained ordinary in magnitude (maximum
+about 6), and LFW flip accuracy was 99.117% at step `17500`. More range
+conditioning therefore helps, but the failure count is not falling quickly
+enough to assume that scale-1 inference will pass all 469,375 IJB-C images.
+
+Layer hooks on the epoch-6 model identified the causal cascade. A persistent
+CFP-FP sample had activation-input maxima
+`5.54 -> 6.13 -> 18.93 -> 1279.57 -> 8.63e9`; the value `18.93` entered
+`layer1.1.prelu`, whose quartic output became `-329.7`. The next residual
+block amplified that finite tail until `layer2.0.prelu` overflowed. Seven of
+the first eight failed CFP-FP rows began at `layer1.1.prelu` with maxima
+between 16.53 and 18.93; the eighth began at `layer1.2.prelu` at 21.38. Thus,
+large dataset coverage is an exposure mechanism, but the root cause is the
+unbounded quartic outside its fitted interval combined with a train/eval
+mismatch: training clips each activation after recording its penalty, whereas
+inference must evaluate the polynomial exactly.
+
+## Scaled-interval branch
+
+For a positive scale `s`, the implementation now supports
+
+```text
+q_s(x) = s q(x / s)
+```
+
+which approximates ReLU on `[-5s, 5s]`. This transformation retains degree 4
+and multiplicative depth 2; it only changes public polynomial coefficients.
+The corresponding training penalty interval is `[-4.8s, 4.8s]`. The scale is
+stored in checkpoints, while legacy scale-1 checkpoints still load strictly.
+
+An inference-only test that widened just `layer1.1.prelu` and
+`layer1.2.prelu` contained the original failure but shifted the first unsafe
+input to `layer2.0.prelu`. Applying scale 4 to all sites with old scale-1
+BatchNorm statistics also failed, because the larger polynomial constant
+shifted residual distributions. These controls show that interval scaling
+must be co-trained or followed by BatchNorm adaptation, not patched into a
+finished checkpoint. Slurm `316527` resumes the epoch-7 optimizer state with
+uniform `q_4`, target interval `[-20,20]`, on eight additional H200 GPUs. Its
+first training batches were finite; initial activation maxima were 16.23 to
+26.43 and the outside-interval fraction was below `4e-8`. Three adaptation
+epochs are scheduled before diagnostic verification.
+
 Final finite counts, TAR values, and accepted checkpoint will be added after
 these jobs complete.
