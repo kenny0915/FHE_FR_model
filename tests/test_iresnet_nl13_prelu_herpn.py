@@ -230,6 +230,8 @@ def test_selective_seventh_nl13_config_preserves_safe_prefix(path, target):
     assert len(order) == len(set(order)) == 13
     assert cfg.layerwise_poly_allow_selective_order
     assert cfg.layerwise_poly_training_group_limit == 7
+    assert cfg.layerwise_poly_conditioning_range_loss_weight == pytest.approx(
+        0.01)
     assert cfg.herpn_group_epochs[6] == pytest.approx(1.0)
     assert cfg.herpn_group_epochs[7] == pytest.approx(100.0)
     assert cfg.layerwise_poly_max_input_scale == pytest.approx(1.0e6)
