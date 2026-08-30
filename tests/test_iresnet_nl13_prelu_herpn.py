@@ -262,6 +262,24 @@ def test_selective_eighth_nl13_config_extends_terminal_checkpoint():
     assert cfg.num_epoch == 8
 
 
+def test_selective_eighth_recovered_config_uses_final_seventh_model():
+    cfg = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41_recovered.py")
+    order = tuple(
+        name for group in cfg.herpn_conversion_groups for name in group)
+
+    assert order[:8] == (
+        *NL13_ACTIVATION_NAMES[:6],
+        "layer4.2.prelu",
+        "layer4.1.prelu",
+    )
+    assert cfg.backbone_init.endswith("selective7_layer42/model.pt")
+    assert cfg.layerwise_poly_training_group_limit == 8
+    assert cfg.layerwise_poly_optimizer_lr_scale == pytest.approx(1.0e-4)
+    assert cfg.num_epoch == 8
+
+
 def test_selective_ninth_nl13_config_converts_all_layer4_prelus():
     cfg = _load_standalone_config(
         "configs/"
