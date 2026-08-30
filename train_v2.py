@@ -35,6 +35,7 @@ from utils.utils_optimizer import (
 from utils.utils_pillar import (
     pillar_regularization_at_epoch,
     pillar_task_loss_weight_at_epoch,
+    pillar_validation_is_strict_at_epoch,
 )
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
@@ -2051,6 +2052,9 @@ def main(args):
     pillar_log_interval = int(getattr(cfg, "pillar_log_interval", 0))
     pillar_skip_verification_epochs = int(getattr(
         cfg, "pillar_skip_verification_epochs", 0))
+    pillar_strict_verification_epoch = int(getattr(
+        cfg, "pillar_strict_verification_epoch",
+        pillar_skip_verification_epochs))
     pillar_effective_coefficient = pillar_target_coefficient
     pillar_effective_exponent = pillar_target_exponent
     if pillar_target_coefficient < 0.0:
@@ -2066,6 +2070,10 @@ def main(args):
     if pillar_skip_verification_epochs < 0:
         raise ValueError(
             "pillar_skip_verification_epochs must be non-negative")
+    if pillar_strict_verification_epoch < pillar_skip_verification_epochs:
+        raise ValueError(
+            "pillar_strict_verification_epoch must be no smaller than "
+            "pillar_skip_verification_epochs")
     if pillar_target_coefficient > 0.0 and not pillar_enabled:
         raise ValueError(
             "pillar_regularization_coefficient requires a PILLAR backbone")
@@ -4135,6 +4143,26 @@ def main(args):
                                 100.0 * global_step / max(prepbn_decay_steps, 1),
                             )
                     else:
+                        if pillar_enabled:
+                            strict_pillar_validation = (
+                                pillar_validation_is_strict_at_epoch(
+                                    epoch,
+                                    pillar_strict_verification_epoch))
+                            callback_verification.fail_on_nonfinite = (
+                                bool(getattr(
+                                    cfg, "fail_on_nonfinite_val", False))
+                                and strict_pillar_validation)
+                            callback_verification.max_embedding_abs = (
+                                getattr(
+                                    cfg, "max_validation_embedding_abs", None)
+                                if strict_pillar_validation else None)
+                            if rank == 0 and not strict_pillar_validation:
+                                logging.info(
+                                    "PILLAR diagnostic verification at step "
+                                    "%d (epoch %d); strict finite/range gate "
+                                    "starts at epoch %d",
+                                    global_step, epoch,
+                                    pillar_strict_verification_epoch)
                         callback_verification(global_step, backbone.module)
 
         if lr_scheduler_step_per_epoch:

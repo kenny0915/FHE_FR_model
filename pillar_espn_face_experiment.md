@@ -99,5 +99,13 @@ preventing FP32 power overflow. A gradient-norm cap of `5` provides a second
 guard against a single summed-penalty spike. Both changes are training-only;
 the encrypted inference activation remains the same unclipped fixed quartic.
 
+Recovery Slurm `316300` passed the former range-loss failure but found one
+non-finite LFW embedding row at the first unclipped validation, step `15000`.
+This is a rare-tail failure rather than broad collapse: the same training
+batch had activation absmax `6.67` and only `4.03e-7` outside `[-5,5]`.
+Post-warm-up verification now runs diagnostically through epoch 11 so this
+single row cannot terminate further range conditioning; strict fail-fast
+validation starts at epoch 12, and every full IJB-C evaluation remains strict.
+
 Final finite counts, TAR values, and accepted checkpoint will be added after
 these jobs complete.

@@ -43,3 +43,14 @@ def pillar_task_loss_weight_at_epoch(epoch, range_only_epochs=0):
     if range_only_epochs < 0:
         raise ValueError("range_only_epochs must be non-negative")
     return 0.0 if epoch < range_only_epochs else 1.0
+
+
+def pillar_validation_is_strict_at_epoch(epoch, strict_start_epoch=0):
+    """Return whether PILLAR validation should enforce finite/range gates."""
+    epoch = int(epoch)
+    strict_start_epoch = int(strict_start_epoch)
+    if epoch < 0:
+        raise ValueError("epoch must be non-negative")
+    if strict_start_epoch < 0:
+        raise ValueError("strict_start_epoch must be non-negative")
+    return epoch >= strict_start_epoch

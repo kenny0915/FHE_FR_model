@@ -11,6 +11,7 @@ from lr_scheduler import CosineLRWarmup
 from utils.utils_pillar import (
     pillar_regularization_at_epoch,
     pillar_task_loss_weight_at_epoch,
+    pillar_validation_is_strict_at_epoch,
 )
 
 
@@ -144,6 +145,12 @@ def test_pillar_range_only_task_schedule_matches_released_code():
     assert pillar_task_loss_weight_at_epoch(0, range_only_epochs=0) == 1.0
 
 
+def test_pillar_strict_validation_schedule_has_diagnostic_window():
+    assert not pillar_validation_is_strict_at_epoch(5, 12)
+    assert not pillar_validation_is_strict_at_epoch(11, 12)
+    assert pillar_validation_is_strict_at_epoch(12, 12)
+
+
 def test_pillar_warmup_matches_paper_schedule():
     expected = (
         (5e-7, 4),
@@ -210,6 +217,7 @@ def test_r50_pillar_backbone_and_configs_cover_the_recipe():
     assert released.pillar_penalty_reduction == "sum"
     assert released.pillar_penalty_tail_cap == 2.0
     assert released.pillar_range_only_epochs == 1
+    assert released.pillar_strict_verification_epoch == 12
     assert released.pillar_regularization_coefficient == 1e-4
     assert released.batch_size == 256
     assert released.weight_decay == 2e-5

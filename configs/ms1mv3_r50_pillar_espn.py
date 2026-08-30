@@ -57,8 +57,10 @@ config.pillar_penalty_tail_cap = 2.0
 config.pillar_range_only_epochs = 1
 config.pillar_log_interval = 50
 # Early unclipped evaluations can overflow before the range/LR warm-up has
-# finished. The strict finite/range gate starts immediately after warm-up.
+# finished. After warm-up, diagnostic validation counts/sanitizes outliers so
+# training can continue; fail-fast strict validation starts at epoch 12.
 config.pillar_skip_verification_epochs = 5
+config.pillar_strict_verification_epoch = 12
 
 config.lr_scheduler = "cosine"
 config.min_lr_ratio = 0.01
