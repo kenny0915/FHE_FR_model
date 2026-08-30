@@ -312,6 +312,11 @@ def test_r50_pillar_backbone_and_configs_cover_the_recipe():
         "layer1.0.prelu": 6.0,
     }
 
+    exact_graph = _load_standalone_config(
+        "ms1mv3_r50_pillar_espn_scale4_unclipped.py")
+    assert exact_graph.pillar_input_scale == 4.0
+    assert exact_graph.pillar_training_clip is False
+
 
 def test_r18_pillar_lightweight_forward_and_layer_averaged_penalty():
     torch.manual_seed(7)
