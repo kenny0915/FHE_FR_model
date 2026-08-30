@@ -104,11 +104,16 @@ def model_from_config(config_path, checkpoint, device):
     model = get_model(cfg.network, **kwargs)
     state = extract_state_dict(torch.load(checkpoint, map_location="cpu"))
     model.load_state_dict(state, strict=True)
+    model.set_pillar_input_scales(
+        kwargs["pillar_input_scale_overrides"],
+        default_input_scale=kwargs["pillar_input_scale"],
+    )
     return model.float().to(device).eval()
 
 
 @torch.no_grad()
-def debug_rows(model, data, flip, start, end, batch_size, max_bad_rows):
+def debug_rows(model, data, flip, start, end, batch_size, max_bad_rows,
+               forced_trace_rows=()):
     device = next(model.parameters()).device
     bad_rows = []
     bad_row_count = 0
@@ -128,7 +133,12 @@ def debug_rows(model, data, flip, start, end, batch_size, max_bad_rows):
         "bad_row_count": bad_row_count,
         "traced_bad_rows": bad_rows,
     }))
-    for row in bad_rows:
+    trace_rows = list(dict.fromkeys(
+        list(bad_rows) + [int(row) for row in forced_trace_rows]))
+    for row in trace_rows:
+        if not start <= row < end:
+            raise ValueError(
+                f"forced trace row {row} is outside [{start}, {end})")
         trace = PILLARTrace(model)
         try:
             value = data[row:row + 1].to(device=device)
@@ -165,21 +175,38 @@ def build_parser():
     parser.add_argument("--max-bad-rows", type=int, default=8)
     parser.add_argument("--flip", type=int, choices=(0, 1), default=0)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--diagnostic-clip", action="store_true",
+        help=(
+            "enable the training-only activation clip while leaving the "
+            "backbone BatchNorm layers in eval mode; diagnostic only"),
+    )
+    parser.add_argument(
+        "--trace-rows", default="",
+        help="comma-separated absolute row indices to trace even if finite",
+    )
     return parser
 
 
 def main(args):
     model = model_from_config(
         args.config, args.checkpoint, torch.device(args.device))
+    if args.diagnostic_clip:
+        for module in model.modules():
+            if isinstance(module, PILLARPolynomialReLU):
+                module.train()
     data_set = verification.load_bin(args.bin, (112, 112))
     data = data_set[0][args.flip]
     end = args.end if args.end > 0 else data.shape[0]
     if not 0 <= args.start < end <= data.shape[0]:
         raise ValueError(
             f"invalid row interval [{args.start}, {end}) for {data.shape[0]}")
+    forced_trace_rows = tuple(
+        int(value.strip()) for value in args.trace_rows.split(",")
+        if value.strip())
     debug_rows(
         model, data, args.flip, args.start, end, args.batch_size,
-        args.max_bad_rows)
+        args.max_bad_rows, forced_trace_rows=forced_trace_rows)
 
 
 if __name__ == "__main__":

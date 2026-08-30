@@ -300,7 +300,7 @@ class IResNet(_ActivationFactoryIResNet):
             input_scale=self.pillar_input_scale,
         )
 
-    def set_pillar_input_scales(self, overrides):
+    def set_pillar_input_scales(self, overrides, default_input_scale=None):
         activations = {
             name: module for name, module in self.named_modules()
             if isinstance(module, PILLARPolynomialReLU)
@@ -309,6 +309,9 @@ class IResNet(_ActivationFactoryIResNet):
         if unknown:
             raise ValueError(
                 f"Unknown PILLAR activation names: {unknown}")
+        if default_input_scale is not None:
+            for activation in activations.values():
+                activation.set_input_scale(default_input_scale)
         for name, input_scale in overrides.items():
             activations[name].set_input_scale(input_scale)
 

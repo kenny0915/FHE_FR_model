@@ -1938,6 +1938,12 @@ def main(args):
                 f"{checkpoint_gate_grouping!r} does not match config "
                 f"{configured_gate_grouping!r}")
         backbone.module.load_state_dict(dict_checkpoint["state_dict_backbone"])
+        if hasattr(backbone.module, "set_pillar_input_scales"):
+            backbone.module.set_pillar_input_scales(
+                dict(getattr(cfg, "pillar_input_scale_overrides", {})),
+                default_input_scale=float(getattr(
+                    cfg, "pillar_input_scale", 1.0)),
+            )
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
         opt.load_state_dict(dict_checkpoint["state_optimizer"])
         if getattr(cfg, "resume_rebase_lr_scheduler", False):

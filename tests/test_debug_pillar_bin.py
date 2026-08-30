@@ -1,6 +1,7 @@
 import torch
 
 from eval.debug_pillar_bin import (
+    build_parser,
     compact_activation_trace,
     first_nonfinite_activation,
     tensor_summary,
@@ -35,3 +36,14 @@ def test_compact_activation_trace():
         "output_absmax": 8.0,
         "output_nonfinite": 1,
     }]
+
+
+def test_debug_parser_accepts_diagnostic_clip_and_forced_rows():
+    args = build_parser().parse_args([
+        "--checkpoint", "model.pt",
+        "--bin", "lfw.bin",
+        "--diagnostic-clip",
+        "--trace-rows", "3,7",
+    ])
+    assert args.diagnostic_clip is True
+    assert args.trace_rows == "3,7"
