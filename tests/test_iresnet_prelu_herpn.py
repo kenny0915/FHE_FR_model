@@ -360,6 +360,8 @@ def test_nl9_fixed_recovery_keeps_all_nine_quadratics_from_epoch_zero():
     assert bnfreeze.lr == pytest.approx(5.0e-5)
     assert bnfreeze.freeze_batchnorm_running_stats
     assert bnfreeze.freeze_batchnorm_affine
+    assert bnfreeze.herpn_range_loss_weight == 0.0
+    assert bnfreeze.herpn_distill_loss_weight == 0.0
     assert bnfreeze.max_nonfinite_embedding_skips == 1000
 
 
