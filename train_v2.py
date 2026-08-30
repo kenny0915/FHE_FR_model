@@ -1450,6 +1450,10 @@ def main(args):
                 cfg, "pillar_penalty_reduction", "mean")),
             pillar_penalty_tail_cap=getattr(
                 cfg, "pillar_penalty_tail_cap", None),
+            pillar_input_scale=float(getattr(
+                cfg, "pillar_input_scale", 1.0)),
+            pillar_input_scale_overrides=dict(getattr(
+                cfg, "pillar_input_scale_overrides", {})),
         )
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_layerwise_poly")):

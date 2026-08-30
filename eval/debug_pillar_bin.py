@@ -96,6 +96,10 @@ def model_from_config(config_path, checkpoint, device):
             cfg, "pillar_penalty_reduction", "mean")),
         "pillar_penalty_tail_cap": getattr(
             cfg, "pillar_penalty_tail_cap", None),
+        "pillar_input_scale": float(getattr(
+            cfg, "pillar_input_scale", 1.0)),
+        "pillar_input_scale_overrides": dict(getattr(
+            cfg, "pillar_input_scale_overrides", {})),
     }
     model = get_model(cfg.network, **kwargs)
     state = extract_state_dict(torch.load(checkpoint, map_location="cpu"))

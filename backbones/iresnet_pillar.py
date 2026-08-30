@@ -46,7 +46,8 @@ class PILLARPolynomialReLU(nn.Module):
 
     def __init__(self, approximation_range=5.0, regularization_range=4.8,
                  regularization_exponent=10, training_clip=True,
-                 penalty_reduction="mean", penalty_tail_cap=None):
+                 penalty_reduction="mean", penalty_tail_cap=None,
+                 input_scale=1.0):
         super().__init__()
         approximation_range = float(approximation_range)
         regularization_range = float(regularization_range)
@@ -64,12 +65,15 @@ class PILLARPolynomialReLU(nn.Module):
                 "penalty_reduction must be either 'mean' or 'sum'")
         if penalty_tail_cap is not None and float(penalty_tail_cap) <= 1.0:
             raise ValueError("penalty_tail_cap must be greater than 1")
+        if float(input_scale) <= 0.0:
+            raise ValueError("input_scale must be positive")
         self.training_clip = bool(training_clip)
         self.penalty_reduction = str(penalty_reduction)
         self.penalty_tail_cap = (
             None if penalty_tail_cap is None else float(penalty_tail_cap))
         self._approximation_range = approximation_range
         self._regularization_exponent = int(regularization_exponent)
+        self._input_scale = float(input_scale)
         self.register_buffer(
             "coefficients",
             torch.tensor(_PILLAR_COEFFICIENTS, dtype=torch.float32),
@@ -85,6 +89,10 @@ class PILLARPolynomialReLU(nn.Module):
         self.register_buffer(
             "regularization_exponent",
             torch.tensor(int(regularization_exponent), dtype=torch.int64),
+        )
+        self.register_buffer(
+            "input_scale",
+            torch.tensor(float(input_scale), dtype=torch.float32),
         )
         self._last_range_penalty = None
         self._last_input_absmax = None
@@ -105,14 +113,29 @@ class PILLARPolynomialReLU(nn.Module):
         self._regularization_exponent = int(exponent)
         self.regularization_exponent.fill_(int(exponent))
 
+    @torch.no_grad()
+    def set_input_scale(self, input_scale):
+        input_scale = float(input_scale)
+        if input_scale <= 0.0:
+            raise ValueError("input_scale must be positive")
+        self._input_scale = input_scale
+        self.input_scale.fill_(input_scale)
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
+        # Checkpoints created before scaled PILLAR did not store this buffer.
+        # Use the scale selected by the loading config while retaining strict
+        # validation for every pre-existing model tensor.
+        scale_key = prefix + "input_scale"
+        if scale_key not in state_dict:
+            state_dict[scale_key] = self.input_scale.detach().clone()
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
         self._approximation_range = float(self.approximation_range.item())
         self._regularization_exponent = int(
             self.regularization_exponent.item())
+        self._input_scale = float(self.input_scale.item())
 
     def range_penalty(self):
         return self._last_range_penalty
@@ -171,10 +194,13 @@ class PILLARPolynomialReLU(nn.Module):
             else x.dtype
         )
         compute_x = x.to(dtype=compute_dtype)
+        input_scale = self.input_scale.to(
+            device=x.device, dtype=compute_dtype)
+        scaled_x = compute_x / input_scale
         if self.training:
             regularization_range = self.regularization_range.to(
                 device=x.device, dtype=compute_dtype)
-            normalized = compute_x / regularization_range
+            normalized = scaled_x / regularization_range
             element_penalty = self._element_range_penalty(normalized)
             if self.penalty_reduction == "sum":
                 # PILLAR-ESPN flattens each activation and takes its L1 norm.
@@ -190,12 +216,13 @@ class PILLARPolynomialReLU(nn.Module):
                 device=x.device, dtype=compute_dtype)
             detached_abs = compute_x.detach().abs()
             approximation_range = self.approximation_range.to(
-                device=x.device, dtype=compute_dtype)
+                device=x.device, dtype=compute_dtype) * input_scale
+            effective_regularization_range = regularization_range * input_scale
             self._last_input_absmax = detached_abs.amax()
             self._last_approximation_outside_fraction = (
                 detached_abs > approximation_range).float().mean()
             self._last_regularization_outside_fraction = (
-                detached_abs > regularization_range).float().mean()
+                detached_abs > effective_regularization_range).float().mean()
         else:
             self._last_input_absmax = None
             self._last_approximation_outside_fraction = None
@@ -205,17 +232,18 @@ class PILLARPolynomialReLU(nn.Module):
             # PILLAR clips only after computing the penalty and removes this
             # operation entirely from the inference graph.
             if self.training_clip:
-                compute_x = torch.clamp(
-                    compute_x,
+                scaled_x = torch.clamp(
+                    scaled_x,
                     min=-self._approximation_range,
                     max=self._approximation_range,
                 )
-        return self._polynomial(compute_x).to(dtype=x.dtype)
+        return (input_scale * self._polynomial(scaled_x)).to(dtype=x.dtype)
 
     def extra_repr(self):
         return (
-            f"target=ReLU, interval=[-{self._approximation_range:g}, "
-            f"{self._approximation_range:g}], degree=4, "
+            f"target=ReLU, interval=[-"
+            f"{self._approximation_range * self._input_scale:g}, "
+            f"{self._approximation_range * self._input_scale:g}], degree=4, "
             f"multiplicative_depth=2, penalty_reduction="
             f"{self.penalty_reduction}, penalty_tail_cap="
             f"{self.penalty_tail_cap}"
@@ -230,7 +258,8 @@ class IResNet(_ActivationFactoryIResNet):
                  pillar_regularization_exponent=10,
                  pillar_training_clip=True,
                  pillar_penalty_reduction="mean",
-                 pillar_penalty_tail_cap=None, **kwargs):
+                 pillar_penalty_tail_cap=None, pillar_input_scale=1.0,
+                 pillar_input_scale_overrides=None, **kwargs):
         object.__setattr__(
             self, "pillar_approximation_range",
             float(pillar_approximation_range))
@@ -249,9 +278,15 @@ class IResNet(_ActivationFactoryIResNet):
             self, "pillar_penalty_tail_cap",
             (None if pillar_penalty_tail_cap is None
              else float(pillar_penalty_tail_cap)))
+        object.__setattr__(
+            self, "pillar_input_scale", float(pillar_input_scale))
+        object.__setattr__(
+            self, "pillar_input_scale_overrides",
+            dict(pillar_input_scale_overrides or {}))
         # The parent supplies the iResNet topology and activation factory. Its
         # HerPN progress machinery sees no HerPN wrappers in this subclass.
         super().__init__(*args, herpn_progress=0.0, **kwargs)
+        self.set_pillar_input_scales(self.pillar_input_scale_overrides)
 
     def _make_activation(self, channels, stage_name):
         del channels, stage_name
@@ -262,7 +297,20 @@ class IResNet(_ActivationFactoryIResNet):
             training_clip=self.pillar_training_clip,
             penalty_reduction=self.pillar_penalty_reduction,
             penalty_tail_cap=self.pillar_penalty_tail_cap,
+            input_scale=self.pillar_input_scale,
         )
+
+    def set_pillar_input_scales(self, overrides):
+        activations = {
+            name: module for name, module in self.named_modules()
+            if isinstance(module, PILLARPolynomialReLU)
+        }
+        unknown = sorted(set(overrides).difference(activations))
+        if unknown:
+            raise ValueError(
+                f"Unknown PILLAR activation names: {unknown}")
+        for name, input_scale in overrides.items():
+            activations[name].set_input_scale(input_scale)
 
     def pillar_activations(self):
         return [

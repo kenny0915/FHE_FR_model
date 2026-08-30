@@ -100,6 +100,58 @@ def test_pillar_training_penalizes_raw_input_before_clipping():
     assert torch.isfinite(inputs.grad).all()
 
 
+def test_scaled_pillar_expands_interval_without_changing_degree_or_depth():
+    activation = PILLARPolynomialReLU(input_scale=4.0).eval()
+    inputs = torch.tensor([-20.0, -5.0, 0.0, 5.0, 20.0])
+
+    actual = activation(inputs)
+
+    torch.testing.assert_close(actual, 4.0 * _paper_polynomial(inputs / 4.0))
+    assert activation.polynomial_degree == 4
+    assert activation.multiplicative_depth == 2
+    assert "interval=[-20, 20]" in repr(activation)
+
+
+def test_scaled_pillar_uses_effective_training_ranges():
+    activation = PILLARPolynomialReLU(
+        regularization_exponent=4,
+        input_scale=4.0,
+    ).train()
+    inputs = torch.tensor([-19.2, 38.4], requires_grad=True)
+
+    actual = activation(inputs)
+
+    torch.testing.assert_close(
+        actual, 4.0 * _paper_polynomial((inputs / 4.0).clamp(-5, 5)))
+    torch.testing.assert_close(
+        activation.range_penalty(), torch.tensor((1.0 + 16.0) / 2.0))
+    stats = activation.range_stats()
+    torch.testing.assert_close(
+        stats["approximation_outside_fraction"], torch.tensor(0.5))
+    torch.testing.assert_close(
+        stats["regularization_outside_fraction"], torch.tensor(0.5))
+
+
+def test_scaled_pillar_strictly_loads_legacy_state_and_named_overrides():
+    legacy = PILLARPolynomialReLU().state_dict()
+    del legacy["input_scale"]
+    scaled = PILLARPolynomialReLU(input_scale=4.0)
+    scaled.load_state_dict(legacy, strict=True)
+    assert scaled.input_scale == 4.0
+
+    model = get_model(
+        "r18_pillar", dropout=0, fp16=False,
+        pillar_input_scale_overrides={"layer1.1.prelu": 4.0},
+    )
+    scales = {
+        name: float(module.input_scale.item())
+        for name, module in model.named_modules()
+        if isinstance(module, PILLARPolynomialReLU)
+    }
+    assert scales["layer1.1.prelu"] == 4.0
+    assert scales["layer1.0.prelu"] == 1.0
+
+
 def test_pillar_released_sum_penalty_is_unnormalized():
     activation = PILLARPolynomialReLU(
         regularization_range=4.8,
@@ -229,6 +281,14 @@ def test_r50_pillar_backbone_and_configs_cover_the_recipe():
     assert resumed.resume is True
     assert resumed.output == released.output
     assert resumed.pillar_penalty_tail_cap == 2.0
+
+    scaled = _load_standalone_config(
+        "ms1mv3_r50_pillar_espn_scale4_early.py")
+    assert scaled.pillar_input_scale == 1.0
+    assert scaled.pillar_input_scale_overrides == {
+        "layer1.1.prelu": 4.0,
+        "layer1.2.prelu": 4.0,
+    }
 
 
 def test_r18_pillar_lightweight_forward_and_layer_averaged_penalty():
