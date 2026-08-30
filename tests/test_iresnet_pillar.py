@@ -113,6 +113,31 @@ def test_pillar_released_sum_penalty_is_unnormalized():
         activation.range_penalty(), torch.tensor(1.0 + 16.0))
 
 
+def test_pillar_linear_penalty_tail_is_continuous_finite_and_restoring():
+    activation = PILLARPolynomialReLU(
+        regularization_range=4.8,
+        regularization_exponent=10,
+        penalty_reduction="sum",
+        penalty_tail_cap=2.0,
+    ).train()
+    normalized = torch.tensor([2.0, 3.0, 1.0e6], requires_grad=True)
+    inputs = normalized * 4.8
+
+    activation(inputs)
+    penalty = activation.range_penalty()
+
+    expected = (
+        2.0 ** 10
+        + (2.0 ** 10 + 10.0 * 2.0 ** 9 * (3.0 - 2.0))
+        + (2.0 ** 10 + 10.0 * 2.0 ** 9 * (1.0e6 - 2.0))
+    )
+    torch.testing.assert_close(penalty, torch.tensor(expected))
+    penalty.backward()
+    assert torch.isfinite(penalty)
+    assert torch.isfinite(normalized.grad).all()
+    assert torch.all(normalized.grad > 0)
+
+
 def test_pillar_range_only_task_schedule_matches_released_code():
     assert pillar_task_loss_weight_at_epoch(0, range_only_epochs=1) == 0.0
     assert pillar_task_loss_weight_at_epoch(1, range_only_epochs=1) == 1.0
@@ -183,12 +208,19 @@ def test_r50_pillar_backbone_and_configs_cover_the_recipe():
 
     released = _load_standalone_config("ms1mv3_r50_pillar_espn.py")
     assert released.pillar_penalty_reduction == "sum"
+    assert released.pillar_penalty_tail_cap == 2.0
     assert released.pillar_range_only_epochs == 1
     assert released.pillar_regularization_coefficient == 1e-4
     assert released.batch_size == 256
     assert released.weight_decay == 2e-5
     assert released.selective_weight_decay is True
     assert released.num_epoch == 32
+
+    resumed = _load_standalone_config(
+        "ms1mv3_r50_pillar_espn_resume.py")
+    assert resumed.resume is True
+    assert resumed.output == released.output
+    assert resumed.pillar_penalty_tail_cap == 2.0
 
 
 def test_r18_pillar_lightweight_forward_and_layer_averaged_penalty():

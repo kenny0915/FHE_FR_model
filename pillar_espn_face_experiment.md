@@ -84,9 +84,20 @@ showing why all penalty warm-up phases must finish before judging the method.
 
 ## Production and IJB-C jobs
 
-- MS1Mv3 all-polynomial training: Slurm `316092`, eight H200 GPUs, 32 epochs.
-- Strict full IJB-C evaluation: Slurm `316106`, dependent on successful
-  completion of `316092`.
+The first MS1Mv3 production attempt, Slurm `316092`, completed the released
+four-epoch penalty warm-up with finite embeddings and gradients. At step
+`10466`, shortly after beta reached its full `1e-4` value, a rare internal
+iResNet activation made the direct FP32 `z^10` penalty non-finite. The
+activation output itself was still hidden by the training-only clip, so the
+failure occurred in the range loss before strict inference validation. The
+clean epoch-4 model, PartialFC, optimizer, and scheduler states were preserved.
+
+The resumed face adaptation keeps the exact released `z^10` penalty through
+`|z|=2` (`|x|=9.6`) and continues with its tangent line for larger training
+outliers. This makes the loss and its restoring gradient continuous while
+preventing FP32 power overflow. A gradient-norm cap of `5` provides a second
+guard against a single summed-penalty spike. Both changes are training-only;
+the encrypted inference activation remains the same unclipped fixed quartic.
 
 Final finite counts, TAR values, and accepted checkpoint will be added after
 these jobs complete.

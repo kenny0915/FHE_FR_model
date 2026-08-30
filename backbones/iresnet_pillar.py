@@ -46,7 +46,7 @@ class PILLARPolynomialReLU(nn.Module):
 
     def __init__(self, approximation_range=5.0, regularization_range=4.8,
                  regularization_exponent=10, training_clip=True,
-                 penalty_reduction="mean"):
+                 penalty_reduction="mean", penalty_tail_cap=None):
         super().__init__()
         approximation_range = float(approximation_range)
         regularization_range = float(regularization_range)
@@ -62,8 +62,12 @@ class PILLARPolynomialReLU(nn.Module):
         if penalty_reduction not in ("mean", "sum"):
             raise ValueError(
                 "penalty_reduction must be either 'mean' or 'sum'")
+        if penalty_tail_cap is not None and float(penalty_tail_cap) <= 1.0:
+            raise ValueError("penalty_tail_cap must be greater than 1")
         self.training_clip = bool(training_clip)
         self.penalty_reduction = str(penalty_reduction)
+        self.penalty_tail_cap = (
+            None if penalty_tail_cap is None else float(penalty_tail_cap))
         self._approximation_range = approximation_range
         self._regularization_exponent = int(regularization_exponent)
         self.register_buffer(
@@ -138,6 +142,28 @@ class PILLARPolynomialReLU(nn.Module):
             + coefficients[4] * fourth
         )
 
+    def _element_range_penalty(self, normalized):
+        """Return the paper penalty with an optional finite linear tail.
+
+        The released implementation directly evaluates ``z**gamma``. That is
+        exact and remains the default. Face iResNet occasionally produces a
+        very large but finite internal outlier which overflows that training
+        loss before the following activation clip can contain it. When a tail
+        cap is configured, preserve the exact power through the cap and use
+        its tangent line beyond it. The value and first derivative are
+        continuous, extreme inputs still receive a restoring gradient, and
+        this training-only guard never enters the inference graph.
+        """
+        magnitude = normalized.abs()
+        if self.penalty_tail_cap is None:
+            return magnitude.pow(self._regularization_exponent)
+        cap = self.penalty_tail_cap
+        exponent = self._regularization_exponent
+        capped = magnitude.clamp(max=cap)
+        power = capped.pow(exponent)
+        slope = exponent * cap ** (exponent - 1)
+        return power + slope * (magnitude - capped)
+
     def forward(self, x):
         compute_dtype = (
             torch.float32
@@ -149,8 +175,7 @@ class PILLARPolynomialReLU(nn.Module):
             regularization_range = self.regularization_range.to(
                 device=x.device, dtype=compute_dtype)
             normalized = compute_x / regularization_range
-            element_penalty = normalized.pow(
-                self._regularization_exponent)
+            element_penalty = self._element_range_penalty(normalized)
             if self.penalty_reduction == "sum":
                 # PILLAR-ESPN flattens each activation and takes its L1 norm.
                 # Since gamma is even, that is exactly this unnormalized sum.
@@ -192,7 +217,8 @@ class PILLARPolynomialReLU(nn.Module):
             f"target=ReLU, interval=[-{self._approximation_range:g}, "
             f"{self._approximation_range:g}], degree=4, "
             f"multiplicative_depth=2, penalty_reduction="
-            f"{self.penalty_reduction}"
+            f"{self.penalty_reduction}, penalty_tail_cap="
+            f"{self.penalty_tail_cap}"
         )
 
 
@@ -203,7 +229,8 @@ class IResNet(_ActivationFactoryIResNet):
                  pillar_regularization_range=4.8,
                  pillar_regularization_exponent=10,
                  pillar_training_clip=True,
-                 pillar_penalty_reduction="mean", **kwargs):
+                 pillar_penalty_reduction="mean",
+                 pillar_penalty_tail_cap=None, **kwargs):
         object.__setattr__(
             self, "pillar_approximation_range",
             float(pillar_approximation_range))
@@ -218,6 +245,10 @@ class IResNet(_ActivationFactoryIResNet):
         object.__setattr__(
             self, "pillar_penalty_reduction",
             str(pillar_penalty_reduction))
+        object.__setattr__(
+            self, "pillar_penalty_tail_cap",
+            (None if pillar_penalty_tail_cap is None
+             else float(pillar_penalty_tail_cap)))
         # The parent supplies the iResNet topology and activation factory. Its
         # HerPN progress machinery sees no HerPN wrappers in this subclass.
         super().__init__(*args, herpn_progress=0.0, **kwargs)
@@ -230,6 +261,7 @@ class IResNet(_ActivationFactoryIResNet):
             regularization_exponent=self.pillar_regularization_exponent,
             training_clip=self.pillar_training_clip,
             penalty_reduction=self.pillar_penalty_reduction,
+            penalty_tail_cap=self.pillar_penalty_tail_cap,
         )
 
     def pillar_activations(self):

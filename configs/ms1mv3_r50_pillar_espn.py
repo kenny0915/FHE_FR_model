@@ -32,10 +32,11 @@ config.momentum = 0.9
 config.weight_decay = 2e-5
 config.selective_weight_decay = True
 config.batch_size = 256
-# The reference does not clip gradients. This high guard is effectively
-# inactive for healthy steps but still prevents an accidental infinite jump.
-config.gradient_clip = 1e6
-config.gradient_norm_warning_threshold = 1e4
+# Face iResNet can produce rare internal outliers during ArcFace training.
+# The reference ImageNet ResNet does not clip gradients, but a norm cap is
+# necessary here to keep one summed range-gradient spike recoverable.
+config.gradient_clip = 5.0
+config.gradient_norm_warning_threshold = 5.0
 config.gradient_norm_warning_interval = 50
 config.check_finite_grads = True
 
@@ -49,6 +50,10 @@ config.pillar_regularization_warmup = True
 # even-power penalty, averaged over activation sites, with task loss disabled
 # during epoch zero.
 config.pillar_penalty_reduction = "sum"
+# Preserve the exact z^10 range loss through |z|=2 (|x|=9.6), then continue
+# with its tangent line. This avoids FP32 overflow on a rare internal outlier
+# while retaining a nonzero restoring gradient. It is training-only.
+config.pillar_penalty_tail_cap = 2.0
 config.pillar_range_only_epochs = 1
 config.pillar_log_interval = 50
 # Early unclipped evaluations can overflow before the range/LR warm-up has

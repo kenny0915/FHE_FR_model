@@ -1447,6 +1447,8 @@ def main(args):
                 cfg, "pillar_training_clip", True)),
             pillar_penalty_reduction=str(getattr(
                 cfg, "pillar_penalty_reduction", "mean")),
+            pillar_penalty_tail_cap=getattr(
+                cfg, "pillar_penalty_tail_cap", None),
         )
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_layerwise_poly")):
@@ -3647,9 +3649,16 @@ def main(args):
                 pillar_range_penalty = (
                     backbone.module.pillar_range_penalty())
                 if not torch.isfinite(pillar_range_penalty):
+                    pillar_summary = backbone.module.pillar_range_summary()
                     raise FloatingPointError(
                         "Non-finite PILLAR range penalty at "
-                        f"global_step={global_step}")
+                        f"global_step={global_step}; "
+                        "input_absmax="
+                        f"{float(pillar_summary['input_absmax'].item()):.7g}; "
+                        "approximation_outside="
+                        f"{float(pillar_summary['approximation_outside_fraction'].item()):.7g}; "
+                        "regularization_outside="
+                        f"{float(pillar_summary['regularization_outside_fraction'].item()):.7g}")
                 loss = loss + (
                     pillar_effective_coefficient
                     * pillar_range_penalty)
