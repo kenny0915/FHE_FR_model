@@ -53,6 +53,19 @@ BatchNorm head, and ArcFace/PartialFC. Therefore, the released hyperparameters
 are a strong starting point rather than proof that the face model will meet the
 IJB-C low-FAR gate.
 
+The paper's claim is empirical rather than a bound over every possible input.
+Its ImageNet ResNet-50 result is one trained run: 77.7% plaintext PILLAR
+accuracy and 77.3% encrypted accuracy, versus 80.8% for the ReLU/CryptGPU
+model. The authors explicitly call the same runaway behavior the “escaping
+activation problem” and address it with the combination of range
+regularization, training-only clipping, a four-epoch beta/gamma warm-up, and
+BatchNorm. Their test demonstrates stability on the ImageNet evaluation they
+ran; it does not prove that the quartic is bounded outside `[-5,5]` or that no
+sample in a much larger out-of-distribution face corpus can escape. PILLAR's
+reported private runtime uses 64-bit-ring MPC (CrypTen/ESPN/HoneyBadger), not
+leveled FHE. The degree-4 inference polynomial is nevertheless compatible
+with the polynomial portion of an FHE graph.
+
 ## Implemented face adaptation
 
 `configs/ms1mv3_r50_pillar_espn.py` keeps the exact fixed quartic, `[-5,5]`
