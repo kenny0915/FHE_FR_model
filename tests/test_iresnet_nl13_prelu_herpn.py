@@ -232,5 +232,6 @@ def test_selective_seventh_nl13_config_preserves_safe_prefix(path, target):
     assert cfg.layerwise_poly_training_group_limit == 7
     assert cfg.herpn_group_epochs[6] == pytest.approx(1.0)
     assert cfg.herpn_group_epochs[7] == pytest.approx(100.0)
+    assert cfg.layerwise_poly_max_input_scale == pytest.approx(1.0e6)
     assert not cfg.herpn_require_full_conversion
     assert cfg.num_epoch == 8

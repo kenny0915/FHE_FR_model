@@ -40,6 +40,9 @@ config.herpn_require_full_conversion = False
 config.layerwise_poly_allow_selective_order = True
 config.layerwise_poly_training_group_limit = 7
 config.layerwise_poly_max_tail_scale_expansion = 5.1
+# Late NL13 PReLUs safely receive large finite values because their teacher is
+# linear outside zero.  Preserve those measured values through public input
+# normalization instead of forcing an unsafe small quadratic interval.
+config.layerwise_poly_max_input_scale = 1.0e6
 config.num_epoch = 8
 config.fail_on_nonfinite_val = True
-
