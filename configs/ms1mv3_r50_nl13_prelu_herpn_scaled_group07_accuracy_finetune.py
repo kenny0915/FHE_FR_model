@@ -16,6 +16,7 @@ from configs.ms1mv3_r50_nl13_prelu_herpn_scaled_group07_accuracy_recovery import
 
 config = edict(group07_config.copy())
 config.resume = True
+config.resume_rebase_lr_scheduler = True
 config.layerwise_poly_conditioning_range_loss_weight = 1.0e-8
 config.herpn_distill_loss_weight = 0.0
 config.herpn_group_epochs = (

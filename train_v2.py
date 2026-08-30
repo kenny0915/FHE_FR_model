@@ -1928,7 +1928,23 @@ def main(args):
         backbone.module.load_state_dict(dict_checkpoint["state_dict_backbone"])
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
         opt.load_state_dict(dict_checkpoint["state_optimizer"])
-        lr_scheduler.load_state_dict(dict_checkpoint["state_lr_scheduler"])
+        if getattr(cfg, "resume_rebase_lr_scheduler", False):
+            # An accuracy-recovery run can deliberately extend ``num_epoch``
+            # beyond the checkpoint's original schedule.  Loading that
+            # exhausted scheduler would leave every optimizer group at zero
+            # LR.  Rebase the freshly constructed scheduler at the resumed
+            # global step so it uses the new total-step horizon and restores
+            # a non-zero closed-form LR from its configured base rates.
+            lr_scheduler.step(global_step)
+            if rank == 0:
+                logging.info(
+                    "Rebased LR scheduler at resumed global_step=%d: "
+                    "lr=%s total_step=%d",
+                    global_step,
+                    [group["lr"] for group in opt.param_groups],
+                    cfg.total_step)
+        else:
+            lr_scheduler.load_state_dict(dict_checkpoint["state_lr_scheduler"])
         legacy_parameters = getattr(
             backbone.module, "legacy_layerwise_poly_parameters", lambda: [])()
         for parameter in legacy_parameters:
