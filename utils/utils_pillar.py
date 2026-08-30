@@ -27,3 +27,19 @@ def pillar_regularization_at_epoch(epoch, target_coefficient,
         target_coefficient / _PILLAR_BETA_WARMUP_DIVISORS[epoch])
     exponent = min(4 + 2 * epoch, target_exponent)
     return coefficient, exponent
+
+
+def pillar_task_loss_weight_at_epoch(epoch, range_only_epochs=0):
+    """Return the task-loss weight for PILLAR range preparation.
+
+    The released PILLAR-ESPN ImageNet recipe uses ``classification_loss * 0``
+    in epoch zero and optimizes only the activation-range penalty. Keeping the
+    number of such epochs configurable preserves legacy experiment behavior.
+    """
+    epoch = int(epoch)
+    range_only_epochs = int(range_only_epochs)
+    if epoch < 0:
+        raise ValueError("epoch must be non-negative")
+    if range_only_epochs < 0:
+        raise ValueError("range_only_epochs must be non-negative")
+    return 0.0 if epoch < range_only_epochs else 1.0

@@ -8,7 +8,10 @@ import torch
 from backbones import get_model
 from backbones.iresnet_pillar import PILLARPolynomialReLU
 from lr_scheduler import CosineLRWarmup
-from utils.utils_pillar import pillar_regularization_at_epoch
+from utils.utils_pillar import (
+    pillar_regularization_at_epoch,
+    pillar_task_loss_weight_at_epoch,
+)
 
 
 class _EasyDict(dict):
@@ -96,6 +99,26 @@ def test_pillar_training_penalizes_raw_input_before_clipping():
     assert torch.isfinite(inputs.grad).all()
 
 
+def test_pillar_released_sum_penalty_is_unnormalized():
+    activation = PILLARPolynomialReLU(
+        regularization_range=4.8,
+        regularization_exponent=4,
+        penalty_reduction="sum",
+    ).train()
+    inputs = torch.tensor([-4.8, 9.6], requires_grad=True)
+
+    activation(inputs)
+
+    torch.testing.assert_close(
+        activation.range_penalty(), torch.tensor(1.0 + 16.0))
+
+
+def test_pillar_range_only_task_schedule_matches_released_code():
+    assert pillar_task_loss_weight_at_epoch(0, range_only_epochs=1) == 0.0
+    assert pillar_task_loss_weight_at_epoch(1, range_only_epochs=1) == 1.0
+    assert pillar_task_loss_weight_at_epoch(0, range_only_epochs=0) == 1.0
+
+
 def test_pillar_warmup_matches_paper_schedule():
     expected = (
         (5e-7, 4),
@@ -157,6 +180,15 @@ def test_r50_pillar_backbone_and_configs_cover_the_recipe():
     assert smoke.max_steps_per_epoch == 100
     assert smoke.pillar_regularization_coefficient == 5e-5
     assert smoke.val_targets == []
+
+    released = _load_standalone_config("ms1mv3_r50_pillar_espn.py")
+    assert released.pillar_penalty_reduction == "sum"
+    assert released.pillar_range_only_epochs == 1
+    assert released.pillar_regularization_coefficient == 1e-4
+    assert released.batch_size == 256
+    assert released.weight_decay == 2e-5
+    assert released.selective_weight_decay is True
+    assert released.num_epoch == 32
 
 
 def test_r18_pillar_lightweight_forward_and_layer_averaged_penalty():

@@ -32,7 +32,10 @@ from utils.utils_optimizer import (
     split_weight_decay_parameters,
     temporary_optimizer_lr_scale,
 )
-from utils.utils_pillar import pillar_regularization_at_epoch
+from utils.utils_pillar import (
+    pillar_regularization_at_epoch,
+    pillar_task_loss_weight_at_epoch,
+)
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
 assert torch.__version__ >= "1.12.0", "In order to enjoy the features of the new torch, \
@@ -1442,6 +1445,8 @@ def main(args):
                 cfg, "pillar_regularization_exponent", 10)),
             pillar_training_clip=bool(getattr(
                 cfg, "pillar_training_clip", True)),
+            pillar_penalty_reduction=str(getattr(
+                cfg, "pillar_penalty_reduction", "mean")),
         )
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_layerwise_poly")):
@@ -2038,6 +2043,12 @@ def main(args):
         cfg, "pillar_regularization_exponent", 10))
     pillar_regularization_warmup = bool(getattr(
         cfg, "pillar_regularization_warmup", True))
+    pillar_range_only_epochs = int(getattr(
+        cfg, "pillar_range_only_epochs", 0))
+    pillar_task_loss_weight = 1.0
+    pillar_log_interval = int(getattr(cfg, "pillar_log_interval", 0))
+    pillar_skip_verification_epochs = int(getattr(
+        cfg, "pillar_skip_verification_epochs", 0))
     pillar_effective_coefficient = pillar_target_coefficient
     pillar_effective_exponent = pillar_target_exponent
     if pillar_target_coefficient < 0.0:
@@ -2046,6 +2057,13 @@ def main(args):
     if pillar_target_exponent < 4 or pillar_target_exponent % 2:
         raise ValueError(
             "pillar_regularization_exponent must be an even integer >= 4")
+    if pillar_range_only_epochs < 0:
+        raise ValueError("pillar_range_only_epochs must be non-negative")
+    if pillar_log_interval < 0:
+        raise ValueError("pillar_log_interval must be non-negative")
+    if pillar_skip_verification_epochs < 0:
+        raise ValueError(
+            "pillar_skip_verification_epochs must be non-negative")
     if pillar_target_coefficient > 0.0 and not pillar_enabled:
         raise ValueError(
             "pillar_regularization_coefficient requires a PILLAR backbone")
@@ -2060,13 +2078,17 @@ def main(args):
         )
         backbone.module.set_pillar_regularization_exponent(
             pillar_effective_exponent)
+        pillar_task_loss_weight = pillar_task_loss_weight_at_epoch(
+            start_epoch, pillar_range_only_epochs)
         if rank == 0:
             logging.info(
                 "PILLAR regularization: target_beta=%g target_gamma=%d "
-                "warmup=%s current_beta=%g current_gamma=%d",
+                "warmup=%s current_beta=%g current_gamma=%d "
+                "range_only_epochs=%d task_loss_weight=%g",
                 pillar_target_coefficient, pillar_target_exponent,
                 pillar_regularization_warmup,
                 pillar_effective_coefficient, pillar_effective_exponent,
+                pillar_range_only_epochs, pillar_task_loss_weight,
             )
     precise_relu_enabled = hasattr(
         backbone.module, "set_polynomial_progress")
@@ -2924,11 +2946,14 @@ def main(args):
             )
             backbone.module.set_pillar_regularization_exponent(
                 pillar_effective_exponent)
+            pillar_task_loss_weight = pillar_task_loss_weight_at_epoch(
+                epoch, pillar_range_only_epochs)
             if rank == 0:
                 logging.info(
-                    "PILLAR epoch %d: beta=%g gamma=%d",
+                    "PILLAR epoch %d: beta=%g gamma=%d "
+                    "task_loss_weight=%g",
                     epoch, pillar_effective_coefficient,
-                    pillar_effective_exponent,
+                    pillar_effective_exponent, pillar_task_loss_weight,
                 )
 
         if isinstance(train_loader, DataLoader):
@@ -3558,6 +3583,8 @@ def main(args):
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
             task_loss = loss
+            if pillar_enabled and pillar_task_loss_weight != 1.0:
+                loss = loss * pillar_task_loss_weight
             range_penalty = local_embeddings.new_zeros(())
             distillation_loss = local_embeddings.new_zeros(())
             simple_gate_range_penalty = local_embeddings.new_zeros(())
@@ -3626,6 +3653,23 @@ def main(args):
                 loss = loss + (
                     pillar_effective_coefficient
                     * pillar_range_penalty)
+                if (rank == 0 and pillar_log_interval > 0
+                        and global_step % pillar_log_interval == 0):
+                    pillar_summary = backbone.module.pillar_range_summary()
+                    logging.info(
+                        "PILLAR range step=%d penalty=%.7g weighted=%.7g "
+                        "input_absmax=%.7g approximation_outside=%.7g "
+                        "regularization_outside=%.7g",
+                        global_step,
+                        float(pillar_range_penalty.item()),
+                        float((pillar_effective_coefficient
+                               * pillar_range_penalty).item()),
+                        float(pillar_summary["input_absmax"].item()),
+                        float(pillar_summary[
+                            "approximation_outside_fraction"].item()),
+                        float(pillar_summary[
+                            "regularization_outside_fraction"].item()),
+                    )
             if herpn_enabled and herpn_distill_loss_weight > 0:
                 distillation_names = (
                     active_layerwise_group
@@ -4062,7 +4106,16 @@ def main(args):
                             backbone.module.state_dict(),
                             os.path.join(cfg.output, "model_validation.pt"),
                         )
-                    if (validate_after_prepbn_transition
+                    if (pillar_enabled
+                            and epoch < pillar_skip_verification_epochs):
+                        if rank == 0:
+                            logging.info(
+                                "Skipping verification at step %d during "
+                                "PILLAR warm-up epoch %d/%d",
+                                global_step, epoch + 1,
+                                pillar_skip_verification_epochs,
+                            )
+                    elif (validate_after_prepbn_transition
                             and not prepbn_transition_complete(
                                 global_step, prepbn_decay_steps)):
                         if rank == 0:

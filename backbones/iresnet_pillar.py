@@ -45,7 +45,8 @@ class PILLARPolynomialReLU(nn.Module):
     multiplicative_depth = 2
 
     def __init__(self, approximation_range=5.0, regularization_range=4.8,
-                 regularization_exponent=10, training_clip=True):
+                 regularization_exponent=10, training_clip=True,
+                 penalty_reduction="mean"):
         super().__init__()
         approximation_range = float(approximation_range)
         regularization_range = float(regularization_range)
@@ -58,7 +59,11 @@ class PILLARPolynomialReLU(nn.Module):
                 "regularization_range must be positive and no larger than "
                 "approximation_range")
         self._validate_exponent(regularization_exponent)
+        if penalty_reduction not in ("mean", "sum"):
+            raise ValueError(
+                "penalty_reduction must be either 'mean' or 'sum'")
         self.training_clip = bool(training_clip)
+        self.penalty_reduction = str(penalty_reduction)
         self._approximation_range = approximation_range
         self._regularization_exponent = int(regularization_exponent)
         self.register_buffer(
@@ -144,8 +149,14 @@ class PILLARPolynomialReLU(nn.Module):
             regularization_range = self.regularization_range.to(
                 device=x.device, dtype=compute_dtype)
             normalized = compute_x / regularization_range
-            self._last_range_penalty = normalized.pow(
-                self._regularization_exponent).mean()
+            element_penalty = normalized.pow(
+                self._regularization_exponent)
+            if self.penalty_reduction == "sum":
+                # PILLAR-ESPN flattens each activation and takes its L1 norm.
+                # Since gamma is even, that is exactly this unnormalized sum.
+                self._last_range_penalty = element_penalty.sum()
+            else:
+                self._last_range_penalty = element_penalty.mean()
         else:
             self._last_range_penalty = None
 
@@ -180,7 +191,8 @@ class PILLARPolynomialReLU(nn.Module):
         return (
             f"target=ReLU, interval=[-{self._approximation_range:g}, "
             f"{self._approximation_range:g}], degree=4, "
-            f"multiplicative_depth=2"
+            f"multiplicative_depth=2, penalty_reduction="
+            f"{self.penalty_reduction}"
         )
 
 
@@ -190,7 +202,8 @@ class IResNet(_ActivationFactoryIResNet):
     def __init__(self, *args, pillar_approximation_range=5.0,
                  pillar_regularization_range=4.8,
                  pillar_regularization_exponent=10,
-                 pillar_training_clip=True, **kwargs):
+                 pillar_training_clip=True,
+                 pillar_penalty_reduction="mean", **kwargs):
         object.__setattr__(
             self, "pillar_approximation_range",
             float(pillar_approximation_range))
@@ -202,6 +215,9 @@ class IResNet(_ActivationFactoryIResNet):
             int(pillar_regularization_exponent))
         object.__setattr__(
             self, "pillar_training_clip", bool(pillar_training_clip))
+        object.__setattr__(
+            self, "pillar_penalty_reduction",
+            str(pillar_penalty_reduction))
         # The parent supplies the iResNet topology and activation factory. Its
         # HerPN progress machinery sees no HerPN wrappers in this subclass.
         super().__init__(*args, herpn_progress=0.0, **kwargs)
@@ -213,6 +229,7 @@ class IResNet(_ActivationFactoryIResNet):
             regularization_range=self.pillar_regularization_range,
             regularization_exponent=self.pillar_regularization_exponent,
             training_clip=self.pillar_training_clip,
+            penalty_reduction=self.pillar_penalty_reduction,
         )
 
     def pillar_activations(self):
