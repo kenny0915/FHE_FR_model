@@ -297,6 +297,14 @@ def test_r50_pillar_backbone_and_configs_cover_the_recipe():
     assert uniform_scaled.pillar_skip_verification_epochs == 10
     assert uniform_scaled.pillar_strict_verification_epoch == 14
 
+    layerwise_scaled = _load_standalone_config(
+        "ms1mv3_r50_pillar_espn_scale4_stem6.py")
+    assert layerwise_scaled.pillar_input_scale == 4.0
+    assert layerwise_scaled.pillar_input_scale_overrides == {
+        "prelu": 6.0,
+        "layer1.0.prelu": 6.0,
+    }
+
 
 def test_r18_pillar_lightweight_forward_and_layer_averaged_penalty():
     torch.manual_seed(7)
