@@ -2,10 +2,10 @@
 
 ## Objective and acceptance gate
 
-This experiment replaces the 13 retained PReLUs in the `nl13` iResNet-50
-backbone in forward order. A checkpoint qualifies only when strict inference
-over all 469,375 IJB-C images reports zero non-finite augmented embedding rows
-and TAR at FAR `1e-4` is at least 90%.
+This experiment searches forward-prefix and selective orders over the 13
+retained PReLUs in the `nl13` iResNet-50 backbone. A checkpoint qualifies only
+when strict inference over all 469,375 IJB-C images reports zero non-finite
+augmented embedding rows and TAR at FAR `1e-4` is at least 90%.
 
 The polynomial target at activation `i` is its frozen channel-wise PReLU on a
 public interval `[-S_i, S_i]`. Inference evaluates
@@ -26,23 +26,34 @@ training procedures and do not increase encrypted multiplicative depth.
 | 7, fast schedule | `layer3.3.prelu` | 0 | 77.52% | accuracy fail |
 | 7, slow blend + fixed-graph recovery, epoch 11 | `layer3.3.prelu` | 0 | 84.24% | accuracy fail |
 | 7, slow blend + fixed-graph recovery, epoch 14 | `layer3.3.prelu` | 0 | **87.36%** | accuracy fail |
+| 7, selective terminal `layer4.2`, final | `layer4.2.prelu` | 0 | **90.84%** | **pass** |
+| 7, selective terminal `layer4.2`, epoch 7 | `layer4.2.prelu` | 0 | **90.86%** | **pass** |
+| 8, boundary-seeded `layer4.2` + `layer4.1` | `layer4.1.prelu` | 0 | 88.62% | accuracy fail |
 
-The maximum validated prefix is therefore **six polynomial activations**,
-leaving seven PReLUs. The qualifying checkpoint is preserved independently of
-the later seven-layer experiment at:
+The maximum validated count is therefore **seven polynomial activations**,
+leaving six PReLUs. It is not a forward prefix: the successful set is the
+accepted first six sites plus terminal `layer4.2.prelu`. The best qualifying
+checkpoint is preserved at:
 
 ```text
-work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_recovery/
-model_group06_ijbc_92p69.pt
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/
+model_selective7_layer42_ijbc_90p86.pt
 ```
 
-Its complete IJB-C TAR vector for FAR
+Its complete strict IJB-C TAR vector for FAR
 `[1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]` is
-`[80.50, 88.09, 92.69, 95.59, 97.45, 98.64]` percent. The exact checkpoint
-state has its first six `.blend` buffers equal to one and its remaining seven
-equal to zero.
+`[76.61, 84.36, 90.86, 94.70, 97.31, 98.90]` percent. The evaluator processed
+all 469,375 files and reported zero non-finite augmented embedding rows. The
+exact checkpoint has `.blend=1` at the first six activations and
+`layer4.2.prelu`, with the other six blends zero. Its SHA-256 is
+`9bf8545d509abca4f25553ee1d0390a2cade0d3448d0d14374cb44c998b939b5`.
 
-## Method that reached six replacements
+The seven public input scales are `[1.2140, 3.0112, 2.9724, 3.9498,
+8.9278, 29.6929, 1.6235]` in activation order. Each site targets its frozen
+channel-wise PReLU on `[-S_i,S_i]` and folds to degree 2, so the replacement
+costs one square level per site.
+
+## Method that reached seven replacements
 
 1. Start from the trained NL13 PReLU backbone, not the 25-activation baseline.
 2. Convert singleton activations in forward order so every interval is
@@ -65,6 +76,16 @@ equal to zero.
    of `29.69291`, a two-epoch blend, then fine-tune the fixed-six graph with a
    frozen baseline-NL13 embedding teacher and 10% backbone LR. This recovered
    TAR at FAR `1e-4` from 84.72% to 92.69%.
+9. Do not assume forward order remains optimal after that point. The forward
+   seventh (`layer3.3.prelu`) stopped at 87.36% TAR. Keeping it as PReLU and
+   instead converting the terminal `layer4.2.prelu` produced a strict scale of
+   `1.623502` (robust input `0.811751`, observed input `4.191087`, tail ratio
+   `2.5815`) and reached 90.86% TAR after fixed-graph recovery.
+10. Scale the optimizer LR of pending normalized polynomial coefficients by
+    `1e-4`. Before this fix, a coefficient update was multiplied back by a
+    provisional public scale of roughly `6e4--9e4`, causing local-fit loss and
+    gradients to explode. The smaller coefficient LR let conditioning collapse
+    the provisional late-stage tails before the mandatory strict recalibration.
 
 The primary configurations are:
 
@@ -75,6 +96,9 @@ configs/ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03_resume.py
 configs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_recovery.py
 configs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_resume.py
 configs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_finetune.py
+configs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42.py
+configs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41.py
+configs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41_recovered.py
 ```
 
 ## Why earlier replacement attempts failed
@@ -112,10 +136,23 @@ the root cause.
   LFW. The opt-in `resume_rebase_lr_scheduler` fix rebased the extended run at
   step 50,580 (base LR `3.0769e-4`, effective backbone LR `3.0769e-5`), rapidly
   restored LFW, and produced the meaningful final 87.36% IJB-C result.
-- The seventh activation is an accuracy boundary rather than a non-finite
-  boundary. Its slow blend stayed finite, but loss rose to about 45 and the
-  pre-clip gradient norm exceeded 9,000. Four real-LR recovery epochs reduced
-  loss to about 14.4, yet did not recover the required low-FAR separation.
+- The forward-prefix seventh activation is an accuracy boundary rather than a
+  non-finite boundary. Its slow blend stayed finite, but loss rose to about 45
+  and the pre-clip gradient norm exceeded 9,000. Four real-LR recovery epochs
+  reduced loss to about 14.4, yet did not recover the required low-FAR
+  separation.
+- Reducing the topology to nine nonlinear sites did not make an all-nine
+  polynomial model numerically safe. A clean-input recovery exceeded the
+  validation guard with a finite embedding magnitude of `8.49947e22` at step
+  2,000. Range-augmented recovery looked ordinary on LFW/CFP-FP/AgeDB at step
+  2,000, then reached `4.93499e7` on validation at step 4,000. Freezing
+  BatchNorm still produced a non-finite validation row at step 2,000. The old
+  86.67% IJB-C number for that graph came from a pre-strict evaluator and is
+  therefore not evidence of numerical safety.
+- A boundary-seeded selective eighth model stayed finite on all 469,375 IJB-C
+  files, but only reached 88.62% TAR at FAR `1e-4`. Zero non-finite rows are
+  necessary but not sufficient: adding one quadratic can preserve ordinary
+  benchmark accuracy while damaging the extreme low-FAR score.
 
 ## Strict result artifacts
 
@@ -133,9 +170,19 @@ work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_recovery/
   ijbc_group06_accuracy_final/nl13_herpn_group06_accuracy_final/ijbc_tar_at_far.csv
   ijbc_group07_accuracy_epoch11/nl13_herpn_group07_accuracy_epoch11/ijbc_tar_at_far.csv
   ijbc_group07_accuracy_final/nl13_herpn_group07_accuracy_final/ijbc_tar_at_far.csv
+
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/
+  ijbc_selective7_layer42_final_node34/
+    nl13_herpn_selective7_layer42_final_node34/ijbc_tar_at_far.csv
+  ijbc_selective7_layer42_epoch07_node35/
+    nl13_herpn_selective7_layer42_epoch07_node35/ijbc_tar_at_far.csv
+
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41/
+  ijbc_selective8_layer42_layer41_node33/
+    nl13_herpn_selective8_layer42_layer41_node33/ijbc_tar_at_far.csv
 ```
 
-## Why the frontier stops at six
+## Why forward-prefix conversion stopped at six
 
 The seventh replacement completed the strongest practical recovery attempted:
 strict tail-aware scale `135.2361`, two-epoch blend, BatchNorm recalibration,
@@ -153,3 +200,9 @@ required expansion `39.74x` beyond a `3x` cap. This is direct evidence that
 more fitting can move rare tails outward rather than cure them. Blending group
 8 would violate the explicit numerical-safety policy and is not justified
 after group 7 already fails accuracy.
+
+That conclusion applies to forward-prefix order, not to every seven-site
+subset. The selective terminal route succeeds because `layer4.2.prelu` can be
+conditioned to a compact strict interval while the difficult middle
+`layer3.3--layer3.13` sites remain linear PReLUs. This raises the validated
+count from six to seven without increasing polynomial degree.
