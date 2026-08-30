@@ -323,3 +323,23 @@ def test_selective_ninth_recovered_config_uses_final_eighth_model():
     assert cfg.layerwise_poly_training_group_limit == 9
     assert cfg.layerwise_poly_optimizer_lr_scale == pytest.approx(1.0e-4)
     assert cfg.num_epoch == 8
+
+
+def test_selective_ninth_from_recovered_eighth_uses_stronger_branch():
+    cfg = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_nl13_prelu_herpn_selective9_layer42_layer41_layer40_from_recovered8.py")
+    order = tuple(
+        name for group in cfg.herpn_conversion_groups for name in group)
+
+    assert order[:9] == (
+        *NL13_ACTIVATION_NAMES[:6],
+        "layer4.2.prelu",
+        "layer4.1.prelu",
+        "layer4.0.prelu",
+    )
+    assert cfg.backbone_init.endswith(
+        "selective8_layer42_layer41_recovered/model.pt")
+    assert cfg.layerwise_poly_training_group_limit == 9
+    assert cfg.layerwise_poly_optimizer_lr_scale == pytest.approx(1.0e-4)
+    assert cfg.num_epoch == 8
