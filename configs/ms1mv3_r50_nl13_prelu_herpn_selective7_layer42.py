@@ -40,10 +40,11 @@ config.herpn_require_full_conversion = False
 config.layerwise_poly_allow_selective_order = True
 config.layerwise_poly_training_group_limit = 7
 config.layerwise_poly_max_tail_scale_expansion = 5.1
-# The range term is dimensionless after normalization by S.  Keep it as a
-# gentle tail constraint so the frozen local PReLU fit and recognition losses
-# are not overwhelmed by a handful of extreme late-stage values.
-config.layerwise_poly_conditioning_range_loss_weight = 0.01
+# The measured public interval already contains the late-stage distribution.
+# Keep a numerically positive value for the provisional-schedule invariant,
+# but let the frozen local PReLU fit and recognition losses drive adaptation;
+# even a 0.01 relative-tail weight was dominated by very rare extreme values.
+config.layerwise_poly_conditioning_range_loss_weight = 1.0e-8
 # Late NL13 PReLUs safely receive large finite values because their teacher is
 # linear outside zero.  Preserve those measured values through public input
 # normalization instead of forcing an unsafe small quadratic interval.
