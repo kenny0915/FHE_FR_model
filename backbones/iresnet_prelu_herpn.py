@@ -273,13 +273,19 @@ class PReLUHerPNActivation(nn.Module):
             ).to(device=x.device, dtype=compute_x.dtype)
             excess = torch.relu(compute_x.abs() - limit)
             if not scaled or calibrated:
+                # Layerwise intervals can differ by many orders of magnitude.
+                # Penalize relative escape so changing the public scale S does
+                # not multiply this auxiliary objective and its gradient by
+                # S^2.  Legacy unscaled activations retain their raw penalty.
+                penalty_excess = excess / limit if scaled else excess
                 self._last_range_penalty = (
-                    excess.square().mean()
-                    + 0.1 * excess.flatten(1).amax(dim=1).square().mean()
+                    penalty_excess.square().mean()
+                    + 0.1
+                    * penalty_excess.flatten(1).amax(dim=1).square().mean()
                 )
                 self._last_input_absmax = compute_x.detach().abs().amax()
                 self._last_outside_fraction = (
-                    (excess.detach() > 0).float().mean())
+                    (penalty_excess.detach() > 0).float().mean())
             else:
                 self._last_range_penalty = compute_x.sum() * 0.0
                 self._last_input_absmax = None

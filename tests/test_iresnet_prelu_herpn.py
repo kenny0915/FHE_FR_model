@@ -209,6 +209,21 @@ def test_layerwise_scaled_prelu_herpn_requires_calibration_before_blend():
     assert float(activation.blend) == pytest.approx(0.1)
 
 
+def test_layerwise_range_penalty_is_normalized_by_public_interval():
+    activation = PReLUHerPNActivation(
+        channels=1, blend=0.0, layerwise_scale=True).train()
+    activation.set_input_scale(10.0)
+    inputs = torch.tensor([[[[20.0, 5.0]]]])
+
+    activation(inputs)
+
+    # Relative excess is [1, 0]: mean square 0.5 plus 0.1 * max square.
+    torch.testing.assert_close(
+        activation.range_penalty(), torch.tensor(0.6))
+    assert float(activation.range_stats()["outside_fraction"]) == pytest.approx(
+        0.5)
+
+
 def test_relative_distillation_remains_active_at_full_conversion():
     activation = PReLUHerPNActivation(
         channels=2, blend=1.0).train()
