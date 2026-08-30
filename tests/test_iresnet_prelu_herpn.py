@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from backbones import get_model
+from backbones.iresnet_nl9_prelu_herpn import NL9_ACTIVATION_NAMES
 from backbones.iresnet_prelu_herpn import PReLUHerPNActivation
 from utils.utils_optimizer import split_weight_decay_parameters
 
@@ -332,6 +333,27 @@ def test_layerwise_scaled_r50_config_schedules_forward_order_and_augmentation():
     assert final_conversion_epoch == 25.0
     assert cfg.num_epoch - final_conversion_epoch == 4.0
     assert cfg.output.endswith("layerwise_scale_range_aug_one_epoch")
+
+
+def test_nl9_fixed_recovery_keeps_all_nine_quadratics_from_epoch_zero():
+    clean = _load_standalone_config(
+        "configs/ms1mv3_r50_nl9_prelu_herpn_fixed_recovery.py")
+    augmented = _load_standalone_config(
+        "configs/ms1mv3_r50_nl9_prelu_herpn_fixed_recovery_aug.py")
+    scheduled = tuple(
+        name for group in clean.herpn_conversion_groups for name in group)
+
+    assert scheduled == NL9_ACTIVATION_NAMES
+    assert all(
+        start + clean.herpn_transition_epochs <= 0.0
+        for start in clean.herpn_group_epochs)
+    assert clean.herpn_require_full_conversion
+    assert clean.embedding_teacher_network == "r50_nl9"
+    assert clean.embedding_distill_weight == pytest.approx(1.0)
+    assert clean.fail_on_nonfinite_val
+    assert augmented.embedding_distill_weight == pytest.approx(5.0)
+    assert augmented.range_augmentation["enabled"]
+    assert augmented.range_augmentation["probability"] == pytest.approx(0.5)
 
 
 def test_layerwise_scaled_r50_group4_recovery_conditions_layer2_before_blend():
