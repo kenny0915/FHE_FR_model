@@ -111,20 +111,23 @@ def model_from_config(config_path, checkpoint, device):
 def debug_rows(model, data, flip, start, end, batch_size, max_bad_rows):
     device = next(model.parameters()).device
     bad_rows = []
+    bad_row_count = 0
     for batch_start in range(start, end, batch_size):
         batch_end = min(batch_start + batch_size, end)
         inputs = data[batch_start:batch_end].to(device=device)
         inputs = inputs / 127.5 - 1.0
         outputs = model(inputs)
         bad = (~torch.isfinite(outputs).all(dim=1)).nonzero().flatten()
-        for local_row in bad.tolist():
+        bad_row_count += int(bad.numel())
+        remaining = max(0, max_bad_rows - len(bad_rows))
+        for local_row in bad[:remaining].tolist():
             bad_rows.append(batch_start + local_row)
-            if len(bad_rows) >= max_bad_rows:
-                break
-        if len(bad_rows) >= max_bad_rows:
-            break
 
-    print(json.dumps({"flip": flip, "bad_rows": bad_rows}))
+    print(json.dumps({
+        "flip": flip,
+        "bad_row_count": bad_row_count,
+        "traced_bad_rows": bad_rows,
+    }))
     for row in bad_rows:
         trace = PILLARTrace(model)
         try:
