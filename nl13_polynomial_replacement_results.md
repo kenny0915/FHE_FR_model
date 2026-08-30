@@ -29,31 +29,50 @@ training procedures and do not increase encrypted multiplicative depth.
 | 7, selective terminal `layer4.2`, final | `layer4.2.prelu` | 0 | **90.84%** | **pass** |
 | 7, selective terminal `layer4.2`, epoch 7 | `layer4.2.prelu` | 0 | **90.86%** | **pass** |
 | 8, boundary-seeded `layer4.2` + `layer4.1` | `layer4.1.prelu` | 0 | 88.62% | accuracy fail |
+| 8, recovered-seven source, final | `layer4.1.prelu` | 0 | 89.50% | accuracy fail |
+| 8, fresh-head distillation, low LR, epoch 2 | `layer4.1.prelu` | 0 | 88.79% | accuracy fail |
+| 8, fresh-head distillation, high LR, epoch 1 | `layer4.1.prelu` | 0 | 87.17% | accuracy fail |
+| 8, class-head-preserving resume, epoch 9 | `layer4.1.prelu` | 0 | 89.75% | accuracy fail |
+| 8, class-head-preserving resume, epoch 10 | `layer4.1.prelu` | 0 | **90.01%** | **pass** |
+| 8, gentle class-head-preserving resume, epoch 9 | `layer4.1.prelu` | 0 | 89.60% | accuracy fail |
 
-The maximum validated count is therefore **seven polynomial activations**,
-leaving six PReLUs. It is not a forward prefix: the successful set is the
-accepted first six sites plus terminal `layer4.2.prelu`. The best qualifying
+The maximum validated count is therefore **eight polynomial activations**,
+leaving five PReLUs. It is not a forward prefix: the successful set is the
+accepted first six sites plus terminal `layer4.2.prelu` and
+`layer4.1.prelu`. The maximum-count qualifying
 checkpoint is preserved at:
 
 ```text
-work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/
-model_selective7_layer42_ijbc_90p86.pt
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill/
+model_selective8_resume_epoch10_ijbc_90p01.pt
 ```
 
 Its complete strict IJB-C TAR vector for FAR
 `[1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]` is
-`[76.61, 84.36, 90.86, 94.70, 97.31, 98.90]` percent. The evaluator processed
+`[75.72, 83.49, 90.01, 94.15, 97.00, 98.82]` percent. The evaluator processed
 all 469,375 files and reported zero non-finite augmented embedding rows. The
 exact checkpoint has `.blend=1` at the first six activations and
-`layer4.2.prelu`, with the other six blends zero. Its SHA-256 is
-`9bf8545d509abca4f25553ee1d0390a2cade0d3448d0d14374cb44c998b939b5`.
+`layer4.2.prelu` and `layer4.1.prelu`, with the other five blends zero. Its
+SHA-256 is
+`45d6e0e29401b2d2597918d3e791645e1a8c12a123a9c331c55701f7e4de957f`.
 
-The seven public input scales are `[1.2140, 3.0112, 2.9724, 3.9498,
-8.9278, 29.6929, 1.6235]` in activation order. Each site targets its frozen
+The eight public input scales are `[1.2140, 3.0112, 2.9724, 3.9498,
+8.9278, 29.6929, 1.6235, 3.6565]` in selective conversion order. Each site
+targets its frozen
 channel-wise PReLU on `[-S_i,S_i]` and folds to degree 2, so the replacement
 costs one square level per site.
 
-## Method that reached seven replacements
+This means 8 of the `nl13` model's 13 retained PReLUs are polynomial and 5
+remain PReLU. Relative to the original 25 iResNet nonlinear slots, the graph
+contains 8 quadratics, 5 PReLUs, and 12 intentional identities; identities are
+not counted as polynomial replacements.
+
+The seven-site epoch-7 checkpoint remains the higher-accuracy fallback at
+90.86% TAR, but it replaces one fewer PReLU. Its path and SHA-256 remain
+`work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/model_selective7_layer42_ijbc_90p86.pt`
+and `9bf8545d509abca4f25553ee1d0390a2cade0d3448d0d14374cb44c998b939b5`.
+
+## Method that reached eight replacements
 
 1. Start from the trained NL13 PReLU backbone, not the 25-activation baseline.
 2. Convert singleton activations in forward order so every interval is
@@ -86,6 +105,18 @@ costs one square level per site.
     provisional public scale of roughly `6e4--9e4`, causing local-fit loss and
     gradients to explode. The smaller coefficient LR let conditioning collapse
     the provisional late-stage tails before the mandatory strict recalibration.
+11. Seed `layer4.1.prelu` from the fully recovered seven-site epoch-7 model,
+    condition its input from an unusable provisional scale to strict scale
+    `3.656477`, blend over two epochs, and recover the fixed-eight graph. This
+    produced zero non-finite rows and 89.50% TAR: close, but still below the
+    gate.
+12. Preserve the trained distributed PartialFC head when continuing the
+    eight-site model. Backbone-only distillation created a fresh class head and
+    scored only 87.17--88.79% strict TAR despite better LFW/CFP-FP proxies. A
+    true epoch-8 resume restored the backbone, PartialFC, optimizer momentum,
+    and completed-group metadata; rebasing its exhausted LR scheduler over
+    four extra epochs and distilling the accepted seven-site embedding raised
+    epoch 9 to 89.75% and epoch 10 to **90.01%**.
 
 The primary configurations are:
 
@@ -99,6 +130,10 @@ configs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_finetune.py
 configs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42.py
 configs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41.py
 configs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41_recovered.py
+configs/ms1mv3_r50_nl13_prelu_herpn_selective8_recovered_distill.py
+configs/ms1mv3_r50_nl13_prelu_herpn_selective8_recovered_distill_lr1e3.py
+configs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill.py
+configs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill_lr3e4.py
 ```
 
 ## Why earlier replacement attempts failed
@@ -153,6 +188,24 @@ the root cause.
   files, but only reached 88.62% TAR at FAR `1e-4`. Zero non-finite rows are
   necessary but not sufficient: adding one quadratic can preserve ordinary
   benchmark accuracy while damaging the extreme low-FAR score.
+- Starting the eighth conversion from the fully recovered seven-site model
+  improved strict TAR to 89.50%, but ordinary proxy selection was misleading:
+  its epoch-6 proxy looked competitive yet scored 89.14%. Fresh-head embedding
+  recovery made the mismatch worse. The high-LR run reached 99.47% LFW and
+  94.07% CFP-FP around step 4,000, but its strict epoch-1 TAR was only 87.17%.
+- The missing ingredient was preserving the trained PartialFC state. A true
+  resume moved strict TAR monotonically from 89.50% (source) to 89.75%
+  (epoch 9) and 90.01% (epoch 10). A gentler resume reached 89.60% at epoch 9,
+  showing that simply minimizing parameter movement was not enough; both the
+  aligned class head and a useful recovery LR were required.
+- A ninth polynomial at `layer4.0.prelu` was conditioned successfully: its
+  provisional scales near `9e4` collapsed to strict public scales `6.3372` and
+  `6.4419` in two independent source branches, with no calibration violations.
+  Nevertheless, reaching full blend near step 16,000 dropped CFP-FP/AgeDB to
+  about 77--78% in both branches. The redundant weaker-source branch was
+  stopped at step 28,000 after recovering only 87.01/89.60% CFP-FP/AgeDB; the
+  stronger-source branch was stopped after reproducing the same full-blend
+  shock. This is an accuracy boundary, not a range-calibration failure.
 
 ## Strict result artifacts
 
@@ -180,6 +233,30 @@ work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/
 work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41/
   ijbc_selective8_layer42_layer41_node33/
     nl13_herpn_selective8_layer42_layer41_node33/ijbc_tar_at_far.csv
+
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41_recovered/
+  ijbc_selective8_layer42_layer41_recovered/
+    nl13_herpn_selective8_layer42_layer41_recovered/ijbc_tar_at_far.csv
+  ijbc_selective8_layer42_layer41_recovered_epoch06_node37/
+    nl13_herpn_selective8_layer42_layer41_recovered_epoch06_node37/ijbc_tar_at_far.csv
+
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_recovered_distill/
+  ijbc_selective8_recovered_distill_epoch02/
+    nl13_herpn_selective8_recovered_distill_epoch02/ijbc_tar_at_far.csv
+
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_recovered_distill_lr1e3/
+  ijbc_selective8_recovered_distill_lr1e3_epoch01/
+    nl13_herpn_selective8_recovered_distill_lr1e3_epoch01/ijbc_tar_at_far.csv
+
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill/
+  ijbc_selective8_resume_distill_epoch09/
+    nl13_herpn_selective8_resume_distill_epoch09/ijbc_tar_at_far.csv
+  ijbc_selective8_resume_distill_epoch10/
+    nl13_herpn_selective8_resume_distill_epoch10/ijbc_tar_at_far.csv
+
+work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill_lr3e4/
+  ijbc_selective8_resume_distill_lr3e4_epoch09/
+    nl13_herpn_selective8_resume_distill_lr3e4_epoch09/ijbc_tar_at_far.csv
 ```
 
 ## Why forward-prefix conversion stopped at six
@@ -205,4 +282,8 @@ That conclusion applies to forward-prefix order, not to every seven-site
 subset. The selective terminal route succeeds because `layer4.2.prelu` can be
 conditioned to a compact strict interval while the difficult middle
 `layer3.3--layer3.13` sites remain linear PReLUs. This raises the validated
-count from six to seven without increasing polynomial degree.
+count from six to seven without increasing polynomial degree. A second
+selective step then adds `layer4.1.prelu`; unlike the unstable forward-prefix
+sites, it can be conditioned to strict scale `3.656477`. Its accuracy requires
+a class-head-preserving recovery resume, which raises the final validated count
+to eight while retaining degree 2.
