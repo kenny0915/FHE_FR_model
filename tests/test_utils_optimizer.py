@@ -99,6 +99,31 @@ def test_temporary_optimizer_lr_scale_can_target_one_scope():
         [0.2, 0.2, 0.2])
 
 
+def test_temporary_optimizer_lr_scales_can_target_independent_scopes():
+    backbone = torch.nn.Parameter(torch.tensor(1.0))
+    polynomial = torch.nn.Parameter(torch.tensor(1.0))
+    classifier = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.SGD([
+        {"params": [backbone], "lr": 0.2, "scope": "backbone"},
+        {"params": [polynomial], "lr": 0.2, "scope": "layerwise_poly"},
+        {"params": [classifier], "lr": 0.2, "scope": "classifier"},
+    ])
+    for parameter in (backbone, polynomial, classifier):
+        parameter.grad = torch.tensor(1.0)
+
+    with temporary_optimizer_lr_scale(
+            optimizer, 0.01, scope="backbone"):
+        with temporary_optimizer_lr_scale(
+                optimizer, 1.0e-4, scope="layerwise_poly"):
+            optimizer.step()
+
+    assert torch.allclose(backbone, torch.tensor(0.998))
+    assert torch.allclose(polynomial, torch.tensor(0.99998))
+    assert torch.allclose(classifier, torch.tensor(0.8))
+    assert [group["lr"] for group in optimizer.param_groups] == pytest.approx(
+        [0.2, 0.2, 0.2])
+
+
 def test_gradient_clip_scope_can_isolate_backbone_from_classifier():
     backbone = torch.nn.Linear(3, 2)
     classifier = torch.nn.Linear(2, 5)

@@ -45,6 +45,10 @@ config.layerwise_poly_max_tail_scale_expansion = 5.1
 # but let the frozen local PReLU fit and recognition losses drive adaptation;
 # even a 0.01 relative-tail weight was dominated by very rare extreme values.
 config.layerwise_poly_conditioning_range_loss_weight = 1.0e-8
+# The normalized polynomial coefficients are dimensionless, but their output
+# is multiplied by the calibrated S (about 6e4--8e4 here).  Slow this optimizer
+# group so one coefficient step cannot create an S-amplified output jump.
+config.layerwise_poly_optimizer_lr_scale = 1.0e-4
 # Late NL13 PReLUs safely receive large finite values because their teacher is
 # linear outside zero.  Preserve those measured values through public input
 # normalization instead of forcing an unsafe small quadratic interval.

@@ -2317,13 +2317,16 @@ def main(args):
         cfg, "layerwise_poly_blend_backbone_lr_scale", 1.0))
     layerwise_poly_final_backbone_lr_scale = float(getattr(
         cfg, "layerwise_poly_final_backbone_lr_scale", 1.0))
+    layerwise_poly_optimizer_lr_scale = float(getattr(
+        cfg, "layerwise_poly_optimizer_lr_scale", 1.0))
     layerwise_poly_allow_selective_order = bool(getattr(
         cfg, "layerwise_poly_allow_selective_order", False))
     if min(
             layerwise_poly_blend_backbone_lr_scale,
-            layerwise_poly_final_backbone_lr_scale) <= 0.0:
+            layerwise_poly_final_backbone_lr_scale,
+            layerwise_poly_optimizer_lr_scale) <= 0.0:
         raise ValueError(
-            "Layerwise polynomial backbone LR scales must be positive")
+            "Layerwise polynomial optimizer LR scales must be positive")
     if layerwise_poly_conditioning_backbone_lr_scale < 0.0:
         raise ValueError(
             "layerwise_poly_conditioning_backbone_lr_scale must be non-negative")
@@ -3356,7 +3359,7 @@ def main(args):
                 if active_group_index is not None else ())
             logging.info(
                 "Layerwise polynomial phase=%s active_group=%s "
-                "backbone_lr_scale=%.4g",
+                "backbone_lr_scale=%.4g polynomial_lr_scale=%.4g",
                 phase,
                 ", ".join(active_names) if active_names else "all",
                 (layerwise_poly_blend_backbone_lr_scale
@@ -3364,6 +3367,7 @@ def main(args):
                  layerwise_poly_final_backbone_lr_scale
                  if phase == "final_finetune" else
                  layerwise_poly_local_fit_backbone_lr_scale),
+                layerwise_poly_optimizer_lr_scale,
             )
         for step_in_epoch, (img, local_labels) in enumerate(train_loader):
             if max_steps_per_epoch > 0 and step_in_epoch >= max_steps_per_epoch:
@@ -3875,7 +3879,11 @@ def main(args):
                                         opt,
                                         effective_layerwise_backbone_lr_scale,
                                         scope="backbone"):
-                                    amp.step(opt)
+                                    with temporary_optimizer_lr_scale(
+                                            opt,
+                                            layerwise_poly_optimizer_lr_scale,
+                                            scope="layerwise_poly"):
+                                        amp.step(opt)
                             else:
                                 amp.step(opt)
                         amp.update()
@@ -3989,7 +3997,11 @@ def main(args):
                                     opt,
                                     effective_layerwise_backbone_lr_scale,
                                     scope="backbone"):
-                                opt.step()
+                                with temporary_optimizer_lr_scale(
+                                        opt,
+                                        layerwise_poly_optimizer_lr_scale,
+                                        scope="layerwise_poly"):
+                                    opt.step()
                         else:
                             opt.step()
                     opt.zero_grad()
