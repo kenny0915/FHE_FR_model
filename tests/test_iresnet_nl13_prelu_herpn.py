@@ -238,3 +238,25 @@ def test_selective_seventh_nl13_config_preserves_safe_prefix(path, target):
     assert cfg.layerwise_poly_max_input_scale == pytest.approx(1.0e6)
     assert not cfg.herpn_require_full_conversion
     assert cfg.num_epoch == 8
+
+
+def test_selective_eighth_nl13_config_extends_terminal_checkpoint():
+    cfg = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41.py")
+    order = tuple(
+        name for group in cfg.herpn_conversion_groups for name in group)
+
+    assert order[:6] == NL13_ACTIVATION_NAMES[:6]
+    assert order[6:8] == ("layer4.2.prelu", "layer4.1.prelu")
+    assert set(order) == set(NL13_ACTIVATION_NAMES)
+    assert len(order) == len(set(order)) == 13
+    assert cfg.backbone_init.endswith(
+        "selective7_layer42/model_herpn_group_07_bnrecalibrated.pt")
+    assert all(
+        start + cfg.herpn_transition_epochs <= 0.0
+        for start in cfg.herpn_group_epochs[:7])
+    assert cfg.herpn_group_epochs[7] == pytest.approx(1.0)
+    assert cfg.layerwise_poly_training_group_limit == 8
+    assert cfg.layerwise_poly_optimizer_lr_scale == pytest.approx(1.0e-4)
+    assert cfg.num_epoch == 8
