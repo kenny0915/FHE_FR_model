@@ -274,7 +274,8 @@ def test_selective_eighth_recovered_config_uses_final_seventh_model():
         "layer4.2.prelu",
         "layer4.1.prelu",
     )
-    assert cfg.backbone_init.endswith("selective7_layer42/model.pt")
+    assert cfg.backbone_init.endswith(
+        "selective7_layer42/model_epoch_07.pt")
     assert cfg.layerwise_poly_training_group_limit == 8
     assert cfg.layerwise_poly_optimizer_lr_scale == pytest.approx(1.0e-4)
     assert cfg.num_epoch == 8

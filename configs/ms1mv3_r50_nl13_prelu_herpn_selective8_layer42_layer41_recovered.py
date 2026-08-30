@@ -19,4 +19,5 @@ config.output = (
     "work_dirs/"
     "ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41_recovered")
 config.backbone_init = (
-    "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/model.pt")
+    "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/"
+    "model_epoch_07.pt")
