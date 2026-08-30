@@ -22,4 +22,8 @@ config.lr = 5.0e-5
 config.embedding_distill_weight = 5.0
 config.freeze_batchnorm_running_stats = True
 config.freeze_batchnorm_affine = True
-
+# The inherited all-polynomial checkpoint is finite on IJB-C but a rare
+# MS1Mv3 batch can already overflow before any update.  Reject such batches
+# without changing the frozen normalization state instead of poisoning the
+# optimizer.  The strict validation and full IJB-C gates remain zero-tolerance.
+config.max_nonfinite_embedding_skips = 1000
