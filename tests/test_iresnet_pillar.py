@@ -305,6 +305,13 @@ def test_r50_pillar_backbone_and_configs_cover_the_recipe():
         "layer1.0.prelu": 6.0,
     }
 
+    first_block_scaled = _load_standalone_config(
+        "ms1mv3_r50_pillar_espn_scale4_layer10_scale6.py")
+    assert first_block_scaled.pillar_input_scale == 4.0
+    assert first_block_scaled.pillar_input_scale_overrides == {
+        "layer1.0.prelu": 6.0,
+    }
+
 
 def test_r18_pillar_lightweight_forward_and_layer_averaged_penalty():
     torch.manual_seed(7)
