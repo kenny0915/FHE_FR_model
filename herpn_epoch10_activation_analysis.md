@@ -237,6 +237,13 @@ batches on which the accepted prefix itself is non-finite are synchronously
 counted and skipped during optimization; benchmark validation and full IJB-C
 retain the zero-tolerance finite gate.
 
+The first inference-moment launch (`321753`) exposed an implementation
+interaction before its first update: the older preserve-buffer path copied BN
+buffers after the forward, but eval-mode BN backward had saved those tensors,
+so autograd correctly rejected the in-place version change. Frozen BN does not
+update buffers at all; the corrected path simply omits that redundant
+snapshot/restore when inference moments are enabled.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:

@@ -3628,7 +3628,7 @@ def main(args):
                 or (layerwise_training_phase == "final_finetune"
                     and layerwise_poly_preserve_batchnorm_during_final_finetune)
             )
-            if preserve_all_batchnorm:
+            if preserve_all_batchnorm and not freeze_batchnorm_running_stats:
                 preserve_batchnorm_snapshot = (
                     snapshot_batchnorm_running_stats(backbone.module))
             if freeze_batchnorm_running_stats:
