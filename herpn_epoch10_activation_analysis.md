@@ -291,6 +291,12 @@ gate by 0.47 and 0.41 point. `layer3.9` becomes the recovery baseline because
 its remaining four Layer3 blocks, complete Layer4, and embedding head can be
 distilled while the accepted nine-activation prefix stays immutable.
 
+The first suffix-distillation launch (`321787`) improved the static candidate.
+At step 500 LFW/CFP-FP/AgeDB were 99.750%/97.729%/97.417%; at step 1000 they
+were 99.733%/97.843%/97.333%. Because CFP continued improving while the other
+sets peaked earlier, the deterministic run is repeated with per-validation
+snapshots enabled so both checkpoints can receive the authoritative IJB gate.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:

@@ -452,6 +452,7 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
     assert layer3_recovery.task_loss_weight == 0.0
     assert "layer3.10" in layer3_recovery.backbone_trainable_prefixes
     assert layer3_recovery.freeze_batchnorm_running_stats
+    assert layer3_recovery.save_validation_snapshots
 
 
 def test_zero_initialized_student_has_bounded_relative_loss():

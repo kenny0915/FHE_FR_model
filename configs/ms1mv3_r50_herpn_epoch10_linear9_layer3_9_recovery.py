@@ -66,4 +66,4 @@ config.max_nonfinite_embedding_skips = 100
 config.num_epoch = 2
 config.warmup_epoch = 0
 config.verbose = 500
-
+config.save_validation_snapshots = True
