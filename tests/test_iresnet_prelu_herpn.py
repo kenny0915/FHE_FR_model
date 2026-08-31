@@ -395,12 +395,20 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
     assert names[8] == "layer4.2.prelu"
     assert cfg.layerwise_poly_training_group_limit == 9
     assert cfg.layerwise_poly_preserve_batchnorm_during_local_fit
-    assert cfg.layerwise_poly_preserve_upstream_batchnorm
+    assert cfg.layerwise_poly_preserve_batchnorm_during_blend
+    assert cfg.layerwise_poly_preserve_batchnorm_during_final_finetune
+    assert cfg.herpn_bn_recalibration_batches == 0
     assert not cfg.layerwise_poly_strict_recalibrate_before_blend
     assert not cfg.layerwise_poly_verify_singleton_boundary
     assert cfg.herpn_range_loss_weight == 0.0
     assert cfg.output.endswith("epoch10_linear9_layer42")
     assert not cfg.herpn_require_full_conversion
+
+    resume_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_herpn_epoch10_linear9_layer42_resume.py")
+    assert resume_cfg.resume
+    assert resume_cfg.output == cfg.output
+    assert resume_cfg.herpn_conversion_groups == cfg.herpn_conversion_groups
 
 
 def test_zero_initialized_student_has_bounded_relative_loss():

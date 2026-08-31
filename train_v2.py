@@ -2307,8 +2307,10 @@ def main(args):
         cfg, "layerwise_poly_freeze_backbone_during_local_fit", False))
     layerwise_poly_preserve_batchnorm_during_local_fit = bool(getattr(
         cfg, "layerwise_poly_preserve_batchnorm_during_local_fit", False))
-    layerwise_poly_preserve_upstream_batchnorm = bool(getattr(
-        cfg, "layerwise_poly_preserve_upstream_batchnorm", False))
+    layerwise_poly_preserve_batchnorm_during_blend = bool(getattr(
+        cfg, "layerwise_poly_preserve_batchnorm_during_blend", False))
+    layerwise_poly_preserve_batchnorm_during_final_finetune = bool(getattr(
+        cfg, "layerwise_poly_preserve_batchnorm_during_final_finetune", False))
     layerwise_poly_conditioning_backbone_lr_scale = float(getattr(
         cfg, "layerwise_poly_conditioning_backbone_lr_scale", 0.0))
     layerwise_poly_conditioning_range_loss_weight = float(getattr(
@@ -2361,7 +2363,8 @@ def main(args):
             "Causal layerwise calibration requires strict pre-blend "
             "recalibration")
     if ((layerwise_poly_preserve_batchnorm_during_local_fit
-         or layerwise_poly_preserve_upstream_batchnorm)
+         or layerwise_poly_preserve_batchnorm_during_blend
+         or layerwise_poly_preserve_batchnorm_during_final_finetune)
             and not layerwise_poly_staged_training):
         raise ValueError(
             "Phase-specific BatchNorm preservation requires staged layerwise "
@@ -3590,15 +3593,17 @@ def main(args):
                 snapshot_batchnorm_running_stats(backbone.module)
                 if max_nonfinite_embedding_skips > 0 else None)
             preserve_batchnorm_snapshot = None
-            if (layerwise_training_phase == "local_fit"
-                    and layerwise_poly_preserve_batchnorm_during_local_fit):
+            preserve_all_batchnorm = (
+                (layerwise_training_phase == "local_fit"
+                 and layerwise_poly_preserve_batchnorm_during_local_fit)
+                or (layerwise_training_phase == "blend"
+                    and layerwise_poly_preserve_batchnorm_during_blend)
+                or (layerwise_training_phase == "final_finetune"
+                    and layerwise_poly_preserve_batchnorm_during_final_finetune)
+            )
+            if preserve_all_batchnorm:
                 preserve_batchnorm_snapshot = (
                     snapshot_batchnorm_running_stats(backbone.module))
-            elif (layerwise_poly_preserve_upstream_batchnorm
-                    and layerwise_poly_training_groups):
-                preserve_batchnorm_snapshot = snapshot_batchnorm_running_stats(
-                    backbone.module,
-                    before_activation=layerwise_poly_training_groups[-1][-1])
             if freeze_batchnorm_running_stats:
                 # Verification restores the whole backbone to train mode.
                 # Reassert the frozen-stat policy before every forward.

@@ -61,7 +61,8 @@ config.herpn_range_loss_weight = 0.0
 config.layerwise_poly_staged_training = True
 config.layerwise_poly_freeze_backbone_during_local_fit = True
 config.layerwise_poly_preserve_batchnorm_during_local_fit = True
-config.layerwise_poly_preserve_upstream_batchnorm = True
+config.layerwise_poly_preserve_batchnorm_during_blend = True
+config.layerwise_poly_preserve_batchnorm_during_final_finetune = True
 config.layerwise_poly_blend_backbone_lr_scale = 0.01
 config.layerwise_poly_final_backbone_lr_scale = 0.01
 # The two affine student parameters are the only trainable backbone tensors in
@@ -96,8 +97,8 @@ config.herpn_transition_epochs = 2.0
 config.herpn_require_full_conversion = False
 config.layerwise_poly_allow_selective_order = True
 config.layerwise_poly_training_group_limit = 9
-config.herpn_bn_recalibration_batches = 500
-config.herpn_save_after_group = True
+config.herpn_bn_recalibration_batches = 0
+config.herpn_save_after_group = False
 
 config.sync_bn = True
 config.broadcast_buffers = True

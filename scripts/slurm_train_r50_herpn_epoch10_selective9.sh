@@ -25,4 +25,4 @@ export PYTHONUNBUFFERED=1
 /home/u8798807/.conda/envs/face_recog/bin/torchrun \
     --standalone \
     --nproc_per_node=8 \
-    train_v2.py configs/ms1mv3_r50_herpn_epoch10_selective9_layer42
+    train_v2.py configs/ms1mv3_r50_herpn_epoch10_linear9_layer42_resume

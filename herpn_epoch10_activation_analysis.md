@@ -165,9 +165,12 @@ run `321518` reproduced a non-finite training embedding at step 641 because
 the source graph needs batch moments for those training tails. The corrected
 policy keeps train-mode batch normalization for the forward, then restores all
 running buffers after each local-fit batch. During blend/recovery it restores
-only buffers upstream of `layer4.2.prelu`, preserving the eight-quadratic
-prefix while downstream normalizers can accumulate the affine output's new
-distribution.
+the buffers after every batch as well. Run `321536` showed why downstream
+adaptation is unsafe here: at only 9.3% affine blend, CFP-FP absmax grew from
+2.88 to 4.70e4 and AgeDB from 2.66e14 to 3.69e17 even though the learned
+affine slope was bounded in `[0.84, 1.0]`. The only mechanism capable of that
+growth was downstream running-stat drift. The corrected run therefore keeps
+the complete epoch-10 BN state fixed and disables post-group BN recalibration.
 
 ## Acceptance gates and next replacement
 
