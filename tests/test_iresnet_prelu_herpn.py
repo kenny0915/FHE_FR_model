@@ -9,7 +9,10 @@ from torch import nn
 
 from backbones import get_model
 from backbones.iresnet_nl9_prelu_herpn import NL9_ACTIVATION_NAMES
-from backbones.iresnet_prelu_herpn import PReLUHerPNActivation
+from backbones.iresnet_prelu_herpn import (
+    PReLUHerPNActivation,
+    PReLULinearActivation,
+)
 from backbones.iresnet_no_relu import ProgressiveHerPNActivation
 from utils.utils_optimizer import split_weight_decay_parameters
 
@@ -178,6 +181,57 @@ def test_prelu_herpn_polynomial_parameter_selection_is_group_local():
         model.layerwise_poly_parameters(("missing.prelu",))
 
 
+def test_prelu_linear_student_folds_exactly_without_a_square():
+    activation = PReLULinearActivation(channels=3, blend=1.0).eval()
+    with torch.no_grad():
+        activation.weight.copy_(torch.tensor([[[0.8]], [[1.1]], [[0.3]]]))
+        activation.bias.copy_(torch.tensor([[[0.2]], [[-0.1]], [[0.4]]]))
+    inputs = torch.tensor([1.0e24, -1.0e24, 2.0]).reshape(1, 3, 1, 1)
+
+    output = activation(inputs)
+    folded = activation.folded().eval()
+
+    assert torch.isfinite(output).all()
+    torch.testing.assert_close(folded(inputs), output, rtol=0.0, atol=0.0)
+    assert torch.count_nonzero(folded.coefficient2) == 0
+
+
+def test_hybrid_linear_suffix_loads_legacy_checkpoint_at_exact_blend_zero():
+    torch.manual_seed(33)
+    source = get_model(
+        "r18_no_relu", dropout=0, fp16=False, herpn_progress=0.0).eval()
+    names = [
+        name for name, module in source.named_modules()
+        if isinstance(module, ProgressiveHerPNActivation)
+    ]
+    source.set_herpn_blends({
+        name: float(index < 3) for index, name in enumerate(names)
+    })
+    hybrid = get_model(
+        "r18_prelu_herpn",
+        dropout=0,
+        fp16=False,
+        herpn_progress=0.0,
+        prelu_herpn_layerwise_scale=True,
+        prelu_herpn_legacy_prefix=3,
+        prelu_herpn_linear_indices=(len(names) - 1,),
+    ).eval()
+    hybrid.load_backbone_init_state_dict(source.state_dict())
+
+    activations = dict(hybrid.named_progressive_activations())
+    assert isinstance(activations[names[-1]], PReLULinearActivation)
+    selected = hybrid.layerwise_poly_parameters((names[-1],))
+    assert {id(parameter) for parameter in selected} == {
+        id(activations[names[-1]].weight),
+        id(activations[names[-1]].bias),
+    }
+    inputs = torch.randn(1, 3, 112, 112)
+    with torch.no_grad():
+        expected = source(inputs)
+        actual = hybrid(inputs)
+    torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
 def test_scaled_checkpoint_restores_scaling_without_constructor_flag():
     source = PReLUHerPNActivation(
         channels=2, blend=0.0, layerwise_scale=True).eval()
@@ -337,10 +391,13 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
     names = tuple(group[0] for group in cfg.herpn_conversion_groups)
 
     assert cfg.prelu_herpn_legacy_prefix == 8
+    assert cfg.prelu_herpn_linear_indices == (24,)
     assert names[8] == "layer4.2.prelu"
     assert cfg.layerwise_poly_training_group_limit == 9
-    assert cfg.layerwise_poly_range_quantile == 1.0
-    assert cfg.layerwise_poly_verify_singleton_boundary
+    assert not cfg.layerwise_poly_strict_recalibrate_before_blend
+    assert not cfg.layerwise_poly_verify_singleton_boundary
+    assert cfg.herpn_range_loss_weight == 0.0
+    assert cfg.output.endswith("epoch10_linear9_layer42")
     assert not cfg.herpn_require_full_conversion
 
 

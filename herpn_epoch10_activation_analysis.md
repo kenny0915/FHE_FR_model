@@ -107,23 +107,19 @@ The configuration is
    difference before the ninth conversion.
 2. Only `layer4.2.prelu` is converted. Being the final activation, it cannot
    inject a tail into another polynomial activation.
-3. For its frozen channel-wise PReLU slope `a`, the new target on the public
-   interval `[-S,S]` is
-   `a*x + (1-a)*S*HerPN_ReLU(x/S)`. Calibration uses `S = 1.5 * observed
-   absmax` over a complete natural MS1Mv3 loader shard per rank.
+3. Its student is the channel-wise degree-one polynomial `m_c*x+b_c`, locally
+   distilled against the frozen PReLU before blending. It introduces no
+   ciphertext square and needs no approximation interval.
 4. The backbone is frozen during the local-fit epoch. Blend and recovery use
    1% of the base backbone learning rate and a frozen epoch-10 embedding
    teacher, limiting drift in the known-finite prefix.
-5. Immediately before blending, the interval is measured again. The code
-   temporarily enables the complete singleton and profiles its embedding
-   boundary for the same complete natural-data pass. Non-finite output or absmax
-   above 1,000 aborts before the first blend update.
-6. Every ordinary validation pass is strict. Completion also saves a
+5. Every ordinary validation pass is strict. Completion also saves a
    downstream-only BatchNorm-recalibrated group checkpoint.
 
 No clamp, division by encrypted data, or branch is added to inference. After
-folding, the new activation is `A*x^2+B*x+C`; it adds one ciphertext square
-level. The nine-site path therefore has nine quadratic activation levels.
+folding, the new activation is exactly `m_c*x+b_c`; it adds zero ciphertext
+square levels. The nine-site graph therefore removes nine PReLUs while retaining
+only the original eight quadratic activation levels.
 
 The first Nano4 submission (`321291`) tested a stronger photometric stress
 domain. It failed at global step zero while observing the input of
@@ -133,6 +129,20 @@ synthetically stressed input. That augmentation is outside this fixed
 baseline's stable domain and cannot be repaired by rescaling the later ninth
 site. The revised run retains the fail-fast checks but uses the natural
 training distribution; it does not hide the failure with clipping.
+
+The complete natural-data follow-up (`321306`) found a second, stronger
+counterexample. The graph remained finite, but one ordinary training image
+reached `3.431934e23` at the input of `layer4.2.prelu` (rank 7, batch 2931,
+sample 115; RecordIO index 86052). Replaying both orientations showed the
+cascade begins in the already-converted prefix: about `8.5` after
+`layer1.2.prelu`, `1.1e3` after `layer2.0`, `6.7e5` after `layer2.1`, `2.2e12`
+after `layer2.2`, and `6.3e24` after `layer2.3`. The image bytes are valid.
+
+Consequently, adding any nonzero quadratic at the ninth site is not globally
+safe: even a zero quadratic coefficient evaluated naively as `0*x^2` becomes
+NaN when `x^2` overflows. The revised degree-one student and its folded module
+never evaluate a square. This directly addresses the observed failure instead
+of choosing a robust quantile that hides it.
 
 ## Acceptance gates and next replacement
 

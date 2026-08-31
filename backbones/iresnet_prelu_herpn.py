@@ -39,6 +39,7 @@ from .iresnet_no_relu import (
 
 __all__ = [
     "PReLUHerPNActivation",
+    "PReLULinearActivation",
     "IResNet",
     "iresnet18",
     "iresnet34",
@@ -52,7 +53,143 @@ _STAGE_NAMES = ("stem", "layer1", "layer2", "layer3", "layer4")
 
 def _is_progressive_activation(module):
     return isinstance(
-        module, (ProgressiveHerPNActivation, PReLUHerPNActivation))
+        module, (
+            ProgressiveHerPNActivation,
+            PReLUHerPNActivation,
+            PReLULinearActivation,
+        ))
+
+
+class FoldedLinearPolynomial(nn.Module):
+    """Inference-only affine polynomial that never evaluates ``x.square()``."""
+
+    def __init__(self, coefficient1, coefficient0):
+        super().__init__()
+        self.register_buffer(
+            "coefficient2", torch.zeros_like(coefficient1).detach())
+        self.register_buffer("coefficient1", coefficient1.detach().clone())
+        self.register_buffer("coefficient0", coefficient0.detach().clone())
+
+    def forward(self, x):
+        compute_dtype = (
+            torch.float32
+            if x.dtype in (torch.float16, torch.bfloat16)
+            else x.dtype
+        )
+        output = self.coefficient1.to(dtype=compute_dtype) * x.to(
+            dtype=compute_dtype)
+        output = output + self.coefficient0.to(dtype=compute_dtype)
+        return output.to(dtype=x.dtype)
+
+
+class PReLULinearActivation(nn.Module):
+    """Progressively replace PReLU by a channel-wise degree-one polynomial.
+
+    This is useful at a site whose input already contains rare extreme tails:
+    adding another square would turn a large finite value into an overflow.
+    The student ``m*x+b`` is FHE-friendly and adds no multiplicative depth.
+    """
+
+    is_progressive_polynomial_activation = True
+    is_layerwise_rescaled_polynomial = False
+
+    def __init__(self, channels, distill_eps=1e-4, stage_index=0, blend=0.0):
+        super().__init__()
+        if distill_eps <= 0:
+            raise ValueError("distill_eps must be positive")
+        self.prelu = nn.PReLU(channels)
+        self.prelu.weight.requires_grad = False
+        self.weight = nn.Parameter(torch.ones(channels, 1, 1))
+        self.bias = nn.Parameter(torch.zeros(channels, 1, 1))
+        self.stage_index = int(stage_index)
+        self.register_buffer(
+            "blend", torch.tensor(float(blend), dtype=torch.float32))
+        self.register_buffer(
+            "distill_eps", torch.tensor(float(distill_eps), dtype=torch.float32))
+        self._last_distillation_loss = None
+        self._blend = 0.0
+        self.set_blend(blend)
+
+    def set_blend(self, blend):
+        blend = float(blend)
+        if not 0.0 <= blend <= 1.0:
+            raise ValueError("blend must be in [0, 1]")
+        self._blend = blend
+        self.blend.fill_(blend)
+
+    def range_penalty(self):
+        return None
+
+    def distillation_loss(self):
+        return self._last_distillation_loss
+
+    def range_stats(self):
+        return {
+            "absmax": None,
+            "outside_fraction": None,
+            "blend": self.blend.detach(),
+            "input_scale": None,
+            "scale_calibrated": None,
+        }
+
+    def forward(self, x):
+        if not self.training and self._blend <= 0.0:
+            return self.prelu(x)
+        teacher = self.prelu(x)
+        student = (
+            self.weight.to(dtype=x.dtype) * x
+            + self.bias.to(dtype=x.dtype)
+        )
+        if self.training:
+            target = teacher.detach().float()
+            denominator = (
+                target.square().mean().detach()
+                + self.distill_eps.to(
+                    device=x.device, dtype=target.dtype)
+            )
+            self._last_distillation_loss = (
+                student.float() - target).square().mean() / denominator
+        else:
+            self._last_distillation_loss = None
+        if self._blend <= 0.0:
+            return teacher + student * 0.0
+        if self._blend >= 1.0:
+            return student + teacher * 0.0 if self.training else student
+        return (1.0 - self._blend) * teacher + self._blend * student
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        old_key = prefix + "weight"
+        teacher_key = prefix + "prelu.weight"
+        if old_key in state_dict and teacher_key not in state_dict:
+            state_dict[teacher_key] = state_dict.pop(old_key)
+
+        # A legacy progressive HerPN checkpoint contains a dormant quadratic
+        # branch at this site. It is intentionally not reused by the linear
+        # student, but the frozen PReLU teacher and blend are preserved.
+        legacy_keys = [
+            key for key in state_dict
+            if key.startswith(prefix + "herpn.")
+        ]
+        for key in legacy_keys:
+            state_dict.pop(key)
+        state_dict.pop(prefix + "range_limit", None)
+        for local_key, value in self.state_dict().items():
+            full_key = prefix + local_key
+            if full_key not in state_dict:
+                state_dict[full_key] = value.detach()
+
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict,
+            missing_keys, unexpected_keys, error_msgs)
+        self._blend = float(self.blend.item())
+
+    @torch.no_grad()
+    def folded(self):
+        if self._blend < 1.0:
+            raise RuntimeError(
+                "Only a fully converted linear activation can be folded")
+        return FoldedLinearPolynomial(self.weight, self.bias)
 
 
 class _PReLUHerPN(HerPN):
@@ -375,10 +512,19 @@ class IResNet(_HerPNIResNet):
     def __init__(self, *args, prelu_herpn_distill_eps=1e-4,
                  prelu_herpn_layerwise_scale=False,
                  prelu_herpn_initial_scale=1.0,
-                 prelu_herpn_legacy_prefix=0, **kwargs):
+                 prelu_herpn_legacy_prefix=0,
+                 prelu_herpn_linear_indices=(), **kwargs):
         legacy_prefix = int(prelu_herpn_legacy_prefix)
         if legacy_prefix < 0:
             raise ValueError("prelu_herpn_legacy_prefix must be non-negative")
+        linear_indices = frozenset(
+            int(index) for index in prelu_herpn_linear_indices)
+        if any(index < 0 for index in linear_indices):
+            raise ValueError(
+                "prelu_herpn_linear_indices must be non-negative")
+        if any(index < legacy_prefix for index in linear_indices):
+            raise ValueError(
+                "A linear activation cannot overlap the legacy prefix")
         object.__setattr__(
             self, "prelu_herpn_distill_eps",
             float(prelu_herpn_distill_eps))
@@ -389,8 +535,14 @@ class IResNet(_HerPNIResNet):
             self, "prelu_herpn_initial_scale",
             float(prelu_herpn_initial_scale))
         object.__setattr__(self, "prelu_herpn_legacy_prefix", legacy_prefix)
+        object.__setattr__(self, "prelu_herpn_linear_indices", linear_indices)
         object.__setattr__(self, "_activation_construction_index", 0)
         super().__init__(*args, **kwargs)
+        if linear_indices and max(linear_indices) >= len(
+                self.named_progressive_activations()):
+            raise ValueError(
+                "prelu_herpn_linear_indices contains an activation index "
+                "outside this backbone")
 
     def _make_activation(self, channels, stage_name):
         activation_index = self._activation_construction_index
@@ -401,6 +553,13 @@ class IResNet(_HerPNIResNet):
                 channels=channels,
                 range_limit=self.herpn_range_limit,
                 bn_eps=self.herpn_bn_eps,
+                stage_index=_STAGE_NAMES.index(stage_name),
+                blend=0.0,
+            )
+        if activation_index in self.prelu_herpn_linear_indices:
+            return PReLULinearActivation(
+                channels=channels,
+                distill_eps=self.prelu_herpn_distill_eps,
                 stage_index=_STAGE_NAMES.index(stage_name),
                 blend=0.0,
             )
@@ -482,10 +641,13 @@ class IResNet(_HerPNIResNet):
         parameters = []
         for name, activation in named_activations:
             if selected is None or name in selected:
-                parameters.extend((
-                    activation.herpn.weight,
-                    activation.herpn.bias,
-                ))
+                if isinstance(activation, PReLULinearActivation):
+                    parameters.extend((activation.weight, activation.bias))
+                else:
+                    parameters.extend((
+                        activation.herpn.weight,
+                        activation.herpn.bias,
+                    ))
         return parameters
 
     def uncalibrated_layerwise_poly_names(self):

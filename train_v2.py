@@ -1437,6 +1437,8 @@ def main(args):
                     cfg, "prelu_herpn_initial_scale", 1.0))
             model_kwargs["prelu_herpn_legacy_prefix"] = int(getattr(
                 cfg, "prelu_herpn_legacy_prefix", 0))
+            model_kwargs["prelu_herpn_linear_indices"] = tuple(getattr(
+                cfg, "prelu_herpn_linear_indices", ()))
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_herpn_residual_scale")):
         model_kwargs.update(
