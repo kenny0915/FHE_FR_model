@@ -268,6 +268,14 @@ otherwise finite all-negative-slope fallback. The expanded screen probes
 thresholds through `1e23`; the 10x tail-growth bound remains conservative
 against the 35x amplification already observed for the failed fitted affine.
 
+Completed job `321772` found 511/512 channels unsafe through `1e21`. At
+`1e23`, releasing 100 channels worsened LFW/CFP-FP/AgeDB to
+99.383%/96.800%/95.500%. Per-channel masking at `layer4.2` therefore cannot
+recover accuracy. The next screen applies the same globally tail-safe affine
+to each of the 17 remaining PReLUs separately. This tests which residual block
+is most redundant instead of assuming the last activation is the least
+disruptive choice.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:
