@@ -227,6 +227,16 @@ prefix is immutable. In particular, recovery cannot optimize the safe
 negative slope back into the disproven positive affine fit or perturb the
 upstream tail distribution.
 
+Job `321749` tested that suffix-only objective with ordinary train-mode batch
+moments. Its distillation loss fell from 0.397 to 0.288, but at step 500
+LFW/CFP-FP had degraded to 99.650%/96.414%. This isolates a train/eval domain
+mismatch: the frozen teacher and all acceptance tests use inference running
+moments, while the student was learning from batch moments. The next recovery
+therefore uses frozen inference BN moments for the student too. Rare MS1M
+batches on which the accepted prefix itself is non-finite are synchronously
+counted and skipped during optimization; benchmark validation and full IJB-C
+retain the zero-tolerance finite gate.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:

@@ -437,6 +437,8 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
     assert recovery_cfg.task_loss_weight == 0.0
     assert recovery_cfg.backbone_trainable_prefixes[0] == "layer4.2.conv2"
     assert recovery_cfg.layerwise_poly_final_backbone_lr_scale == 1.0
+    assert recovery_cfg.freeze_batchnorm_running_stats
+    assert recovery_cfg.max_nonfinite_embedding_skips == 100
     assert recovery_cfg.output.endswith("linear9_prelu_slope_recovery")
     assert resume_cfg.herpn_conversion_groups == cfg.herpn_conversion_groups
 

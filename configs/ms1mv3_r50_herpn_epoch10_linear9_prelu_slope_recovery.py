@@ -52,3 +52,11 @@ config.layerwise_poly_final_backbone_lr_scale = 1.0
 config.num_epoch = 2
 config.warmup_epoch = 0
 config.verbose = 500
+
+# Distillation must optimize the same running-moment graph used by inference.
+# The accepted prefix has rare MS1M examples that are unsafe with those fixed
+# moments, so skip and count such synchronized batches during recovery. This
+# exception applies only to training data; validation and IJB remain fail-fast.
+config.freeze_batchnorm_running_stats = True
+config.freeze_batchnorm_affine = False
+config.max_nonfinite_embedding_skips = 100
