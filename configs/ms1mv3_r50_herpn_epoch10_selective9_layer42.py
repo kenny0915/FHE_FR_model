@@ -60,6 +60,8 @@ config.herpn_distill_loss_weight = 1.0
 config.herpn_range_loss_weight = 0.0
 config.layerwise_poly_staged_training = True
 config.layerwise_poly_freeze_backbone_during_local_fit = True
+config.layerwise_poly_freeze_batchnorm_during_local_fit = True
+config.layerwise_poly_freeze_upstream_batchnorm = True
 config.layerwise_poly_blend_backbone_lr_scale = 0.01
 config.layerwise_poly_final_backbone_lr_scale = 0.01
 # The two affine student parameters are the only trainable backbone tensors in

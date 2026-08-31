@@ -155,6 +155,16 @@ logs maxima for blend-zero versus blended comparison. This policy is not
 appropriate for an added quadratic: the observed 1e15 tail already rules that
 out, whereas the degree-one student cannot superlinearly amplify it.
 
+The first uncapped run (`321454`) then showed that freezing parameter gradients
+alone does not preserve the baseline during local fit: BatchNorm running
+buffers still update in training mode. Between validation steps 2000 and 4000,
+while the replacement blend remained exactly zero, CFP-FP absmax increased
+from 3.54 to 12.81 and AgeDB absmax from 1.90e15 to 7.69e16. The run was
+stopped before blending. The corrected policy freezes every BatchNorm during
+local fit, then freezes only BatchNorms upstream of `layer4.2.prelu` during
+blend/recovery so the eight-quadratic prefix remains fixed while downstream
+normalizers can adapt to the affine output.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:

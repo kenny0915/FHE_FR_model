@@ -394,6 +394,8 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
     assert cfg.prelu_herpn_linear_indices == (24,)
     assert names[8] == "layer4.2.prelu"
     assert cfg.layerwise_poly_training_group_limit == 9
+    assert cfg.layerwise_poly_freeze_batchnorm_during_local_fit
+    assert cfg.layerwise_poly_freeze_upstream_batchnorm
     assert not cfg.layerwise_poly_strict_recalibrate_before_blend
     assert not cfg.layerwise_poly_verify_singleton_boundary
     assert cfg.herpn_range_loss_weight == 0.0
