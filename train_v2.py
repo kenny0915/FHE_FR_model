@@ -1621,6 +1621,28 @@ def main(args):
                 cfg, "precise_relu_initial_progress", 0.0)))
         logging.info("Initialized backbone from %s", backbone_init)
         del init_checkpoint, init_metadata, init_state
+    backbone_trainable_prefixes = tuple(str(prefix) for prefix in getattr(
+        cfg, "backbone_trainable_prefixes", ()))
+    if backbone_trainable_prefixes:
+        if any(not prefix for prefix in backbone_trainable_prefixes):
+            raise ValueError("backbone_trainable_prefixes cannot contain empty strings")
+        trainable_names = []
+        for name, parameter in backbone.named_parameters():
+            trainable = any(
+                name == prefix or name.startswith(prefix + ".")
+                for prefix in backbone_trainable_prefixes
+            )
+            if not trainable:
+                parameter.requires_grad_(False)
+            elif parameter.requires_grad:
+                trainable_names.append(name)
+        if not trainable_names:
+            raise ValueError(
+                "backbone_trainable_prefixes did not select any trainable "
+                "backbone parameters")
+        logging.info(
+            "Restricted backbone training to prefixes %s (%d tensors)",
+            backbone_trainable_prefixes, len(trainable_names))
     layerwise_poly_scale_file = getattr(
         cfg, "layerwise_poly_scale_file", "")
     if layerwise_poly_scale_file and not cfg.resume:
@@ -1662,6 +1684,9 @@ def main(args):
         cfg, "embedding_distill_weight", 0.0))
     if embedding_distill_weight < 0.0:
         raise ValueError("embedding_distill_weight must be non-negative")
+    task_loss_weight = float(getattr(cfg, "task_loss_weight", 1.0))
+    if task_loss_weight < 0.0:
+        raise ValueError("task_loss_weight must be non-negative")
     embedding_teacher = None
     if embedding_distill_weight > 0.0:
         teacher_network = str(getattr(
@@ -3729,6 +3754,8 @@ def main(args):
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
             task_loss = loss
+            if task_loss_weight != 1.0:
+                loss = loss * task_loss_weight
             if pillar_enabled and pillar_task_loss_weight != 1.0:
                 loss = loss * pillar_task_loss_weight
             range_penalty = local_embeddings.new_zeros(())

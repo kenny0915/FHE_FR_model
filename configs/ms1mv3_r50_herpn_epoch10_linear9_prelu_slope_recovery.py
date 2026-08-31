@@ -1,11 +1,11 @@
 """Recover low-FAR accuracy with a fixed, tail-safe ninth activation.
 
 The source checkpoint fully replaces ``layer4.2.prelu`` by ``a_c*x``, where
-``a_c`` is the frozen PReLU negative-branch slope.  Full IJB-C inference is
-finite, but its static TAR@FAR=1e-4 is 93.61%.  Keep those coefficients fixed
-and adapt only the ordinary backbone/embedding with an epoch-10 embedding
-teacher.  The eight legacy quadratic activations and every BatchNorm running
-buffer remain fixed to limit movement of the known extreme tails.
+``a_c`` is the frozen PReLU negative-branch slope. Full IJB-C inference is
+finite, but its static TAR@FAR=1e-4 is 93.61%. Keep those coefficients fixed
+and distill only the layers after this activation against the epoch-10
+embedding teacher. The eight legacy quadratic activations, the upstream
+representation, and every BatchNorm running buffer remain fixed.
 """
 
 from easydict import EasyDict as edict
@@ -34,12 +34,21 @@ config.herpn_group_epochs = (
 config.herpn_transition_epochs = 2.0
 config.layerwise_poly_training_group_limit = 9
 
-# The fixed affine has no local approximation objective.  Use a conservative
-# 3e-5 effective backbone LR and retain the epoch-10 embedding geometry.
+# The fixed affine has no local approximation objective. A first experiment
+# that mixed full-backbone ArcFace recovery with distillation degraded all
+# three verification sets by step 1000. Use pure teacher reconstruction and
+# expose only the layers downstream of layer4.2.prelu to the optimizer.
 config.herpn_distill_loss_weight = 0.0
-config.embedding_distill_weight = 5.0
-config.layerwise_poly_final_backbone_lr_scale = 0.1
-config.num_epoch = 4
+config.task_loss_weight = 0.0
+config.embedding_distill_weight = 1.0
+config.backbone_trainable_prefixes = (
+    "layer4.2.conv2",
+    "layer4.2.bn3",
+    "bn2",
+    "fc",
+    "features",
+)
+config.layerwise_poly_final_backbone_lr_scale = 1.0
+config.num_epoch = 2
 config.warmup_epoch = 0
-config.verbose = 1000
-
+config.verbose = 500

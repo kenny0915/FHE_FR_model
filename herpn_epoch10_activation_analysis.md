@@ -212,13 +212,20 @@ finite. Its TAR values were 80.82%, 89.22%, **93.61%**, 95.84%, 97.50%, and
 the FAR `1e-4` accuracy is 1.57 percentage points below the 95.18% epoch-10
 baseline and misses the 94.68% acceptance threshold.
 
-The recovery configuration is
+Recovery job `321743` first tried full-backbone ArcFace training plus embedding
+distillation at an effective `3e-5` learning rate. Although it remained finite
+and reduced the AgeDB tail to 1.55e14, by step 1000 LFW/CFP-FP/AgeDB had all
+degraded to 99.700%/97.243%/96.917%, so the run was stopped.
+
+The revised recovery configuration is
 `configs/ms1mv3_r50_herpn_epoch10_linear9_prelu_slope_recovery.py`. It starts
 from `model_linear9_prelu_slope_static.pt`, keeps `a_c` and the zero bias
-frozen, preserves all BatchNorm running buffers, and fine-tunes only the
-ordinary backbone/embedding at an effective `3e-5` learning rate with the
-epoch-10 embedding teacher. In particular, recovery cannot optimize the safe
-negative slope back into the disproven positive affine fit.
+frozen, preserves all BatchNorm running buffers, and disables the classifier
+loss. Only `layer4.2.conv2`, `layer4.2.bn3`, and the final `bn2`/`fc`/`features`
+layers can learn from the epoch-10 embedding teacher; the complete polynomial
+prefix is immutable. In particular, recovery cannot optimize the safe
+negative slope back into the disproven positive affine fit or perturb the
+upstream tail distribution.
 
 ## Acceptance gates and next replacement
 
