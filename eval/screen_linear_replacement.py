@@ -63,6 +63,14 @@ def main():
         "lfw", "cfp_fp", "agedb_30"])
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--checkpoint-output",
+        default=None,
+        help=(
+            "Optionally save the selected full-replacement model as a "
+            "CPU state_dict after screening"
+        ),
+    )
     args = parser.parse_args()
 
     device = torch.device("cuda")
@@ -114,6 +122,15 @@ def main():
         "bias_mean": float(activation.bias.mean().item()),
         "bias_max": float(activation.bias.max().item()),
     }
+    if args.checkpoint_output is not None:
+        checkpoint_output = Path(args.checkpoint_output)
+        checkpoint_output.parent.mkdir(parents=True, exist_ok=True)
+        cpu_state = {
+            key: value.detach().cpu()
+            for key, value in model.state_dict().items()
+        }
+        torch.save(cpu_state, checkpoint_output)
+        result["checkpoint_output"] = str(checkpoint_output)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

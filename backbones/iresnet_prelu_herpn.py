@@ -93,7 +93,8 @@ class PReLULinearActivation(nn.Module):
     is_progressive_polynomial_activation = True
     is_layerwise_rescaled_polynomial = False
 
-    def __init__(self, channels, distill_eps=1e-4, stage_index=0, blend=0.0):
+    def __init__(self, channels, distill_eps=1e-4, stage_index=0, blend=0.0,
+                 trainable=True):
         super().__init__()
         if distill_eps <= 0:
             raise ValueError("distill_eps must be positive")
@@ -101,6 +102,8 @@ class PReLULinearActivation(nn.Module):
         self.prelu.weight.requires_grad = False
         self.weight = nn.Parameter(torch.ones(channels, 1, 1))
         self.bias = nn.Parameter(torch.zeros(channels, 1, 1))
+        self.weight.requires_grad = bool(trainable)
+        self.bias.requires_grad = bool(trainable)
         self.stage_index = int(stage_index)
         self.register_buffer(
             "blend", torch.tensor(float(blend), dtype=torch.float32))
@@ -513,7 +516,8 @@ class IResNet(_HerPNIResNet):
                  prelu_herpn_layerwise_scale=False,
                  prelu_herpn_initial_scale=1.0,
                  prelu_herpn_legacy_prefix=0,
-                 prelu_herpn_linear_indices=(), **kwargs):
+                 prelu_herpn_linear_indices=(),
+                 prelu_herpn_linear_trainable=True, **kwargs):
         legacy_prefix = int(prelu_herpn_legacy_prefix)
         if legacy_prefix < 0:
             raise ValueError("prelu_herpn_legacy_prefix must be non-negative")
@@ -536,6 +540,9 @@ class IResNet(_HerPNIResNet):
             float(prelu_herpn_initial_scale))
         object.__setattr__(self, "prelu_herpn_legacy_prefix", legacy_prefix)
         object.__setattr__(self, "prelu_herpn_linear_indices", linear_indices)
+        object.__setattr__(
+            self, "prelu_herpn_linear_trainable",
+            bool(prelu_herpn_linear_trainable))
         object.__setattr__(self, "_activation_construction_index", 0)
         super().__init__(*args, **kwargs)
         if linear_indices and max(linear_indices) >= len(
@@ -562,6 +569,7 @@ class IResNet(_HerPNIResNet):
                 distill_eps=self.prelu_herpn_distill_eps,
                 stage_index=_STAGE_NAMES.index(stage_name),
                 blend=0.0,
+                trainable=self.prelu_herpn_linear_trainable,
             )
         return PReLUHerPNActivation(
             channels=channels,

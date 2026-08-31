@@ -232,6 +232,24 @@ def test_hybrid_linear_suffix_loads_legacy_checkpoint_at_exact_blend_zero():
     torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
 
 
+def test_hybrid_linear_suffix_can_freeze_tail_safe_coefficients():
+    model = get_model(
+        "r18_prelu_herpn",
+        dropout=0,
+        fp16=False,
+        herpn_progress=0.0,
+        prelu_herpn_legacy_prefix=3,
+        prelu_herpn_linear_indices=(8,),
+        prelu_herpn_linear_trainable=False,
+    )
+    activation = model.progressive_activations()[8]
+
+    assert isinstance(activation, PReLULinearActivation)
+    assert not activation.prelu.weight.requires_grad
+    assert not activation.weight.requires_grad
+    assert not activation.bias.requires_grad
+
+
 def test_scaled_checkpoint_restores_scaling_without_constructor_flag():
     source = PReLUHerPNActivation(
         channels=2, blend=0.0, layerwise_scale=True).eval()
@@ -408,6 +426,16 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
         "configs/ms1mv3_r50_herpn_epoch10_linear9_layer42_resume.py")
     assert resume_cfg.resume
     assert resume_cfg.output == cfg.output
+
+    recovery_cfg = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_herpn_epoch10_linear9_prelu_slope_recovery.py")
+    assert not recovery_cfg.resume
+    assert not recovery_cfg.prelu_herpn_linear_trainable
+    assert recovery_cfg.herpn_group_epochs[8] == -2.0
+    assert recovery_cfg.herpn_distill_loss_weight == 0.0
+    assert recovery_cfg.layerwise_poly_final_backbone_lr_scale == 0.1
+    assert recovery_cfg.output.endswith("linear9_prelu_slope_recovery")
     assert resume_cfg.herpn_conversion_groups == cfg.herpn_conversion_groups
 
 

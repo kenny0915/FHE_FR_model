@@ -25,8 +25,9 @@ All tensors in epochs 10 through 15 are finite. The graph changes are:
 | epoch 11 | same 8 | `layer3.0` through `layer3.3`, blend about 0.5 |
 | epoch 12 | same 8 | `layer3.0` through `layer3.3`, blend about 1.0 |
 
-Epoch 10 completed strict IJB-C inference over all 469,375 augmented rows with
-zero non-finite rows and reached 95.18% TAR at FAR `1e-4`. Epoch 11 first
+Epoch 10 completed strict IJB-C inference over all 469,375 source images in
+both orientations (938,750 embeddings) with zero non-finite rows and reached
+95.18% TAR at FAR `1e-4`. Epoch 11 first
 failed at IJB-C batch 13; epochs 12--15 also produced non-finite embeddings.
 
 ### Distribution comparison with the original ResNet50
@@ -95,7 +96,7 @@ The old range objective cannot guarantee safety. It is averaged over all
 pixels and batches, its per-sample maximum term has weight 0.1, the fixed
 `[-6, 6]` interval is only a soft penalty, and inference correctly has no
 non-polynomial clipping. A rare face can remain invisible to training loss
-while still failing a 469,375-row IJB-C scan.
+while still failing the 469,375-image, two-orientation IJB-C scan.
 
 ## Improved ninth-site experiment
 
@@ -165,20 +166,68 @@ run `321518` reproduced a non-finite training embedding at step 641 because
 the source graph needs batch moments for those training tails. The corrected
 policy keeps train-mode batch normalization for the forward, then restores all
 running buffers after each local-fit batch. During blend/recovery it restores
-the buffers after every batch as well. Run `321536` showed why downstream
-adaptation is unsafe here: at only 9.3% affine blend, CFP-FP absmax grew from
-2.88 to 4.70e4 and AgeDB from 2.66e14 to 3.69e17 even though the learned
-affine slope was bounded in `[0.84, 1.0]`. The only mechanism capable of that
-growth was downstream running-stat drift. The corrected run therefore keeps
-the complete epoch-10 BN state fixed and disables post-group BN recalibration.
+the buffers after every batch as well. Run `321536` showed a new failure at
+only 9.3% affine blend: CFP-FP absmax grew from 2.88 to 4.70e4 and AgeDB from
+2.66e14 to 3.69e17 even though the learned affine slope was bounded in
+`[0.84, 1.0]`. Initially this was attributed to downstream running-stat drift.
+Run `321603` restored **all** BN buffers after every blend batch and reproduced
+essentially the same result (CFP-FP 4.66e4, AgeDB 3.66e17), ruling that
+explanation out.
+
+The actual cause is a sign-dependent extrapolation error. At this site the
+frozen PReLU slopes are in `[-0.03324, 0]`, with mean `-0.02643`. Thus an
+extreme negative input is multiplied by a small negative coefficient by the
+teacher, while the centrally fitted affine multiplies it by about `+0.92`.
+The fitted student can therefore make the rare negative tail roughly 35 times
+larger and reverse its sign even though it has no square. Degree one prevents
+superlinear growth, but does not by itself make an already enormous tail safe.
+
+### Square-free full-replacement screen
+
+Job `321650` screened full (`blend=1`) variants on all LFW, CFP-FP, and AgeDB
+images. The already disproven fitted variant was stopped to let the useful
+candidates finish inside the one-hour allocation. Accuracy and maximum finite
+embedding magnitude were:
+
+| variant | LFW | CFP-FP | AgeDB | AgeDB absmax | non-finite |
+|---|---:|---:|---:|---:|---:|
+| epoch-10 source | 99.800% | 98.000% | 97.517% | 2.665e14 | 0 |
+| `prelu_slope` | 99.767% | 97.686% | 97.050% | 2.592e14 | 0 |
+| `zero` | 99.733% | 97.614% | 96.900% | 2.427e14 | 0 |
+| `small_positive_bias` | 99.483% | 94.900% | 94.500% | 2.451e14 | 0 |
+
+`prelu_slope` is the selected ninth activation. Its degree-one polynomial is
+`a_c*x`, using the frozen PReLU negative-branch slope, with zero bias. The
+approximation target is deliberately tail-oriented: it is exact to PReLU on
+`x < 0`; on `x >= 0` it replaces the unit slope by `a_c` and relies on the
+residual path. There is no bounded approximation interval because this is a
+global affine polynomial; the complete benchmark distributions, including
+AgeDB row 5039, are the empirical safety domain. It adds no encrypted square
+and introduces no division, clipping, comparison, or data-dependent branch.
+
+Full IJB-C job `321724` evaluated the materialized nine-site checkpoint on
+469,375 source images in both orientations. All 938,750 embeddings were
+finite. Its TAR values were 80.82%, 89.22%, **93.61%**, 95.84%, 97.50%, and
+98.72% at FAR `1e-6` through `1e-1`. Numerical safety therefore passes, but
+the FAR `1e-4` accuracy is 1.57 percentage points below the 95.18% epoch-10
+baseline and misses the 94.68% acceptance threshold.
+
+The recovery configuration is
+`configs/ms1mv3_r50_herpn_epoch10_linear9_prelu_slope_recovery.py`. It starts
+from `model_linear9_prelu_slope_static.pt`, keeps `a_c` and the zero bias
+frozen, preserves all BatchNorm running buffers, and fine-tunes only the
+ordinary backbone/embedding at an effective `3e-5` learning rate with the
+epoch-10 embedding teacher. In particular, recovery cannot optimize the safe
+negative slope back into the disproven positive affine fit.
 
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:
 
 - LFW, CFP-FP, and AgeDB validation have zero non-finite embeddings throughout;
-- the completed-group checkpoint passes all 469,375 augmented IJB-C rows with
-  zero non-finite values; and
+- the completed-group checkpoint passes all 469,375 IJB-C source images in
+  both orientations (938,750 augmented embeddings) with zero non-finite
+  values; and
 - IJB-C TAR at FAR `1e-4` is at least 94.68%, no more than 0.50 percentage point
   below the 95.18% epoch-10 baseline.
 

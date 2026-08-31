@@ -1448,6 +1448,8 @@ def main(args):
                 cfg, "prelu_herpn_legacy_prefix", 0))
             model_kwargs["prelu_herpn_linear_indices"] = tuple(getattr(
                 cfg, "prelu_herpn_linear_indices", ()))
+            model_kwargs["prelu_herpn_linear_trainable"] = bool(getattr(
+                cfg, "prelu_herpn_linear_trainable", True))
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_herpn_residual_scale")):
         model_kwargs.update(
