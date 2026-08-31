@@ -109,14 +109,14 @@ The configuration is
    inject a tail into another polynomial activation.
 3. For its frozen channel-wise PReLU slope `a`, the new target on the public
    interval `[-S,S]` is
-   `a*x + (1-a)*S*HerPN_ReLU(x/S)`. Calibration uses `S = 1.25 * observed
-   absmax` over 2,048 augmented batches per rank.
+   `a*x + (1-a)*S*HerPN_ReLU(x/S)`. Calibration uses `S = 1.5 * observed
+   absmax` over a complete natural MS1Mv3 loader shard per rank.
 4. The backbone is frozen during the local-fit epoch. Blend and recovery use
    1% of the base backbone learning rate and a frozen epoch-10 embedding
    teacher, limiting drift in the known-finite prefix.
 5. Immediately before blending, the interval is measured again. The code
    temporarily enables the complete singleton and profiles its embedding
-   boundary for the same 2,048 batches per rank. Non-finite output or absmax
+   boundary for the same complete natural-data pass. Non-finite output or absmax
    above 1,000 aborts before the first blend update.
 6. Every ordinary validation pass is strict. Completion also saves a
    downstream-only BatchNorm-recalibrated group checkpoint.
@@ -124,6 +124,15 @@ The configuration is
 No clamp, division by encrypted data, or branch is added to inference. After
 folding, the new activation is `A*x^2+B*x+C`; it adds one ciphertext square
 level. The nine-site path therefore has nine quadratic activation levels.
+
+The first Nano4 submission (`321291`) tested a stronger photometric stress
+domain. It failed at global step zero while observing the input of
+`layer4.2.prelu`, before the ninth polynomial was enabled. The accepted
+epoch-10 graph's existing eight-polynomial prefix therefore overflowed on a
+synthetically stressed input. That augmentation is outside this fixed
+baseline's stable domain and cannot be repaired by rescaling the later ninth
+site. The revised run retains the fail-fast checks but uses the natural
+training distribution; it does not hide the failure with clipping.
 
 ## Acceptance gates and next replacement
 

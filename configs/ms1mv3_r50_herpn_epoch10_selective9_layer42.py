@@ -11,10 +11,10 @@ For its frozen channel-wise PReLU slope ``a`` and calibrated public scale
 
     PReLU_a(x), x in [-S, S]
 
-with ``a*x + (1-a)*S*HerPN_ReLU(x/S)``. ``S`` is 1.25 times the largest input
-seen across augmented range-calibration shards and is checked again at the
-blend boundary. The folded inference activation is still ``A*x^2+B*x+C``:
-degree 2 and one ciphertext square at this site.
+with ``a*x + (1-a)*S*HerPN_ReLU(x/S)``. ``S`` is 1.5 times the largest input
+seen across the complete natural MS1Mv3 range-calibration shards and is checked
+again at the blend boundary. The folded inference activation is still
+``A*x^2+B*x+C``: degree 2 and one ciphertext square at this site.
 """
 
 from easydict import EasyDict as edict
@@ -24,7 +24,7 @@ config = edict()
 config.margin_list = (1.0, 0.5, 0.0)
 config.network = "r50_prelu_herpn"
 config.resume = False
-config.output = "work_dirs/ms1mv3_r50_herpn_epoch10_selective9_layer42"
+config.output = "work_dirs/ms1mv3_r50_herpn_epoch10_selective9_layer42_natural"
 config.embedding_size = 512
 config.sample_rate = 1.0
 config.fp16 = False
@@ -64,10 +64,14 @@ config.layerwise_poly_final_backbone_lr_scale = 0.01
 config.layerwise_poly_optimizer_lr_scale = 0.01
 
 # Approximation interval: [-S, S], with S fitted to the maximum rather than a
-# central quantile. This deliberately trades a little fit sharpness for tail
-# coverage; no clipping or other non-polynomial guard enters inference.
-config.layerwise_poly_range_calibration_batches = 2048
-config.layerwise_poly_range_margin = 1.25
+# central quantile. A full distributed loader pass covers the natural MS1Mv3
+# training distribution. The earlier stress-augmentation attempt was rejected
+# by this same fail-fast pass: the accepted epoch-10 graph overflowed before
+# layer4.2 on an augmented input, before the ninth polynomial was enabled.
+# Therefore stress samples are not a valid calibration domain for this fixed
+# baseline. No clipping or other non-polynomial guard enters inference.
+config.layerwise_poly_range_calibration_batches = 0
+config.layerwise_poly_range_margin = 1.5
 config.layerwise_poly_min_scale = 1e-3
 config.layerwise_poly_range_quantile = 1.0
 config.layerwise_poly_quantile_samples = 65536
@@ -80,16 +84,7 @@ config.layerwise_poly_causal_strict_calibration = True
 config.layerwise_poly_verify_singleton_boundary = True
 config.layerwise_poly_calibration_log_interval = 128
 
-config.range_augmentation = {
-    "enabled": True,
-    "probability": 0.70,
-    "contrast": (0.45, 1.90),
-    "gain": (0.65, 1.40),
-    "bias": (-0.15, 0.15),
-    "gamma": (0.65, 1.60),
-    "noise_probability": 0.35,
-    "noise_std": 0.05,
-}
+config.range_augmentation = {"enabled": False}
 
 legacy_prefix = (
     "prelu",
