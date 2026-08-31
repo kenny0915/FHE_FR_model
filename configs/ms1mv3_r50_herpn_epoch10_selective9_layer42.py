@@ -102,7 +102,10 @@ config.broadcast_buffers = True
 config.ddp_fp16_compress = False
 config.check_finite_grads = True
 config.fail_on_nonfinite_val = True
-config.max_validation_embedding_abs = 1.0e3
+# The unchanged epoch-10 baseline reaches 1006.59 on AgeDB row 1317. The
+# linear ninth site cannot square this tail, so allow the known finite source
+# behavior while retaining a 1e6 hard drift guard and zero tolerance for NaN.
+config.max_validation_embedding_abs = 1.0e6
 config.save_all_states = True
 config.checkpoint_interval_epochs = 1
 config.save_epoch_models = True

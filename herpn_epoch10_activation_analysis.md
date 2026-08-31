@@ -144,6 +144,14 @@ NaN when `x^2` overflows. The revised degree-one student and its folded module
 never evaluate a square. This directly addresses the observed failure instead
 of choosing a robust quantile that hides it.
 
+The first linear run (`321376`) reproduced the source checkpoint at blend zero:
+LFW was 99.717% and CFP-FP was 97.957%, with finite maxima 3.03 and 3.54.
+AgeDB then exposed another source-checkpoint tail, a finite embedding magnitude
+of 1006.59 at row 1317. The original 1000 drift threshold was therefore below
+the baseline it was intended to guard. It is raised to 1e6 for the linear run,
+while non-finite values remain fatal. This is not appropriate for an added
+quadratic, but the degree-one student cannot superlinearly amplify this tail.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:
