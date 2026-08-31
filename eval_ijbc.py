@@ -1,6 +1,7 @@
 # coding: utf-8
 
 import csv
+import json
 import os
 import pickle
 
@@ -51,6 +52,15 @@ parser.add_argument('--image-path', default='', type=str, help='')
 parser.add_argument('--result-dir', default='.', type=str, help='')
 parser.add_argument('--batch-size', default=128, type=int, help='')
 parser.add_argument('--network', default='iresnet50', type=str, help='')
+parser.add_argument(
+    '--model-kwargs',
+    default='{}',
+    type=str,
+    help=(
+        'JSON object passed to backbones.get_model, for example '
+        "'{\"arch_config\":\"nl13\"}'"
+    ),
+)
 parser.add_argument('--job', default='insightface', type=str, help='job name')
 parser.add_argument('--target', default='IJBC', type=str, help='target, set to IJBC or IJBB')
 parser.add_argument(
@@ -105,6 +115,13 @@ class Embedding(object):
             'dropout': 0,
             'fp16': False,
         }
+        try:
+            requested_model_kwargs = json.loads(args.model_kwargs)
+        except json.JSONDecodeError as error:
+            raise ValueError('--model-kwargs must be a JSON object') from error
+        if not isinstance(requested_model_kwargs, dict):
+            raise ValueError('--model-kwargs must decode to a JSON object')
+        model_kwargs.update(requested_model_kwargs)
         if args.network.startswith('poolformer_no_ln_x2_act'):
             model_kwargs.update(
                 gate_initial_blend=0.0,
