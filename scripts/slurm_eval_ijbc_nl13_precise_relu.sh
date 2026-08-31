@@ -4,7 +4,7 @@
 #SBATCH --partition=dev
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:1
 #SBATCH --mem=200G
 #SBATCH --time=4:00:00
@@ -43,7 +43,7 @@ model_kwargs=$(printf \
     "${scale}" "${lower_degrees}")
 
 export CUDA_VISIBLE_DEVICES=0
-export OMP_NUM_THREADS=32
+export OMP_NUM_THREADS=12
 export PYTHONUNBUFFERED=1
 
 /home/u8798807/.conda/envs/face_recog/bin/python eval_ijbc.py \
