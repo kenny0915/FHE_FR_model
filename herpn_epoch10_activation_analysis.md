@@ -160,10 +160,14 @@ alone does not preserve the baseline during local fit: BatchNorm running
 buffers still update in training mode. Between validation steps 2000 and 4000,
 while the replacement blend remained exactly zero, CFP-FP absmax increased
 from 3.54 to 12.81 and AgeDB absmax from 1.90e15 to 7.69e16. The run was
-stopped before blending. The corrected policy freezes every BatchNorm during
-local fit, then freezes only BatchNorms upstream of `layer4.2.prelu` during
-blend/recovery so the eight-quadratic prefix remains fixed while downstream
-normalizers can adapt to the affine output.
+stopped before blending. Simply forcing BatchNorm to eval mode was also wrong:
+run `321518` reproduced a non-finite training embedding at step 641 because
+the source graph needs batch moments for those training tails. The corrected
+policy keeps train-mode batch normalization for the forward, then restores all
+running buffers after each local-fit batch. During blend/recovery it restores
+only buffers upstream of `layer4.2.prelu`, preserving the eight-quadratic
+prefix while downstream normalizers can accumulate the affine output's new
+distribution.
 
 ## Acceptance gates and next replacement
 

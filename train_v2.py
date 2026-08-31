@@ -350,39 +350,15 @@ def freeze_batchnorm_for_training(module: torch.nn.Module, *, affine=False):
     return count
 
 
-def freeze_batchnorm_before_activation(
-        module: torch.nn.Module, activation_name: str, *, affine=False):
-    """Freeze only BatchNorms upstream of a named activation.
-
-    ``named_modules`` follows module construction/forward order for the
-    sequential iResNet backbone. This preserves the accepted polynomial prefix
-    while leaving downstream normalizers free to adapt to a new activation.
-    """
-    count = 0
-    found = False
-    for name, submodule in module.named_modules():
-        if name == activation_name:
-            found = True
-            break
-        if not isinstance(submodule, nn.modules.batchnorm._BatchNorm):
-            continue
-        submodule.eval()
-        if affine:
-            if submodule.weight is not None:
-                submodule.weight.requires_grad_(False)
-            if submodule.bias is not None:
-                submodule.bias.requires_grad_(False)
-        count += 1
-    if not found:
-        raise ValueError(
-            f"Unknown activation for upstream BatchNorm freeze: {activation_name}")
-    return count
-
-
-def snapshot_batchnorm_running_stats(module: torch.nn.Module):
+def snapshot_batchnorm_running_stats(
+        module: torch.nn.Module, *, before_activation=None):
     """Copy mutable BN buffers so a rejected forward can be rolled back."""
     snapshots = []
-    for submodule in module.modules():
+    found_boundary = before_activation is None
+    for name, submodule in module.named_modules():
+        if before_activation is not None and name == before_activation:
+            found_boundary = True
+            break
         if not isinstance(
                 submodule, nn.modules.batchnorm._BatchNorm):
             continue
@@ -395,6 +371,10 @@ def snapshot_batchnorm_running_stats(module: torch.nn.Module):
             (submodule.num_batches_tracked.detach().clone()
              if submodule.num_batches_tracked is not None else None),
         ))
+    if not found_boundary:
+        raise ValueError(
+            "Unknown activation for upstream BatchNorm snapshot: "
+            f"{before_activation}")
     return snapshots
 
 
@@ -2325,10 +2305,10 @@ def main(args):
         cfg, "layerwise_poly_staged_training", False))
     layerwise_poly_freeze_backbone_during_local_fit = bool(getattr(
         cfg, "layerwise_poly_freeze_backbone_during_local_fit", False))
-    layerwise_poly_freeze_batchnorm_during_local_fit = bool(getattr(
-        cfg, "layerwise_poly_freeze_batchnorm_during_local_fit", False))
-    layerwise_poly_freeze_upstream_batchnorm = bool(getattr(
-        cfg, "layerwise_poly_freeze_upstream_batchnorm", False))
+    layerwise_poly_preserve_batchnorm_during_local_fit = bool(getattr(
+        cfg, "layerwise_poly_preserve_batchnorm_during_local_fit", False))
+    layerwise_poly_preserve_upstream_batchnorm = bool(getattr(
+        cfg, "layerwise_poly_preserve_upstream_batchnorm", False))
     layerwise_poly_conditioning_backbone_lr_scale = float(getattr(
         cfg, "layerwise_poly_conditioning_backbone_lr_scale", 0.0))
     layerwise_poly_conditioning_range_loss_weight = float(getattr(
@@ -2380,11 +2360,11 @@ def main(args):
         raise ValueError(
             "Causal layerwise calibration requires strict pre-blend "
             "recalibration")
-    if ((layerwise_poly_freeze_batchnorm_during_local_fit
-         or layerwise_poly_freeze_upstream_batchnorm)
+    if ((layerwise_poly_preserve_batchnorm_during_local_fit
+         or layerwise_poly_preserve_upstream_batchnorm)
             and not layerwise_poly_staged_training):
         raise ValueError(
-            "Phase-specific BatchNorm freezing requires staged layerwise "
+            "Phase-specific BatchNorm preservation requires staged layerwise "
             "polynomial training")
     if (layerwise_poly_verify_singleton_boundary
             and not layerwise_poly_causal_strict_calibration):
@@ -3609,20 +3589,27 @@ def main(args):
             batchnorm_snapshot = (
                 snapshot_batchnorm_running_stats(backbone.module)
                 if max_nonfinite_embedding_skips > 0 else None)
+            preserve_batchnorm_snapshot = None
+            if (layerwise_training_phase == "local_fit"
+                    and layerwise_poly_preserve_batchnorm_during_local_fit):
+                preserve_batchnorm_snapshot = (
+                    snapshot_batchnorm_running_stats(backbone.module))
+            elif (layerwise_poly_preserve_upstream_batchnorm
+                    and layerwise_poly_training_groups):
+                preserve_batchnorm_snapshot = snapshot_batchnorm_running_stats(
+                    backbone.module,
+                    before_activation=layerwise_poly_training_groups[-1][-1])
             if freeze_batchnorm_running_stats:
                 # Verification restores the whole backbone to train mode.
                 # Reassert the frozen-stat policy before every forward.
                 freeze_batchnorm_for_training(
                     backbone.module, affine=freeze_batchnorm_affine)
-            elif (layerwise_training_phase == "local_fit"
-                    and layerwise_poly_freeze_batchnorm_during_local_fit):
-                freeze_batchnorm_for_training(backbone.module)
-            elif (layerwise_poly_freeze_upstream_batchnorm
-                    and layerwise_poly_training_groups):
-                freeze_batchnorm_before_activation(
-                    backbone.module,
-                    layerwise_poly_training_groups[-1][-1])
             backbone_output = backbone(img)
+            if preserve_batchnorm_snapshot is not None:
+                # Use train-mode batch moments to keep rare-tail forwards
+                # stable, but do not let their mutable running buffers drift
+                # the accepted inference graph.
+                restore_batchnorm_running_stats(preserve_batchnorm_snapshot)
             if cryptoface_patch_training:
                 local_embeddings, patch_pred, patch_target = backbone_output
             else:

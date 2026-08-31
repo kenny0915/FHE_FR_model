@@ -2,8 +2,9 @@ import torch
 from torch import nn
 
 from train_v2 import (
-    freeze_batchnorm_before_activation,
     freeze_batchnorm_for_training,
+    restore_batchnorm_running_stats,
+    snapshot_batchnorm_running_stats,
 )
 
 
@@ -27,7 +28,7 @@ def test_freeze_batchnorm_for_training_preserves_stats_and_affine():
         torch.testing.assert_close(module.running_mean, expected)
 
 
-def test_freeze_batchnorm_before_activation_leaves_downstream_adaptive():
+def test_snapshot_before_activation_restores_only_upstream_stats():
     model = nn.Sequential(
         nn.Conv2d(3, 4, 1),
         nn.BatchNorm2d(4),
@@ -40,11 +41,13 @@ def test_freeze_batchnorm_before_activation_leaves_downstream_adaptive():
     upstream_mean = upstream.running_mean.clone()
     downstream_mean = downstream.running_mean.clone()
 
-    count = freeze_batchnorm_before_activation(model, "3")
+    snapshots = snapshot_batchnorm_running_stats(
+        model, before_activation="3")
     model(torch.randn(8, 3, 5, 5))
+    restore_batchnorm_running_stats(snapshots)
 
-    assert count == 1
-    assert not upstream.training
+    assert len(snapshots) == 1
+    assert upstream.training
     assert downstream.training
     torch.testing.assert_close(upstream.running_mean, upstream_mean)
     assert not torch.equal(downstream.running_mean, downstream_mean)
