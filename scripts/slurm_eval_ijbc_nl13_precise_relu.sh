@@ -6,6 +6,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=12
 #SBATCH --gres=gpu:1
+#SBATCH --exclude=25a-hgpn[143-145]
 #SBATCH --mem=200G
 #SBATCH --time=4:00:00
 #SBATCH --output=work_dirs/slurm-%x-%j.out
