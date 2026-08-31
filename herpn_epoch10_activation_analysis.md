@@ -147,12 +147,13 @@ of choosing a robust quantile that hides it.
 The first linear run (`321376`) reproduced the source checkpoint at blend zero:
 LFW was 99.717% and CFP-FP was 97.957%, with finite maxima 3.03 and 3.54.
 AgeDB then exposed another source-checkpoint tail at row 1317: magnitude
-1006.59 in one orientation and 1.57239e6 after horizontal flip. The original
-drift thresholds were therefore below the baseline they were intended to
-guard. The hard guard is set to 1e12 for the linear run, while non-finite
-values remain fatal and logged maxima are compared to the blend-zero value.
-This headroom is not appropriate for an added quadratic, but the degree-one
-student cannot superlinearly amplify this tail.
+1006.59 in one orientation and 1.57239e6 after horizontal flip. A subsequent
+fuller pass found 1.9028e15 at flipped row 5039. Fixed cutoffs of 1e3, 1e6, and
+1e12 all rejected the unchanged source graph before the replacement was
+active. The linear run therefore uses elementwise NaN/Inf as the hard gate and
+logs maxima for blend-zero versus blended comparison. This policy is not
+appropriate for an added quadratic: the observed 1e15 tail already rules that
+out, whereas the degree-one student cannot superlinearly amplify it.
 
 ## Acceptance gates and next replacement
 
