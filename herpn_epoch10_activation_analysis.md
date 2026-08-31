@@ -276,6 +276,14 @@ to each of the 17 remaining PReLUs separately. This tests which residual block
 is most redundant instead of assuming the last activation is the least
 disruptive choice.
 
+Site-selection job `321773` found two near-gate Layer3 candidates. Replacing
+`layer3.8.prelu` (index 16) yielded 99.683%/97.500%/97.200%; replacing
+`layer3.9.prelu` (index 17) yielded 99.767%/97.471%/97.267%. Their CFP-FP drops
+miss the 0.5-point screening gate by only 0.014 and 0.043 point respectively,
+while all outputs and the known RecordIO tail remain finite. Both proceed to
+parallel full IJB-C evaluation because this difference is below one 10-fold
+validation sample step and `layer4.2` is already known to miss IJB accuracy.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:
