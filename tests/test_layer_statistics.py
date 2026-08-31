@@ -9,10 +9,12 @@ from torch import nn
 from eval.layer_statistics import (
     LayerStatisticsRecorder,
     RunningTensorStats,
+    evenly_spaced_indices,
     estimate_similarity_transform,
     parameter_rows,
     write_results,
 )
+from eval.compare_activation_distributions import compare_rows
 
 
 def test_running_tensor_stats_aggregates_calls_and_nonfinite_values():
@@ -32,6 +34,15 @@ def test_running_tensor_stats_aggregates_calls_and_nonfinite_values():
     assert row["min"] == -1.0
     assert row["max"] == 2.0
     assert len(row["sample_values"]) == 3
+
+
+def test_evenly_spaced_indices_stay_bounded_above_fp32_exact_range():
+    indices = evenly_spaced_indices(80_281_600, 2048)
+
+    assert indices.dtype == torch.long
+    assert int(indices[0]) == 0
+    assert int(indices[-1]) == 80_281_599
+    assert bool((indices[1:] >= indices[:-1]).all())
 
 
 def test_recorder_collects_leaf_outputs_and_parameters():
@@ -101,3 +112,22 @@ def test_estimate_similarity_transform_rejects_degenerate_points():
 
     with pytest.raises(ValueError, match="degenerate"):
         estimate_similarity_transform(points, points)
+
+
+def test_compare_activation_rows_reports_tail_ratios_and_nonfinite():
+    baseline = {("prelu", "input"): {
+        "std": 2.0, "abs_p99": 4.0, "abs_p999": 5.0,
+        "absmax": 8.0, "nonfinite": 0,
+    }}
+    candidate = {("prelu", "input"): {
+        "std": 1.0, "abs_p99": 2.0, "abs_p999": 10.0,
+        "absmax": 32.0, "nonfinite": 3,
+    }}
+
+    row = compare_rows(baseline, candidate)[0]
+
+    assert row["std_ratio"] == pytest.approx(0.5)
+    assert row["abs_p99_ratio"] == pytest.approx(0.5)
+    assert row["abs_p999_ratio"] == pytest.approx(2.0)
+    assert row["absmax_ratio"] == pytest.approx(4.0)
+    assert row["candidate_nonfinite"] == 3

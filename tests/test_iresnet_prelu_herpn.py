@@ -10,6 +10,7 @@ from torch import nn
 from backbones import get_model
 from backbones.iresnet_nl9_prelu_herpn import NL9_ACTIVATION_NAMES
 from backbones.iresnet_prelu_herpn import PReLUHerPNActivation
+from backbones.iresnet_no_relu import ProgressiveHerPNActivation
 from utils.utils_optimizer import split_weight_decay_parameters
 
 
@@ -258,6 +259,89 @@ def test_distillation_gradient_is_local_but_task_gradient_reaches_input():
     output.square().mean().backward()
     assert inputs.grad is not None
     assert float(inputs.grad.abs().sum()) > 0.0
+
+
+def test_hybrid_legacy_prefix_load_is_exact_and_new_students_reset():
+    torch.manual_seed(41)
+    source = get_model(
+        "r18_no_relu", dropout=0, fp16=False, herpn_progress=0.0).eval()
+    names = [
+        name for name, module in source.named_modules()
+        if isinstance(module, ProgressiveHerPNActivation)
+    ]
+    source.set_herpn_blends({
+        name: float(index < 3) for index, name in enumerate(names)
+    })
+    source_state = source.state_dict()
+
+    hybrid = get_model(
+        "r18_prelu_herpn",
+        dropout=0,
+        fp16=False,
+        herpn_progress=0.0,
+        prelu_herpn_layerwise_scale=True,
+        prelu_herpn_legacy_prefix=3,
+    ).eval()
+    hybrid.load_backbone_init_state_dict(source_state)
+    hybrid.set_herpn_blends({
+        name: float(index < 3) for index, name in enumerate(names)
+    })
+
+    activations = dict(hybrid.named_progressive_activations())
+    assert all(isinstance(activations[name], ProgressiveHerPNActivation)
+               for name in names[:3])
+    assert all(isinstance(activations[name], PReLUHerPNActivation)
+               for name in names[3:])
+    assert hybrid.uncalibrated_layerwise_poly_names() == names[3:]
+    for name in names[3:]:
+        torch.testing.assert_close(
+            activations[name].herpn.weight,
+            torch.zeros_like(activations[name].herpn.weight))
+        torch.testing.assert_close(
+            activations[name].herpn.bias,
+            torch.zeros_like(activations[name].herpn.bias))
+
+    inputs = torch.randn(1, 3, 112, 112)
+    with torch.no_grad():
+        expected = source(inputs)
+        actual = hybrid(inputs)
+    torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
+def test_hybrid_refuses_to_reinterpret_converted_legacy_suffix():
+    source = get_model(
+        "r18_no_relu", dropout=0, fp16=False, herpn_progress=0.0).eval()
+    names = [
+        name for name, module in source.named_modules()
+        if isinstance(module, ProgressiveHerPNActivation)
+    ]
+    source.set_herpn_blends({
+        name: float(index < 4) for index, name in enumerate(names)
+    })
+    hybrid = get_model(
+        "r18_prelu_herpn",
+        dropout=0,
+        fp16=False,
+        herpn_progress=0.0,
+        prelu_herpn_layerwise_scale=True,
+        prelu_herpn_legacy_prefix=3,
+    )
+
+    with pytest.raises(ValueError, match="already-converted legacy HerPN"):
+        hybrid.load_backbone_init_state_dict(source.state_dict())
+
+
+def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_herpn_epoch10_selective9_layer42.py")
+    names = tuple(group[0] for group in cfg.herpn_conversion_groups)
+
+    assert cfg.prelu_herpn_legacy_prefix == 8
+    assert names[8] == "layer4.2.prelu"
+    assert cfg.layerwise_poly_training_group_limit == 9
+    assert cfg.layerwise_poly_range_quantile == 1.0
+    assert cfg.layerwise_poly_verify_singleton_boundary
+    assert not cfg.herpn_require_full_conversion
 
 
 def test_zero_initialized_student_has_bounded_relative_loss():

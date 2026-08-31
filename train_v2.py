@@ -1435,6 +1435,8 @@ def main(args):
                     cfg.prelu_herpn_layerwise_scale)
                 model_kwargs["prelu_herpn_initial_scale"] = float(getattr(
                     cfg, "prelu_herpn_initial_scale", 1.0))
+            model_kwargs["prelu_herpn_legacy_prefix"] = int(getattr(
+                cfg, "prelu_herpn_legacy_prefix", 0))
     if (cfg.network.startswith("r")
             and cfg.network.endswith("_herpn_residual_scale")):
         model_kwargs.update(
@@ -2305,6 +2307,8 @@ def main(args):
         cfg, "layerwise_poly_strict_recalibrate_before_blend", False))
     layerwise_poly_causal_strict_calibration = bool(getattr(
         cfg, "layerwise_poly_causal_strict_calibration", False))
+    layerwise_poly_verify_singleton_boundary = bool(getattr(
+        cfg, "layerwise_poly_verify_singleton_boundary", False))
     layerwise_poly_calibration_log_interval = int(getattr(
         cfg, "layerwise_poly_calibration_log_interval", 0))
     layerwise_poly_strict_tail_scale_floor = bool(getattr(
@@ -2341,6 +2345,11 @@ def main(args):
         raise ValueError(
             "Causal layerwise calibration requires strict pre-blend "
             "recalibration")
+    if (layerwise_poly_verify_singleton_boundary
+            and not layerwise_poly_causal_strict_calibration):
+        raise ValueError(
+            "Singleton boundary verification requires causal strict "
+            "calibration")
     if layerwise_poly_tail_scale_floor_margin < 1.0:
         raise ValueError(
             "layerwise_poly_tail_scale_floor_margin must be at least 1")
@@ -2913,8 +2922,12 @@ def main(args):
 
     def strictly_calibrate_layerwise_poly_group(target_names, group_index):
         target_names = tuple(target_names)
-        if not (layerwise_poly_causal_strict_calibration
-                and len(target_names) > 1):
+        use_causal_boundary = (
+            layerwise_poly_causal_strict_calibration
+            and (len(target_names) > 1
+                 or layerwise_poly_verify_singleton_boundary)
+        )
+        if not use_causal_boundary:
             return calibrate_layerwise_poly_group(
                 target_names, allow_recalibration=True, provisional=False)
 

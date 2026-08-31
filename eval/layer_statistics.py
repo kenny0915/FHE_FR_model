@@ -33,6 +33,25 @@ SUMMARY_FIELDS = (
 )
 
 
+def evenly_spaced_indices(numel, count, device=None):
+    """Return bounded int64 sample positions without FP32 index rounding.
+
+    Early face-backbone maps can contain more than 2**24 values. CUDA's
+    default FP32 ``linspace`` can then round ``numel - 1`` up to ``numel``,
+    producing an out-of-bounds index. Integer arithmetic is exact here.
+    """
+    numel = int(numel)
+    count = int(count)
+    if numel <= 0 or count <= 0:
+        return torch.empty(0, dtype=torch.long, device=device)
+    count = min(count, numel)
+    if count == 1:
+        return torch.zeros(1, dtype=torch.long, device=device)
+    positions = torch.arange(count, dtype=torch.long, device=device)
+    return torch.div(
+        positions * (numel - 1), count - 1, rounding_mode="floor")
+
+
 def _shape_text(shape, dynamic_batch=False):
     values = [str(value) for value in shape]
     if dynamic_batch and values:
@@ -116,9 +135,8 @@ class RunningTensorStats:
             return
         values = values.reshape(-1)
         if values.numel() > self.sample_limit:
-            indices = torch.linspace(
-                0, values.numel() - 1, self.sample_limit,
-                device=values.device).round().long()
+            indices = evenly_spaced_indices(
+                values.numel(), self.sample_limit, device=values.device)
             values = values[indices]
         values = values.cpu()
         available = self.sample_limit - self.samples.numel()
@@ -291,6 +309,8 @@ def model_kwargs_from_config(cfg):
                     cfg.prelu_herpn_layerwise_scale)
                 kwargs["prelu_herpn_initial_scale"] = float(getattr(
                     cfg, "prelu_herpn_initial_scale", 1.0))
+            kwargs["prelu_herpn_legacy_prefix"] = int(getattr(
+                cfg, "prelu_herpn_legacy_prefix", 0))
     if network.startswith("r") and network.endswith("_herpn_residual_scale"):
         kwargs.update(
             herpn_range_limit=float(getattr(cfg, "herpn_range_limit", 6.0)),

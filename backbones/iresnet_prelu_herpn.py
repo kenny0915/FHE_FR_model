@@ -34,6 +34,7 @@ from .iresnet_no_relu import (
     HerPN,
     IBasicBlock,
     IResNet as _HerPNIResNet,
+    ProgressiveHerPNActivation,
 )
 
 __all__ = [
@@ -47,6 +48,11 @@ __all__ = [
 ]
 
 _STAGE_NAMES = ("stem", "layer1", "layer2", "layer3", "layer4")
+
+
+def _is_progressive_activation(module):
+    return isinstance(
+        module, (ProgressiveHerPNActivation, PReLUHerPNActivation))
 
 
 class _PReLUHerPN(HerPN):
@@ -189,6 +195,9 @@ class PReLUHerPNActivation(nn.Module):
         scaled_key = prefix + "layerwise_scale_enabled"
         scale_key = prefix + "input_scale"
         calibrated_key = prefix + "scale_calibrated"
+        distill_key = prefix + "distill_eps"
+        if distill_key not in state_dict:
+            state_dict[distill_key] = self.distill_eps.detach()
         if scaled_key not in state_dict:
             state_dict[scaled_key] = self.layerwise_scale_enabled.detach()
         if scale_key not in state_dict:
@@ -354,11 +363,22 @@ class PReLUHerPNActivation(nn.Module):
 
 
 class IResNet(_HerPNIResNet):
-    """IResNet topology with channel-wise PReLU-aware HerPN students."""
+    """IResNet with optional exact preservation of a legacy HerPN prefix.
+
+    ``prelu_herpn_legacy_prefix`` keeps that many activations as the original
+    direct HerPN wrapper. Remaining sites use the scaled, PReLU-aware student.
+    This lets a known-finite partially converted checkpoint remain bit-for-bit
+    unchanged while later PReLUs are replaced with safer interval-aware
+    quadratics.
+    """
 
     def __init__(self, *args, prelu_herpn_distill_eps=1e-4,
                  prelu_herpn_layerwise_scale=False,
-                 prelu_herpn_initial_scale=1.0, **kwargs):
+                 prelu_herpn_initial_scale=1.0,
+                 prelu_herpn_legacy_prefix=0, **kwargs):
+        legacy_prefix = int(prelu_herpn_legacy_prefix)
+        if legacy_prefix < 0:
+            raise ValueError("prelu_herpn_legacy_prefix must be non-negative")
         object.__setattr__(
             self, "prelu_herpn_distill_eps",
             float(prelu_herpn_distill_eps))
@@ -368,9 +388,22 @@ class IResNet(_HerPNIResNet):
         object.__setattr__(
             self, "prelu_herpn_initial_scale",
             float(prelu_herpn_initial_scale))
+        object.__setattr__(self, "prelu_herpn_legacy_prefix", legacy_prefix)
+        object.__setattr__(self, "_activation_construction_index", 0)
         super().__init__(*args, **kwargs)
 
     def _make_activation(self, channels, stage_name):
+        activation_index = self._activation_construction_index
+        object.__setattr__(
+            self, "_activation_construction_index", activation_index + 1)
+        if activation_index < self.prelu_herpn_legacy_prefix:
+            return ProgressiveHerPNActivation(
+                channels=channels,
+                range_limit=self.herpn_range_limit,
+                bn_eps=self.herpn_bn_eps,
+                stage_index=_STAGE_NAMES.index(stage_name),
+                blend=0.0,
+            )
         return PReLUHerPNActivation(
             channels=channels,
             range_limit=self.herpn_range_limit,
@@ -385,14 +418,44 @@ class IResNet(_HerPNIResNet):
     def progressive_activations(self):
         return [
             module for module in self.modules()
-            if isinstance(module, PReLUHerPNActivation)
+            if _is_progressive_activation(module)
         ]
 
     def named_progressive_activations(self):
         return [
             (name, module) for name, module in self.named_modules()
-            if isinstance(module, PReLUHerPNActivation)
+            if _is_progressive_activation(module)
         ]
+
+    @torch.no_grad()
+    def load_backbone_init_state_dict(self, state_dict):
+        """Load a legacy checkpoint and reset only newly scaled students.
+
+        A legacy direct-HerPN branch is not algebraically the same as the
+        PReLU-aware student. Reusing its output weights would create an
+        immediate graph shock. Its BatchNorm observations remain useful, but
+        the two output parameters must start from the bounded ``a*x`` branch.
+        """
+        scaled_names = [
+            name for name, activation in self.named_progressive_activations()
+            if isinstance(activation, PReLUHerPNActivation)
+        ]
+        legacy_sources = {
+            name for name in scaled_names
+            if name + ".input_scale" not in state_dict
+        }
+        self.load_state_dict(state_dict, strict=True)
+        for name in legacy_sources:
+            activation = dict(self.named_progressive_activations())[name]
+            if activation._blend > 0.0:
+                raise ValueError(
+                    "Cannot reinterpret an already-converted legacy HerPN as "
+                    f"a scaled PReLU-aware student: {name}")
+            activation.herpn.weight.zero_()
+            activation.herpn.bias.zero_()
+            activation.scale_calibrated.fill_(False)
+            activation._scale_is_calibrated = False
+        return self
 
     def layerwise_poly_activation_names(self):
         return [name for name, _ in self.named_progressive_activations()]
@@ -428,7 +491,8 @@ class IResNet(_HerPNIResNet):
     def uncalibrated_layerwise_poly_names(self):
         return [
             name for name, activation in self.named_progressive_activations()
-            if not activation._scale_is_calibrated
+            if isinstance(activation, PReLUHerPNActivation)
+            and not activation._scale_is_calibrated
         ]
 
     @torch.no_grad()
@@ -436,12 +500,15 @@ class IResNet(_HerPNIResNet):
         activations = dict(self.named_progressive_activations())
         if name not in activations:
             raise ValueError(f"Unknown PReLU-HerPN activation: {name}")
+        if not isinstance(activations[name], PReLUHerPNActivation):
+            raise ValueError(
+                f"Legacy HerPN activation has no layerwise input scale: {name}")
         activations[name].set_input_scale(scale)
 
     def set_herpn_blends(self, blends):
         activations = {
             name: module for name, module in self.named_modules()
-            if isinstance(module, PReLUHerPNActivation)
+            if _is_progressive_activation(module)
         }
         unknown = sorted(set(blends).difference(activations))
         if unknown:
@@ -459,7 +526,7 @@ class IResNet(_HerPNIResNet):
         return {
             name: module.range_stats()
             for name, module in self.named_modules()
-            if isinstance(module, PReLUHerPNActivation)
+            if _is_progressive_activation(module)
         }
 
     def herpn_range_penalty(self, activation_names=None):
@@ -469,7 +536,7 @@ class IResNet(_HerPNIResNet):
             for name, activation in self.named_progressive_activations()
             if (selected is None or name in selected)
             and (not self.layerwise_input_scale_enabled
-                 or activation._scale_is_calibrated)
+                 or getattr(activation, "_scale_is_calibrated", True))
             and activation.range_penalty() is not None
         ]
         if not penalties:
@@ -483,7 +550,7 @@ class IResNet(_HerPNIResNet):
             for name, activation in self.named_progressive_activations()
             if (selected is None or name in selected)
             and (not self.layerwise_input_scale_enabled
-                 or activation._scale_is_calibrated)
+                 or getattr(activation, "_scale_is_calibrated", True))
             and activation.distillation_loss() is not None
         ]
         if not losses:
@@ -524,7 +591,7 @@ class IResNet(_HerPNIResNet):
 
         def replace(module):
             for name, child in list(module.named_children()):
-                if isinstance(child, PReLUHerPNActivation):
+                if _is_progressive_activation(child):
                     setattr(module, name, child.folded())
                 else:
                     replace(child)
