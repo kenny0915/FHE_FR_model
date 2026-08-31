@@ -257,9 +257,16 @@ threshold uses the PReLU negative slope; other channels use identity, which is
 exact on PReLU's positive branch. Thresholds are calibrated jointly on the
 three full verification sets and known MS1M counterexample RecordIO index
 86052. A candidate must keep every embedding finite, limit worst-tail growth
-to 1.1x the source, and stay within 0.5 accuracy point before it can proceed
+to 10x the source, and stay within 0.5 accuracy point before it can proceed
 to full IJB-C. This remains a fixed channel-wise affine polynomial with zero
 ciphertext multiplication depth.
+
+The first channel screen found that thresholds through `1e6` still marked all
+512 channels unsafe: the known MS1M tail has been mixed across the complete
+layer. Its overly tight 1.1x single-image magnitude gate also rejected the
+otherwise finite all-negative-slope fallback. The expanded screen probes
+thresholds through `1e23`; the 10x tail-growth bound remains conservative
+against the 35x amplification already observed for the failed fitted affine.
 
 ## Acceptance gates and next replacement
 

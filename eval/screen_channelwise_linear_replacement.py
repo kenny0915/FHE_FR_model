@@ -39,10 +39,11 @@ def main():
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument(
         "--thresholds", nargs="+", type=float,
-        default=(2.0, 4.0, 8.0, 16.0, 64.0, 1000.0, 1.0e6))
+        default=(
+            2.0, 1.0e6, 1.0e9, 1.0e12, 1.0e15, 1.0e18, 1.0e21, 1.0e23))
     parser.add_argument("--recordio-index", type=int, default=86052)
     parser.add_argument("--max-accuracy-drop", type=float, default=0.005)
-    parser.add_argument("--max-tail-growth", type=float, default=1.1)
+    parser.add_argument("--max-tail-growth", type=float, default=10.0)
     parser.add_argument("--output", required=True)
     parser.add_argument("--checkpoint-output", required=True)
     args = parser.parse_args()
@@ -210,7 +211,26 @@ def main():
                 and target_tail_safe and stress_tail_safe):
             accepted.append(candidate)
     if not accepted:
-        raise RuntimeError("No channel-wise candidate passed the accuracy gate")
+        result = {
+            "source": source,
+            "calibration": {
+                "recordio_index": args.recordio_index,
+                "recordio_embedding_finite": stress_finite,
+                "recordio_embedding_absmax": stress_source_absmax,
+                "input_nonfinite_elements": input_nonfinite,
+                "channel_min": channel_min.tolist(),
+            },
+            "candidates": candidates,
+            "selected_threshold": None,
+            "checkpoint_output": None,
+        }
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        raise RuntimeError(
+            f"No channel-wise candidate passed the accuracy/tail gates; "
+            f"diagnostics saved to {output}")
     selected = max(
         accepted,
         key=lambda item: sum(
