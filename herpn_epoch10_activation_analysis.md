@@ -284,6 +284,13 @@ while all outputs and the known RecordIO tail remain finite. Both proceed to
 parallel full IJB-C evaluation because this difference is below one 10-fold
 validation sample step and `layer4.2` is already known to miss IJB accuracy.
 
+Both full jobs were numerically safe over 938,750 embeddings. `layer3.8`
+(`321777`) reached 94.21% and `layer3.9` (`321778`) reached 94.27% TAR at FAR
+`1e-4`, versus 93.61% for `layer4.2`. They still miss the 94.68% acceptance
+gate by 0.47 and 0.41 point. `layer3.9` becomes the recovery baseline because
+its remaining four Layer3 blocks, complete Layer4, and embedding head can be
+distilled while the accepted nine-activation prefix stays immutable.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:

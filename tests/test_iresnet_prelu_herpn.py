@@ -442,6 +442,17 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
     assert recovery_cfg.output.endswith("linear9_prelu_slope_recovery")
     assert resume_cfg.herpn_conversion_groups == cfg.herpn_conversion_groups
 
+    layer3_recovery = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_herpn_epoch10_linear9_layer3_9_recovery.py")
+    layer3_names = tuple(
+        group[0] for group in layer3_recovery.herpn_conversion_groups)
+    assert layer3_recovery.prelu_herpn_linear_indices == (17,)
+    assert layer3_names[8] == "layer3.9.prelu"
+    assert layer3_recovery.task_loss_weight == 0.0
+    assert "layer3.10" in layer3_recovery.backbone_trainable_prefixes
+    assert layer3_recovery.freeze_batchnorm_running_stats
+
 
 def test_zero_initialized_student_has_bounded_relative_loss():
     activation = PReLUHerPNActivation(
