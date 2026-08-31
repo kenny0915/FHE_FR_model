@@ -297,6 +297,13 @@ were 99.733%/97.843%/97.333%. Because CFP continued improving while the other
 sets peaked earlier, the deterministic run is repeated with per-validation
 snapshots enabled so both checkpoints can receive the authoritative IJB gate.
 
+The repeated run reproduced those metrics and saved both states. Full IJB-C
+remained finite, with step 500 (`321795`) at 94.54% and step 1000 (`321797`)
+at 94.62% TAR@FAR=`1e-4`. Step 1000 is only 0.06 point below the acceptance
+gate. The saved step-1500 state is evaluated once, while a separate continuation
+starts from step 1000 at a 10x smaller learning rate to search the narrow
+recovery region without the observed CFP-FP overshoot.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:

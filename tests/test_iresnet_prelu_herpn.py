@@ -454,6 +454,13 @@ def test_epoch10_selective9_config_preserves_eight_and_targets_layer42():
     assert layer3_recovery.freeze_batchnorm_running_stats
     assert layer3_recovery.save_validation_snapshots
 
+    low_lr = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_herpn_epoch10_linear9_layer3_9_low_lr.py")
+    assert low_lr.lr == 3.0e-5
+    assert low_lr.verbose == 250
+    assert low_lr.backbone_init.endswith("model_step_01000.pt")
+
 
 def test_zero_initialized_student_has_bounded_relative_loss():
     activation = PReLUHerPNActivation(
