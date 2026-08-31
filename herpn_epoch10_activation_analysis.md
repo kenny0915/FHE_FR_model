@@ -244,6 +244,23 @@ so autograd correctly rejected the in-place version change. Frozen BN does not
 update buffers at all; the corrected path simply omits that redundant
 snapshot/restore when inference moments are enabled.
 
+Corrected job `321755` reproduced the known source-prefix overflow at step 641
+and skipped it as intended, but its step-500 result still degraded to
+99.600%/96.300%/95.883%. The information loss is therefore fundamental, not
+just a BN-mode mismatch: applying the small negative slope to every positive
+input discards information that a downstream linear/convolutional suffix
+cannot reconstruct.
+
+The next screen keeps a degree-one polynomial but chooses coefficients per
+channel. A channel whose observed input crosses a calibrated negative-tail
+threshold uses the PReLU negative slope; other channels use identity, which is
+exact on PReLU's positive branch. Thresholds are calibrated jointly on the
+three full verification sets and known MS1M counterexample RecordIO index
+86052. A candidate must keep every embedding finite, limit worst-tail growth
+to 1.1x the source, and stay within 0.5 accuracy point before it can proceed
+to full IJB-C. This remains a fixed channel-wise affine polynomial with zero
+ciphertext multiplication depth.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:
