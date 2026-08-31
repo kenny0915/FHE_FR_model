@@ -146,11 +146,13 @@ of choosing a robust quantile that hides it.
 
 The first linear run (`321376`) reproduced the source checkpoint at blend zero:
 LFW was 99.717% and CFP-FP was 97.957%, with finite maxima 3.03 and 3.54.
-AgeDB then exposed another source-checkpoint tail, a finite embedding magnitude
-of 1006.59 at row 1317. The original 1000 drift threshold was therefore below
-the baseline it was intended to guard. It is raised to 1e6 for the linear run,
-while non-finite values remain fatal. This is not appropriate for an added
-quadratic, but the degree-one student cannot superlinearly amplify this tail.
+AgeDB then exposed another source-checkpoint tail at row 1317: magnitude
+1006.59 in one orientation and 1.57239e6 after horizontal flip. The original
+drift thresholds were therefore below the baseline they were intended to
+guard. The hard guard is set to 1e12 for the linear run, while non-finite
+values remain fatal and logged maxima are compared to the blend-zero value.
+This headroom is not appropriate for an added quadratic, but the degree-one
+student cannot superlinearly amplify this tail.
 
 ## Acceptance gates and next replacement
 
