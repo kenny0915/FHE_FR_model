@@ -163,6 +163,20 @@ and reruns the full gate at epoch 2.5.  Its reproducible entry points are
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_recovery.py` and
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_stem_recovery.sh`.
 
+That first half-epoch recovery was also rejected.  Despite restoring the
+correct top-512 manifest, its eval-mode maximum regressed to 2.461008
+(`ratio=1.009815`; holdout maximum 2.442533), again at source 2,471,019.  This
+isolates a train/eval mismatch rather than an unidentified source: range loss
+was computed with train-mode BatchNorm batch moments, while every strict scan
+uses inference running statistics.  More epochs under that mismatched graph
+are not justified.  The next recovery therefore resumes the still-unchanged
+epoch-2 PReLU checkpoint, freezes BatchNorm running statistics while leaving
+affine parameters trainable, and conditions against the exact normalization
+graph used by inference.  It retains the immutable interval and the same
+half-epoch gate.  Reproducible entry points are
+`configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_evalbn.py` and
+`scripts/slurm_train_r50_layerwise_poly_hard_containment_stem_evalbn.sh`.
+
 If the recovery stem gates pass, the reproducible next run is
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_group02.py`, launched by
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_group02.sh`.  It

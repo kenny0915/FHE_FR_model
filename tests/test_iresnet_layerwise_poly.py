@@ -504,6 +504,20 @@ def test_r50_hard_containment_stem_recovery_is_a_half_epoch_probe():
     assert cfg.num_epoch == 4
 
 
+def test_r50_hard_containment_stem_evalbn_matches_strict_inference_graph():
+    recovery_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_recovery.py")
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_evalbn.py")
+
+    assert cfg.resume
+    assert cfg.output == recovery_cfg.output
+    assert cfg.herpn_group_epochs == recovery_cfg.herpn_group_epochs
+    assert cfg.herpn_transition_epochs == recovery_cfg.herpn_transition_epochs
+    assert cfg.freeze_batchnorm_running_stats
+    assert not cfg.freeze_batchnorm_affine
+
+
 def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_layerwise_poly_group4.py")
