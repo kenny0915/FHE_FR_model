@@ -433,7 +433,7 @@ def test_r50_hard_containment_probe_freezes_interval_and_replays_tails():
     assert not cfg.herpn_require_full_conversion
 
 
-def test_r50_hard_containment_group02_resume_preserves_two_conditioning_epochs():
+def test_r50_hard_containment_group02_uses_adaptive_half_epoch_probe():
     stem_cfg = _load_standalone_config(
         "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem.py")
     cfg = _load_standalone_config(
@@ -446,9 +446,10 @@ def test_r50_hard_containment_group02_resume_preserves_two_conditioning_epochs()
     assert cfg.layerwise_poly_require_full_containment
     assert cfg.layerwise_poly_freeze_containment_interval
     assert cfg.layerwise_poly_training_group_limit == 2
-    assert cfg.herpn_group_epochs[:3] == (2.0, 6.0, 9.0)
-    assert cfg.herpn_group_epochs[1] - 4.0 == pytest.approx(2.0)
-    assert cfg.num_epoch == 8
+    assert cfg.herpn_transition_epochs == pytest.approx(0.5)
+    assert cfg.herpn_group_epochs[:3] == (2.0, 4.5, 6.5)
+    assert cfg.herpn_group_epochs[1] - 4.0 == pytest.approx(0.5)
+    assert cfg.num_epoch == 6
     assert not cfg.herpn_require_full_conversion
 
 
