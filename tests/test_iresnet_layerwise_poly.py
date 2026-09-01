@@ -16,10 +16,27 @@ from backbones.iresnet_layerwise_poly import (
 )
 from eval.non_linear_replacement import PReLU_Approx
 from utils.utils_layerwise_poly import (
+    activation_range_is_contained,
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
     pending_group_requires_calibration,
 )
+
+
+def test_full_containment_comparison_has_no_hidden_out_of_range_tolerance():
+    radius = 2.437089
+
+    assert activation_range_is_contained(radius, radius)
+    assert not activation_range_is_contained(
+        torch.nextafter(
+            torch.tensor(radius, dtype=torch.float64),
+            torch.tensor(float("inf"), dtype=torch.float64),
+        ).item(),
+        radius,
+    )
+    assert not activation_range_is_contained(float("inf"), radius)
+    with pytest.raises(ValueError, match="finite and positive"):
+        activation_range_is_contained(0.0, 0.0)
 
 
 def test_fractional_group_starts_trigger_once_at_half_epoch_boundary():

@@ -23,6 +23,7 @@ from utils.utils_config import get_config
 from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
 from utils.utils_layerwise_poly import (
+    activation_range_is_contained,
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
     pending_group_requires_calibration,
@@ -1187,7 +1188,9 @@ def calibrate_layerwise_poly_input_scales(
         if max_tail_ratio > 0.0 and tail_ratio > max_tail_ratio:
             provisional_violations.append(
                 f"tail_ratio={tail_ratio:.7g}>{max_tail_ratio:.7g}")
-        if require_full_containment and tail_ratio > 1.0 + 1.0e-6:
+        if (require_full_containment
+                and not activation_range_is_contained(
+                    observed_absmax, calibrated_scale)):
             provisional_violations.append(
                 f"containment_ratio={tail_ratio:.7g}>1")
         if (max_scale_growth > 0.0 and scale_growth is not None

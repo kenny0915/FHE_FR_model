@@ -1,5 +1,18 @@
 """Orchestration helpers for safe grouped polynomial calibration."""
 
+import math
+
+
+def activation_range_is_contained(observed_absmax, interval_radius):
+    """Return true only when the observed finite maximum is inside radius."""
+    observed_absmax = float(observed_absmax)
+    interval_radius = float(interval_radius)
+    if not math.isfinite(observed_absmax):
+        return False
+    if not math.isfinite(interval_radius) or interval_radius <= 0.0:
+        raise ValueError("interval_radius must be finite and positive")
+    return observed_absmax <= interval_radius
+
 
 def fractional_group_starts_crossed(
         epoch_start, current_epoch, group_epochs, already_handled=()):
