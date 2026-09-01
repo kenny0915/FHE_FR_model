@@ -364,6 +364,8 @@ def test_r50_hard_containment_probe_freezes_interval_and_replays_tails():
     assert cfg.layerwise_poly_freeze_containment_interval
     assert cfg.layerwise_poly_range_calibration_batches == 0
     assert cfg.layerwise_poly_scan_both_orientations
+    assert cfg.num_workers == 8
+    assert cfg.layerwise_poly_calibration_log_interval > 0
     assert cfg.layerwise_poly_max_tail_ratio == 0.0
     assert cfg.layerwise_poly_range_penalty_mode == "containment_topk"
     assert 0.0 < cfg.layerwise_poly_range_topk_fraction < 1.0

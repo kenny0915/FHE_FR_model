@@ -30,6 +30,12 @@ config.herpn_initial_progress = 0.0
 # outside the interval at the strict boundary.
 config.layerwise_poly_range_calibration_batches = 0
 config.layerwise_poly_scan_both_orientations = True
+# Keep all eight V100s fed during the repeated full-dataset scans.  The Slurm
+# launcher reserves 64 CPU cores, so eight workers per rank use that allocation
+# without oversubscription.  Emit deterministic scan progress often enough to
+# distinguish a long pass from a stalled loader.
+config.num_workers = 8
+config.layerwise_poly_calibration_log_interval = 250
 config.layerwise_poly_range_quantile = 0.9995
 config.layerwise_poly_range_margin = 2.0
 config.layerwise_poly_range_holdout_fraction = 0.05
@@ -82,4 +88,3 @@ config.verbose = 1000
 config.herpn_bn_recalibration_batches = 1000
 config.fail_on_nonfinite_val = True
 config.fp16 = False
-
