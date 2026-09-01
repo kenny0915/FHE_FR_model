@@ -50,4 +50,5 @@ export PYTHONUNBUFFERED=1
     --job "r50_full_poly_${tag}" \
     --target IJBC \
     --network r50_no_relu \
+    --nonfinite-manifest "${result_dir}/nonfinite_manifest.csv" \
     --model-kwargs '{"num_features":512,"herpn_range_limit":6.0,"herpn_bn_eps":0.0001,"herpn_progress":5.0}'

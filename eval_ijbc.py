@@ -45,6 +45,8 @@ import warnings
 sys.path.insert(0, "../")
 warnings.filterwarnings("ignore")
 
+from eval.nonfinite_trace import trace_first_nonfinite
+
 parser = argparse.ArgumentParser(description='do ijb test')
 # general
 parser.add_argument('--model-prefix', default='', help='path to load model.')
@@ -67,6 +69,14 @@ parser.add_argument(
     '--fail-on-nonfinite',
     action='store_true',
     help='abort immediately if an image produces a non-finite embedding',
+)
+parser.add_argument(
+    '--nonfinite-manifest',
+    default=None,
+    help=(
+        'optional CSV path for bad source rows, orientations, and the first '
+        'module producing a non-finite value during deterministic replay'
+    ),
 )
 parser.add_argument(
     '--simple-gate-blends',
@@ -158,6 +168,8 @@ class Embedding(object):
         self.model = model
         self.model.eval()
         self.nonfinite_rows = 0
+        self.nonfinite_records = []
+        self.trace_model = resnet if args.nonfinite_manifest else None
         src = np.array([
             [30.2946, 51.6963],
             [65.5318, 51.5014],
@@ -198,7 +210,7 @@ class Embedding(object):
         return input_blob
 
     @torch.no_grad()
-    def forward_db(self, batch_data):
+    def forward_db(self, batch_data, source_indices=None, source_names=None):
         imgs = torch.Tensor(batch_data).cuda()
         imgs.div_(255).sub_(0.5).div_(0.5)
         feat = self.model(imgs)
@@ -210,6 +222,21 @@ class Embedding(object):
                 f'Non-finite embeddings detected for {bad_rows} augmented images; '
                 f'total so far: {self.nonfinite_rows}'
             )
+        if bad_rows and self.trace_model is not None:
+            bad_indices = torch.where(~finite_rows)[0]
+            traces = trace_first_nonfinite(
+                self.trace_model, imgs.index_select(0, bad_indices))
+            for bad_index, trace in zip(bad_indices.tolist(), traces):
+                local_source = bad_index // 2
+                record = dict(trace)
+                record.update({
+                    'source_index': int(source_indices[local_source]),
+                    'image_name': str(source_names[local_source]),
+                    'orientation': 'flip' if bad_index % 2 else 'original',
+                    'embedding_nonfinite_values': int(
+                        (~torch.isfinite(feat[bad_index])).sum().item()),
+                })
+                self.nonfinite_records.append(record)
         feat = feat.reshape([self.batch_size, 2 * feat.shape[1]])
         return feat.cpu().numpy()
 
@@ -299,6 +326,7 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
     batch_data = np.empty((2 * batch_size, 3, 112, 112))
     embedding = Embedding(model_path, data_shape, batch_size)
     nonfinite_rows = 0
+    nonfinite_records = []
     for img_index, each_line in enumerate(files[:len(files) - rare_size]):
         name_lmk_score = each_line.strip().split(' ')
         img_name = os.path.join(img_path, name_lmk_score[0])
@@ -312,11 +340,21 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
         batch_data[2 * (img_index - batch * batch_size) + 1][:] = input_blob[1]
         if (img_index + 1) % batch_size == 0:
             print('batch', batch)
+            batch_start = batch * batch_size
+            source_indices = list(range(batch_start, batch_start + batch_size))
+            source_names = [
+                files[index].strip().split(' ')[0]
+                for index in source_indices
+            ]
             img_feats[batch * batch_size:batch * batch_size +
-                                         batch_size][:] = embedding.forward_db(batch_data)
+                                         batch_size][:] = embedding.forward_db(
+                                             batch_data,
+                                             source_indices,
+                                             source_names)
             batch += 1
         faceness_scores.append(name_lmk_score[-1])
     nonfinite_rows += embedding.nonfinite_rows
+    nonfinite_records.extend(embedding.nonfinite_records)
 
     if rare_size > 0:
         batch_data = np.empty((2 * rare_size, 3, 112, 112))
@@ -333,12 +371,44 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
             batch_data[2 * img_index + 1][:] = input_blob[1]
             if (img_index + 1) % rare_size == 0:
                 print('batch', batch)
+                source_indices = list(range(len(files) - rare_size, len(files)))
+                source_names = [
+                    files[index].strip().split(' ')[0]
+                    for index in source_indices
+                ]
                 img_feats[len(files) -
-                          rare_size:][:] = embedding.forward_db(batch_data)
+                          rare_size:][:] = embedding.forward_db(
+                              batch_data,
+                              source_indices,
+                              source_names)
                 batch += 1
             faceness_scores.append(name_lmk_score[-1])
         nonfinite_rows += embedding.nonfinite_rows
+        nonfinite_records.extend(embedding.nonfinite_records)
     print('Non-finite augmented embedding rows: {}'.format(nonfinite_rows))
+    if args.nonfinite_manifest:
+        manifest_directory = os.path.dirname(args.nonfinite_manifest)
+        if manifest_directory:
+            os.makedirs(manifest_directory, exist_ok=True)
+        columns = [
+            'source_index', 'image_name', 'orientation',
+            'first_nonfinite_module', 'first_nonfinite_values',
+            'first_finite_absmax', 'previous_module',
+            'previous_finite_absmax', 'embedding_nonfinite_values',
+            'final_nonfinite_values',
+        ]
+        with open(
+                args.nonfinite_manifest, 'w', newline='',
+                encoding='utf-8') as manifest_file:
+            writer = csv.DictWriter(manifest_file, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows(sorted(
+                nonfinite_records,
+                key=lambda row: (
+                    row['source_index'], row['orientation'])))
+        print(
+            'Non-finite manifest saved to {} ({} augmented rows)'.format(
+                args.nonfinite_manifest, len(nonfinite_records)))
     faceness_scores = np.array(faceness_scores).astype(np.float32)
     img_feats = replace_nonfinite('img_feats', img_feats)
     faceness_scores = replace_nonfinite('faceness_scores', faceness_scores)
