@@ -89,7 +89,10 @@ config.gradient_clip = 1.0
 config.stable_gradient_clip = True
 config.warmup_epoch = 0
 config.num_epoch = 2
-config.verbose = 500
+# Full IJB-C is the numerical gate.  Do not spend this short conditioning run
+# repeatedly loading/running the three small training-time benchmarks.
+config.verbose = 10000
+config.val_targets = []
 config.fp16 = False
 config.ddp_fp16_compress = False
 config.sync_bn = False
