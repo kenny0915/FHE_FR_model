@@ -2120,7 +2120,16 @@ def main(args):
     resumed_frozen_std_transition_steps = None
     resumed_completed_frozen_std_groups = None
     if cfg.resume:
-        dict_checkpoint = torch.load(os.path.join(cfg.output, f"checkpoint_gpu_{rank}.pt"))
+        resume_checkpoint_dir = str(getattr(
+            cfg, "resume_checkpoint_dir", cfg.output))
+        resume_checkpoint_path = os.path.join(
+            resume_checkpoint_dir, f"checkpoint_gpu_{rank}.pt")
+        dict_checkpoint = torch.load(resume_checkpoint_path)
+        if rank == 0:
+            logging.info(
+                "Resuming distributed training state from %s; new "
+                "checkpoints will be written to %s",
+                resume_checkpoint_dir, cfg.output)
         start_epoch = dict_checkpoint["epoch"]
         global_step = dict_checkpoint["global_step"]
         resumed_completed_simple_gate_groups = dict_checkpoint.get(
@@ -3051,6 +3060,13 @@ def main(args):
     max_nonfinite_embedding_skips = int(getattr(
         cfg, "max_nonfinite_embedding_skips", 0))
     nonfinite_embedding_skips = 0
+    max_nonfinite_loss_skips = int(getattr(
+        cfg, "max_nonfinite_loss_skips", 0))
+    nonfinite_loss_skips = 0
+    if max_nonfinite_embedding_skips < 0:
+        raise ValueError("max_nonfinite_embedding_skips must be non-negative")
+    if max_nonfinite_loss_skips < 0:
+        raise ValueError("max_nonfinite_loss_skips must be non-negative")
     validate_after_prepbn_transition = bool(getattr(
         cfg, "validate_after_prepbn_transition", False))
     layerwise_tail_replay_indices = ()
@@ -4081,7 +4097,9 @@ def main(args):
                             non_blocking=True))
             batchnorm_snapshot = (
                 snapshot_batchnorm_running_stats(backbone.module)
-                if max_nonfinite_embedding_skips > 0 else None)
+                if (max_nonfinite_embedding_skips > 0
+                    or max_nonfinite_loss_skips > 0)
+                else None)
             preserve_batchnorm_snapshot = None
             preserve_all_batchnorm = (
                 (layerwise_training_phase == "local_fit"
@@ -4182,7 +4200,6 @@ def main(args):
                     lr_scheduler.step()
                 set_simple_gate_instrumentation(backbone.module, False)
                 continue
-            del batchnorm_snapshot
             embedding_distillation_loss = local_embeddings.new_zeros(())
             if embedding_teacher is not None:
                 # Run the no-grad teacher before PartialFC constructs its
@@ -4383,8 +4400,61 @@ def main(args):
                 loss = loss + (
                     frozen_std_aux_loss_weight
                     * frozen_std_auxiliary_loss)
-            if not torch.isfinite(loss):
-                raise FloatingPointError(f"Non-finite loss at global_step={global_step}: {loss.item()}")
+            loss_finite = torch.isfinite(loss)
+            if max_nonfinite_loss_skips <= 0:
+                if not bool(loss_finite.item()):
+                    raise FloatingPointError(
+                        "Non-finite loss at global_step="
+                        f"{global_step}: {loss.item()}")
+                finite_loss_rank_count = world_size
+            else:
+                finite_loss_rank_count = loss_finite.to(dtype=torch.long)
+                if (distributed.is_available()
+                        and distributed.is_initialized()):
+                    distributed.all_reduce(
+                        finite_loss_rank_count, op=distributed.ReduceOp.SUM)
+                finite_loss_rank_count = int(finite_loss_rank_count.item())
+            if (max_nonfinite_loss_skips > 0
+                    and finite_loss_rank_count != world_size):
+                nonfinite_loss_skips += 1
+                if nonfinite_loss_skips > max_nonfinite_loss_skips:
+                    raise FloatingPointError(
+                        "Non-finite loss at global_step="
+                        f"{global_step}; finite_ranks="
+                        f"{finite_loss_rank_count}/{world_size}; "
+                        f"skip_count={nonfinite_loss_skips}/"
+                        f"{max_nonfinite_loss_skips}")
+                if rank == 0:
+                    logging.warning(
+                        "Skipping synchronized training batch at "
+                        "global_step=%d because losses were finite on "
+                        "%d/%d ranks; skip_count=%d/%d",
+                        global_step, finite_loss_rank_count, world_size,
+                        nonfinite_loss_skips, max_nonfinite_loss_skips)
+                opt.zero_grad()
+                if batchnorm_snapshot is not None:
+                    restore_batchnorm_running_stats(batchnorm_snapshot)
+                clear_gate_cache = getattr(
+                    backbone.module, "clear_simple_gate_cached_tensors", None)
+                if clear_gate_cache is not None:
+                    clear_gate_cache()
+                clear_nf_cache = getattr(
+                    backbone.module, "clear_nf_cached_tensors", None)
+                if clear_nf_cache is not None:
+                    clear_nf_cache()
+                clear_frozen_std_cache = getattr(
+                    backbone.module,
+                    "clear_frozen_std_cached_tensors",
+                    None,
+                )
+                if clear_frozen_std_cache is not None:
+                    clear_frozen_std_cache()
+                del backbone_output, local_embeddings, loss
+                torch.cuda.empty_cache()
+                if not lr_scheduler_step_per_epoch:
+                    lr_scheduler.step()
+                set_simple_gate_instrumentation(backbone.module, False)
+                continue
 
             backward_loss = loss
             nonfinite_gradient_step_skipped = False
@@ -4524,6 +4594,9 @@ def main(args):
                             f"global_step={global_step}: "
                             f"{float(total_norm.item())}")
                     opt.zero_grad()
+                    if (nonfinite_gradient_step_skipped
+                            and batchnorm_snapshot is not None):
+                        restore_batchnorm_running_stats(batchnorm_snapshot)
             else:
                 backward_loss.backward()
                 if global_step % cfg.gradient_acc == 0:
@@ -4534,8 +4607,22 @@ def main(args):
                         elif layerwise_poly_freeze_backbone_during_local_fit:
                             retain_only_layerwise_poly_group_gradients(
                                 backbone.module, active_layerwise_group)
-                    check_finite_gradients(backbone, "backbone", global_step)
-                    check_finite_gradients(module_partial_fc, "partial_fc", global_step)
+                    named_gradient_modules = (
+                        ("backbone", backbone),
+                        ("partial_fc", module_partial_fc),
+                    )
+                    local_nonfinite_tensor_count = torch.zeros(
+                        (), device=local_embeddings.device, dtype=torch.long)
+                    if skip_nonfinite_gradients:
+                        local_nonfinite_tensor_count = (
+                            nonfinite_gradient_tensor_count(
+                                named_gradient_modules,
+                                device=local_embeddings.device))
+                    else:
+                        check_finite_gradients(
+                            backbone, "backbone", global_step)
+                        check_finite_gradients(
+                            module_partial_fc, "partial_fc", global_step)
                     if getattr(cfg, "gradient_clip_type", "norm") == "value":
                         torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
                         total_norm = torch.tensor(
@@ -4543,11 +4630,25 @@ def main(args):
                     elif getattr(cfg, "stable_gradient_clip", False):
                         total_norm = clip_grad_norm_stable(
                             clipped_params, grad_clip,
-                            error_if_nonfinite=True)
+                            error_if_nonfinite=not skip_nonfinite_gradients)
                     else:
                         total_norm = torch.nn.utils.clip_grad_norm_(
                             clipped_params, grad_clip,
-                            error_if_nonfinite=True)
+                            error_if_nonfinite=not skip_nonfinite_gradients)
+                    local_bad_gradient = (
+                        local_nonfinite_tensor_count > 0
+                    ) | (~torch.isfinite(total_norm).to(
+                        device=local_embeddings.device))
+                    bad_gradient_rank = (
+                        local_bad_gradient.to(dtype=torch.long) * (rank + 1))
+                    if (distributed.is_available()
+                            and distributed.is_initialized()):
+                        distributed.all_reduce(
+                            bad_gradient_rank,
+                            op=distributed.ReduceOp.MAX)
+                    bad_gradient_rank_code = int(bad_gradient_rank.item())
+                    global_bad_gradient = bool(bad_gradient_rank_code)
+                    source_rank = bad_gradient_rank_code - 1
                     gradient_norm_warning_threshold = float(getattr(
                         cfg, "gradient_norm_warning_threshold", 100.0))
                     gradient_norm_warning_interval = max(1, int(getattr(
@@ -4561,21 +4662,76 @@ def main(args):
                             "Large finite pre-clip gradient norm at "
                             "global_step=%d: %.6g (clipped to %.6g)",
                             global_step, total_norm.item(), grad_clip)
-                    with temporary_optimizer_lr_scale(
-                            opt, effective_simple_gate_lr_scale):
-                        if layerwise_poly_staged_training:
-                            with temporary_optimizer_lr_scale(
-                                    opt,
-                                    effective_layerwise_backbone_lr_scale,
-                                    scope="backbone"):
+                    if not global_bad_gradient:
+                        with temporary_optimizer_lr_scale(
+                                opt, effective_simple_gate_lr_scale):
+                            if layerwise_poly_staged_training:
                                 with temporary_optimizer_lr_scale(
                                         opt,
-                                        layerwise_poly_optimizer_lr_scale,
-                                        scope="layerwise_poly"):
-                                    opt.step()
-                        else:
-                            opt.step()
+                                        effective_layerwise_backbone_lr_scale,
+                                        scope="backbone"):
+                                    with temporary_optimizer_lr_scale(
+                                            opt,
+                                            layerwise_poly_optimizer_lr_scale,
+                                            scope="layerwise_poly"):
+                                        opt.step()
+                            else:
+                                opt.step()
+                    elif skip_nonfinite_gradients:
+                        nonfinite_gradient_step_skipped = True
+                        nonfinite_gradient_skips += 1
+                        local_bad_gradient = bool(local_bad_gradient.item())
+                        local_nonfinite_tensors = int(
+                            local_nonfinite_tensor_count.item())
+                        gradient_diagnostics = ()
+                        if local_nonfinite_tensors:
+                            _, gradient_diagnostics = (
+                                nonfinite_gradient_diagnostics(
+                                    named_gradient_modules))
+                        local_details = "; ".join(
+                            f"{item['name']} shape={item['shape']} "
+                            f"nonfinite={item['nonfinite_elements']} "
+                            f"finite_absmax={item['finite_absmax']:.6g}"
+                            for item in gradient_diagnostics
+                        )
+                        if rank == 0:
+                            logging.warning(
+                                "Skipping synchronized FP32 optimizer step "
+                                "at global_step=%d: source_rank=%d, "
+                                "nonfinite_tensors_on_rank0=%d, grad_norm=%s, "
+                                "skip_count=%d%s%s",
+                                global_step, source_rank,
+                                local_nonfinite_tensors,
+                                str(float(total_norm.item())),
+                                nonfinite_gradient_skips,
+                                "; " if local_details else "",
+                                local_details,
+                            )
+                        elif local_bad_gradient:
+                            logging.warning(
+                                "Rank %d detected non-finite FP32 gradients "
+                                "at global_step=%d; optimizer step skipped%s%s",
+                                rank, global_step,
+                                "; " if local_details else "",
+                                local_details,
+                            )
+                        if (max_nonfinite_gradient_skips > 0
+                                and nonfinite_gradient_skips
+                                > max_nonfinite_gradient_skips):
+                            raise FloatingPointError(
+                                "Exceeded max_nonfinite_gradient_skips="
+                                f"{max_nonfinite_gradient_skips} at "
+                                f"global_step={global_step}")
+                        if batchnorm_snapshot is not None:
+                            restore_batchnorm_running_stats(
+                                batchnorm_snapshot)
+                    else:
+                        raise FloatingPointError(
+                            "Non-finite FP32 gradient norm at "
+                            f"global_step={global_step}: "
+                            f"{float(total_norm.item())}")
                     opt.zero_grad()
+            del batchnorm_snapshot
             if (not lr_scheduler_step_per_epoch
                     and not nonfinite_gradient_step_skipped):
                 lr_scheduler.step()

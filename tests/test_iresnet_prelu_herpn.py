@@ -512,6 +512,32 @@ def test_r50_config_schedules_every_prelu_herpn_activation():
     assert cfg.output == "work_dirs/ms1mv3_r50_prelu_herpn"
 
 
+def test_legacy_r50_phase1_resume_finishes_all_conversions_safely():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_no_relu_full_conversion_phase1.py")
+
+    assert cfg.resume
+    assert cfg.resume_checkpoint_dir == "work_dirs/ms1mv3_r50_herpn"
+    assert cfg.output.endswith("herpn_full_conversion_phase1")
+    assert cfg.output != cfg.resume_checkpoint_dir
+    assert cfg.herpn_require_full_conversion
+    assert sum(map(len, cfg.herpn_conversion_groups)) == 25
+    final_conversion_epoch = (
+        cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
+    assert final_conversion_epoch == 20.0
+    assert cfg.num_epoch == 24
+
+    assert cfg.herpn_range_loss_weight == 0.0
+    assert cfg.herpn_distill_loss_weight == 0.0
+    assert cfg.herpn_bn_recalibration_batches == 0
+    assert cfg.max_nonfinite_embedding_skips > 0
+    assert cfg.max_nonfinite_loss_skips > 0
+    assert cfg.skip_nonfinite_gradients
+    assert cfg.max_nonfinite_gradient_skips > 0
+    assert not cfg.fail_on_nonfinite_val
+    assert cfg.max_validation_embedding_abs is None
+
+
 def test_layerwise_scaled_r50_config_schedules_forward_order_and_augmentation():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_prelu_herpn_layerwise_scale.py")
