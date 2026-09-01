@@ -1,6 +1,9 @@
 import torch
 
 from backbones.iresnet_no_relu import IResNet, IBasicBlock, ProgressiveHerPNActivation
+from probe_herpn_quadratic_scales import (
+    attenuate_quadratic_basis_variance,
+)
 
 
 def test_linear_tail_penalty_focuses_extreme_values_and_stays_finite():
@@ -79,3 +82,18 @@ def test_training_stabilization_can_start_at_a_named_boundary():
     assert activations["layer1.0.prelu"].training_stabilization_limit is None
     assert activations["layer2.0.prelu"].training_stabilization_limit == 6.0
     assert activations["layer3.0.prelu"].training_stabilization_limit == 6.0
+
+
+def test_quadratic_basis_variance_attenuates_folded_coefficient():
+    activation = ProgressiveHerPNActivation(3, bn_eps=1e-4, blend=1.0)
+    activation.eval()
+    original = activation.herpn.folded_coefficients()[0]
+    activation.herpn.bn2.running_var.copy_(
+        attenuate_quadratic_basis_variance(
+            activation.herpn.bn2.running_var,
+            activation.herpn.bn2.eps,
+            0.125,
+        )
+    )
+    adjusted = activation.herpn.folded_coefficients()[0]
+    torch.testing.assert_close(adjusted, original * 0.125)
