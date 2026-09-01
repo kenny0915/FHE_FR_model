@@ -732,6 +732,25 @@ def test_r50_group4_causal_recovery_reuses_safe_group1_with_short_schedule():
             - recovery_cfg.herpn_transition_epochs) == pytest.approx(6.0)
 
 
+def test_group02_recovery_repeats_conditioning_without_widening_the_gate():
+    probe_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_group02.py")
+    recovery_cfg = _load_standalone_config(
+        "configs/"
+        "ms1mv3_r50_layerwise_poly_hard_containment_group02_recovery.py")
+
+    assert recovery_cfg.resume
+    assert recovery_cfg.output == probe_cfg.output
+    assert recovery_cfg.layerwise_poly_training_group_limit == 2
+    assert recovery_cfg.layerwise_poly_freeze_containment_interval
+    assert recovery_cfg.layerwise_poly_range_penalty_mode == "containment_max"
+    assert recovery_cfg.layerwise_poly_tail_replay_priority_count == 8
+    assert recovery_cfg.layerwise_poly_tail_replay_priority_repeats == 64
+    assert recovery_cfg.herpn_group_epochs[:2] == (2.0, 5.0)
+    assert recovery_cfg.herpn_transition_epochs == pytest.approx(1.0)
+    assert recovery_cfg.num_epoch == 7
+
+
 def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_cheby8_finetune.py")

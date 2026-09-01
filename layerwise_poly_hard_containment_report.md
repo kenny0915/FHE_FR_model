@@ -232,7 +232,7 @@ AgeDB-30.  It wrote
 `scan_both_orientations=True`; the SHA-256 digest is
 `dc848c11b6f3b01da7d9d883a7bb98a9391d8dc2a405d8f8a183fa9a6f8c16d5`.
 
-If the recovery stem gates pass, the reproducible next run is
+With the stem accepted, the reproducible next run is
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_group02.py`, launched by
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_group02.sh`.  It
 resumes the epoch-4 distributed state, scans `layer1.0.prelu`, and first spends
@@ -241,6 +241,18 @@ permits a half-epoch blend or stops for a longer recovery window.  Epoch 5
 performs completion/BN audit and one guarded hold epoch.  This adaptive probe
 reduces a successful second-site run from four training epochs to two without
 relaxing any immutable-interval check.
+
+Group-2 probe job `323409` measured a much heavier initial rail at
+`layer1.0.prelu`: robust `q99.95=2.492338`, immutable `S=4.984676`, and
+complete-domain maximum `8.882543` (`ratio=1.781970`) at flipped source
+1,443,713.  Its half-epoch hard-max probe nevertheless reduced the strict
+maximum to `4.994925` (`ratio=1.002056`).  The exact gate rejected the
+remaining 0.2056% excess and never enabled the polynomial.  The recovery
+therefore restarts from the audited epoch-4 stem state, keeps the same interval
+and tail manifest, conditions for one full epoch, blends for one full epoch,
+and holds for one epoch.  Its entry points are
+`configs/ms1mv3_r50_layerwise_poly_hard_containment_group02_recovery.py` and
+`scripts/slurm_train_r50_layerwise_poly_hard_containment_group02_recovery.sh`.
 
 ### Pending authoritative gates
 
