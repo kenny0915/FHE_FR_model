@@ -520,6 +520,8 @@ def test_legacy_r50_phase1_resume_finishes_all_conversions_safely():
     assert cfg.resume_checkpoint_dir == "work_dirs/ms1mv3_r50_herpn"
     assert cfg.output.endswith("herpn_full_conversion_phase1")
     assert cfg.output != cfg.resume_checkpoint_dir
+    assert not cfg.resume_optimizer_state
+    assert cfg.resume_rebase_lr_scheduler
     assert cfg.herpn_require_full_conversion
     assert sum(map(len, cfg.herpn_conversion_groups)) == 25
     final_conversion_epoch = (

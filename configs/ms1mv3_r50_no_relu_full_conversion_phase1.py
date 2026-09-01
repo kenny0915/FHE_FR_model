@@ -27,6 +27,12 @@ config.resume = True
 config.resume_checkpoint_dir = "work_dirs/ms1mv3_r50_herpn"
 config.output = "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1"
 config.tensorboard = False
+# The legacy checkpoint predates the current selective optimizer grouping, so
+# its momentum parameter groups cannot be loaded safely by position.  Restore
+# all model/PartialFC tensors, start clean optimizer buffers, and place the
+# scheduler at the checkpoint's original global step.
+config.resume_optimizer_state = False
+config.resume_rebase_lr_scheduler = True
 
 # Phase 1 only asks whether the original curriculum can reach 25/25 with
 # finite parameters.  The old averaged auxiliary losses can overflow on rare

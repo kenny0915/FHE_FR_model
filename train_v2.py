@@ -2170,7 +2170,14 @@ def main(args):
                     cfg, "pillar_input_scale", 1.0)),
             )
         module_partial_fc.load_state_dict(dict_checkpoint["state_dict_softmax_fc"])
-        opt.load_state_dict(dict_checkpoint["state_optimizer"])
+        resume_optimizer_state = bool(getattr(
+            cfg, "resume_optimizer_state", True))
+        if resume_optimizer_state:
+            opt.load_state_dict(dict_checkpoint["state_optimizer"])
+        elif rank == 0:
+            logging.warning(
+                "Resume is using a freshly initialized optimizer because "
+                "resume_optimizer_state=False")
         if getattr(cfg, "resume_rebase_lr_scheduler", False):
             # An accuracy-recovery run can deliberately extend ``num_epoch``
             # beyond the checkpoint's original schedule.  Loading that
@@ -2186,8 +2193,13 @@ def main(args):
                     global_step,
                     [group["lr"] for group in opt.param_groups],
                     cfg.total_step)
-        else:
+        elif resume_optimizer_state:
             lr_scheduler.load_state_dict(dict_checkpoint["state_lr_scheduler"])
+        else:
+            raise ValueError(
+                "resume_optimizer_state=False requires "
+                "resume_rebase_lr_scheduler=True so the fresh optimizer "
+                "does not restart at the initial learning rate")
         legacy_parameters = getattr(
             backbone.module, "legacy_layerwise_poly_parameters", lambda: [])()
         for parameter in legacy_parameters:
