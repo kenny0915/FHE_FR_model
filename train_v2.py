@@ -3176,6 +3176,11 @@ def main(args):
             pin_memory=True,
             drop_last=False,
             worker_init_fn=train_loader.worker_init_fn,
+            # Exact-orientation manifests can be smaller than one ordinary
+            # training batch per rank and are intentionally cycled thousands
+            # of times.  Keep RecordIO workers alive across those iterator
+            # resets instead of paying process startup every few steps.
+            persistent_workers=fixed_tail_replay_workers > 0,
         )
         fixed_sampler.set_epoch(0)
         fixed_tail_replay_iterator = iter(fixed_tail_replay_loader)
