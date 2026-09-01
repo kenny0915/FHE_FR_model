@@ -23,8 +23,18 @@ export OMP_NUM_THREADS=8
 trace_args=()
 for name in \
     layer2.0.prelu layer2.1.prelu layer2.2.prelu layer2.3.prelu \
-    layer3.0.prelu layer3.1.prelu layer3.2.prelu layer3.3.prelu; do
+    layer3.0.prelu layer3.1.prelu layer3.2.prelu layer3.3.prelu \
+    layer3.13.prelu layer4.0.prelu layer4.1.prelu layer4.2.prelu; do
     trace_args+=(--trace-activation "${name}")
+done
+
+attenuate_args=()
+for stage_blocks in "layer2:4" "layer3:14"; do
+    stage=${stage_blocks%%:*}
+    blocks=${stage_blocks##*:}
+    for index in $(seq 0 $((blocks - 1))); do
+        attenuate_args+=(--activation "${stage}.${index}.prelu")
+    done
 done
 
 /home/u8798807/.conda/envs/face_recog/bin/python \
@@ -33,10 +43,6 @@ done
       work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/model_epoch_23.pt \
     --manifest \
       work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_tail_mining/epoch23_prefix_tails.json \
-    --activation layer2.0.prelu \
-    --activation layer2.1.prelu \
-    --activation layer2.2.prelu \
-    --activation layer2.3.prelu \
     --quadratic-scale 1.0 \
     --quadratic-scale 0.9 \
     --quadratic-scale 0.75 \
@@ -49,6 +55,7 @@ done
     --quadratic-scale 0.001 \
     --batch-size 64 \
     --workers 2 \
-    --output "${output}/stage2_quadratic_scales.json" \
-    --save-first-zero-checkpoint "${output}/model_stage2_first_zero_ms1m.pt" \
+    --output "${output}/stage23_quadratic_scales.json" \
+    --save-first-zero-checkpoint "${output}/model_stage23_first_zero_ms1m.pt" \
+    "${attenuate_args[@]}" \
     "${trace_args[@]}"
