@@ -126,6 +126,27 @@ def load_tail_replay_manifests(output, activation_names):
     return results
 
 
+def prioritized_tail_replay_indices(
+        indices, priority_count=0, priority_repeats=1):
+    """Expand the most severe ordered tail sources for frequent replay."""
+    unique = tuple(dict.fromkeys(int(index) for index in indices))
+    if any(index < 0 for index in unique):
+        raise ValueError("tail replay indices must be non-negative")
+    priority_count = int(priority_count)
+    priority_repeats = int(priority_repeats)
+    if priority_count < 0:
+        raise ValueError("tail replay priority_count must be non-negative")
+    if priority_repeats < 1:
+        raise ValueError("tail replay priority_repeats must be positive")
+    priority_count = min(priority_count, len(unique))
+    return tuple(
+        index
+        for position, index in enumerate(unique)
+        for _ in range(
+            priority_repeats if position < priority_count else 1)
+    )
+
+
 def causally_calibrate_polynomial_group(
         module, activation_names, calibrate_one, verify_group):
     """Calibrate a forward-ordered group on its actual polynomial prefix.

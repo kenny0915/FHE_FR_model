@@ -29,6 +29,7 @@ from utils.utils_layerwise_poly import (
     fractional_group_starts_crossed,
     load_tail_replay_manifests,
     pending_group_requires_calibration,
+    prioritized_tail_replay_indices,
 )
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
@@ -2471,6 +2472,10 @@ def main(args):
         cfg, "layerwise_poly_tail_replay_batch_size", 0))
     layerwise_poly_tail_replay_workers = int(getattr(
         cfg, "layerwise_poly_tail_replay_workers", 0))
+    layerwise_poly_tail_replay_priority_count = int(getattr(
+        cfg, "layerwise_poly_tail_replay_priority_count", 0))
+    layerwise_poly_tail_replay_priority_repeats = int(getattr(
+        cfg, "layerwise_poly_tail_replay_priority_repeats", 1))
     layerwise_poly_staged_training = bool(getattr(
         cfg, "layerwise_poly_staged_training", False))
     layerwise_poly_freeze_backbone_during_local_fit = bool(getattr(
@@ -2534,6 +2539,17 @@ def main(args):
             layerwise_poly_tail_replay_workers) < 0:
         raise ValueError(
             "Layerwise tail replay batch size/workers must be non-negative")
+    if layerwise_poly_tail_replay_priority_count < 0:
+        raise ValueError(
+            "Layerwise tail replay priority count must be non-negative")
+    if layerwise_poly_tail_replay_priority_repeats < 1:
+        raise ValueError(
+            "Layerwise tail replay priority repeats must be positive")
+    if (layerwise_poly_tail_replay_priority_count > 0
+            and layerwise_poly_tail_replay_batch_size <= 0):
+        raise ValueError(
+            "Prioritized layerwise tail replay requires a positive replay "
+            "batch size")
     if (layerwise_poly_tail_replay_batch_size > 0
             and layerwise_poly_tail_topk <= 0):
         raise ValueError(
@@ -3063,7 +3079,12 @@ def main(args):
         # restored manifests and newly calibrated activations.
         indices = tuple(dict.fromkeys(
             (*layerwise_tail_replay_indices, *new_indices)))
-        subset = Subset(train_loader.dataset, indices)
+        replay_indices = prioritized_tail_replay_indices(
+            indices,
+            layerwise_poly_tail_replay_priority_count,
+            layerwise_poly_tail_replay_priority_repeats,
+        )
+        subset = Subset(train_loader.dataset, replay_indices)
         sampler = TorchDistributedSampler(
             subset,
             num_replicas=world_size,
@@ -3088,8 +3109,12 @@ def main(args):
         if rank == 0:
             logging.info(
                 "Configured layerwise tail replay: unique_indices=%d "
+                "weighted_entries=%d priority_count=%d priority_repeats=%d "
                 "batch_size_per_rank=%d",
-                len(indices), layerwise_poly_tail_replay_batch_size)
+                len(indices), len(replay_indices),
+                min(layerwise_poly_tail_replay_priority_count, len(indices)),
+                layerwise_poly_tail_replay_priority_repeats,
+                layerwise_poly_tail_replay_batch_size)
 
     def next_layerwise_tail_replay_batch():
         nonlocal layerwise_tail_replay_iterator

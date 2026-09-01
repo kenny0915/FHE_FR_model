@@ -122,9 +122,11 @@ class LayerwisePolynomialActivation(nn.Module):
             raise ValueError("initial_scale must be positive")
         if distill_eps <= 0:
             raise ValueError("distill_eps must be positive")
-        if range_penalty_mode not in ("legacy", "containment_topk"):
+        if range_penalty_mode not in (
+                "legacy", "containment_topk", "containment_max"):
             raise ValueError(
-                "range_penalty_mode must be 'legacy' or 'containment_topk'")
+                "range_penalty_mode must be 'legacy', 'containment_topk', "
+                "or 'containment_max'")
         if not 0.0 < float(range_topk_fraction) <= 1.0:
             raise ValueError("range_topk_fraction must be in (0, 1]")
         if float(range_bulk_weight) < 0.0:
@@ -330,7 +332,8 @@ class LayerwisePolynomialActivation(nn.Module):
                 scale = self.input_scale.to(
                     device=x.device, dtype=compute_x.dtype)
                 excess = torch.relu(compute_x.abs() - scale)
-                if self.range_penalty_mode == "containment_topk":
+                if self.range_penalty_mode in (
+                        "containment_topk", "containment_max"):
                     # Normalize by the public approximation interval so the
                     # loss strength is comparable across layers.  Focusing on
                     # the worst samples in every batch prevents a single rare
@@ -338,13 +341,22 @@ class LayerwisePolynomialActivation(nn.Module):
                     # elements. This branch is training-only.
                     relative_excess = excess / scale
                     sample_violation = relative_excess.flatten(1).amax(dim=1)
-                    topk = max(
-                        1,
-                        math.ceil(
-                            sample_violation.numel()
-                            * self.range_topk_fraction),
-                    )
-                    tail_penalty = sample_violation.square().topk(topk).values.mean()
+                    if self.range_penalty_mode == "containment_max":
+                        # A linear L-infinity hinge does not dilute one rail
+                        # pixel across samples and does not lose its gradient
+                        # as a rare tail approaches the strict boundary.  It
+                        # is training-only and becomes exactly zero in range.
+                        tail_penalty = sample_violation.amax()
+                    else:
+                        topk = max(
+                            1,
+                            math.ceil(
+                                sample_violation.numel()
+                                * self.range_topk_fraction),
+                        )
+                        tail_penalty = (
+                            sample_violation.square()
+                            .topk(topk).values.mean())
                     self._last_range_penalty = (
                         tail_penalty
                         + self.range_bulk_weight

@@ -97,7 +97,7 @@ of replacing the former with the latter.
 Relevant local tests cover the containment-top-k loss, configuration safety
 invariants, exact zero-tolerance interval comparison, contiguous-prefix guards,
 deterministic canonical/flip enumeration, and existing BatchNorm freeze
-behavior.  The current combined suite completed with 35 passes and one known
+behavior.  The current combined suite completed with 39 passes and one known
 unrelated degree-eight initialization test deselected.
 
 ## Nano4 stem proof
@@ -176,6 +176,20 @@ graph used by inference.  It retains the immutable interval and the same
 half-epoch gate.  Reproducible entry points are
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_evalbn.py` and
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_stem_evalbn.sh`.
+
+The eval-BN recovery removed that graph mismatch but was likewise rejected:
+its exact maximum reached 2.481986 (`ratio=1.018422`; holdout 2.463453), with
+the same source and coordinate.  Telemetry explains why: the normalized
+squared top-k objective selected 16 samples per rank, so a lone 1.84% rail
+pixel contributed only about 2e-5 after the sample mean, and the squared hinge
+lost gradient near the boundary.  The next recovery replaces this training-
+only objective with a linear batch `L-infinity` hinge and repeats each of the
+eight worst ordered manifest sources 64 times in the replay population.  It
+still trains on the complete ordinary data stream, retains ArcFace/teacher
+losses, freezes inference BN statistics, keeps the original `S`, and cannot
+blend before the same exact full-domain gate.  Its entry points are
+`configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_hardmax.py` and
+`scripts/slurm_train_r50_layerwise_poly_hard_containment_stem_hardmax.sh`.
 
 If the recovery stem gates pass, the reproducible next run is
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_group02.py`, launched by

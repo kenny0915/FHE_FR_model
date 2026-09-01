@@ -22,6 +22,7 @@ from utils.utils_layerwise_poly import (
     fractional_group_starts_crossed,
     load_tail_replay_manifests,
     pending_group_requires_calibration,
+    prioritized_tail_replay_indices,
 )
 
 
@@ -119,6 +120,16 @@ def test_tail_replay_manifest_is_mandatory_and_checkpoint_scoped(tmp_path):
     }))
     with pytest.raises(ValueError, match="activation mismatch"):
         load_tail_replay_manifests(tmp_path, ("prelu",))
+
+
+def test_prioritized_tail_replay_preserves_order_and_weights_worst_sources():
+    assert prioritized_tail_replay_indices(
+        (9, 4, 9, 7), priority_count=2, priority_repeats=3) == (
+            9, 9, 9, 4, 4, 4, 7)
+    with pytest.raises(ValueError, match="non-negative"):
+        prioritized_tail_replay_indices((1, -1), 1, 2)
+    with pytest.raises(ValueError, match="positive"):
+        prioritized_tail_replay_indices((1,), 1, 0)
 
 
 class _EasyDict(dict):
@@ -397,6 +408,27 @@ def test_containment_topk_penalty_focuses_on_worst_samples_and_is_normalized():
     assert activation.range_stats()["outside_fraction"] == pytest.approx(0.5)
 
 
+def test_containment_max_penalty_keeps_a_linear_worst_case_gradient():
+    activation = LayerwisePolynomialActivation(
+        1,
+        degree=2,
+        range_penalty_mode="containment_max",
+        range_bulk_weight=0.0,
+    ).train()
+    activation.set_input_scale(2.0)
+    base_inputs = torch.tensor(
+        [1.0, 2.0, 4.0, 6.0], requires_grad=True)
+    inputs = base_inputs.reshape(4, 1, 1, 1)
+
+    activation(inputs)
+    penalty = activation.range_penalty()
+    penalty.backward()
+
+    assert float(penalty.detach()) == pytest.approx(2.0)
+    # d((abs(6)-2)/2)/d6 = 1/2: no square-induced vanishing near S.
+    assert base_inputs.grad.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.5])
+
+
 def test_containment_penalty_options_are_validated():
     with pytest.raises(ValueError, match="range_penalty_mode"):
         LayerwisePolynomialActivation(1, range_penalty_mode="unknown")
@@ -516,6 +548,17 @@ def test_r50_hard_containment_stem_evalbn_matches_strict_inference_graph():
     assert cfg.herpn_transition_epochs == recovery_cfg.herpn_transition_epochs
     assert cfg.freeze_batchnorm_running_stats
     assert not cfg.freeze_batchnorm_affine
+
+
+def test_r50_hard_containment_stem_hardmax_prioritizes_true_extrema():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_hardmax.py")
+
+    assert cfg.resume
+    assert cfg.freeze_batchnorm_running_stats
+    assert cfg.layerwise_poly_range_penalty_mode == "containment_max"
+    assert cfg.layerwise_poly_tail_replay_priority_count == 8
+    assert cfg.layerwise_poly_tail_replay_priority_repeats >= 32
 
 
 def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
