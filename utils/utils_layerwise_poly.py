@@ -53,6 +53,29 @@ def pending_group_requires_calibration(
     return any(name in pending for name in groups[completed_groups])
 
 
+def calibrated_conversion_prefix(
+        model_order, calibrated_names, conversion_groups):
+    """Return the contiguous calibrated prefix inside a training frontier."""
+    model_order = tuple(model_order)
+    frontier = tuple(
+        name for group in conversion_groups for name in tuple(group))
+    if frontier != model_order[:len(frontier)]:
+        raise ValueError(
+            "conversion_groups must be a forward prefix of model_order")
+    calibrated = set(calibrated_names)
+    prefix = []
+    found_gap = False
+    for name in frontier:
+        if name in calibrated:
+            if found_gap:
+                raise ValueError(
+                    "calibrated conversion activations must form a prefix")
+            prefix.append(name)
+        else:
+            found_gap = True
+    return tuple(prefix)
+
+
 def causally_calibrate_polynomial_group(
         module, activation_names, calibrate_one, verify_group):
     """Calibrate a forward-ordered group on its actual polynomial prefix.

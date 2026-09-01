@@ -17,6 +17,7 @@ from backbones.iresnet_layerwise_poly import (
 from eval.non_linear_replacement import PReLU_Approx
 from utils.utils_layerwise_poly import (
     activation_range_is_contained,
+    calibrated_conversion_prefix,
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
     pending_group_requires_calibration,
@@ -66,6 +67,24 @@ def test_resume_calibrates_only_the_immediate_pending_group():
         (), groups, completed_groups=3)
     with pytest.raises(ValueError, match="completed_groups"):
         pending_group_requires_calibration((), groups, completed_groups=4)
+
+
+def test_containment_guard_selects_only_a_contiguous_training_prefix():
+    order = ("stem", "block1", "block2", "block3")
+    groups = (("stem",), ("block1",), ("block2",))
+
+    assert calibrated_conversion_prefix(
+        order, ("stem", "block1"), groups) == ("stem", "block1")
+    # Later activations outside this run's frontier are intentionally ignored.
+    assert calibrated_conversion_prefix(
+        order, ("stem", "block1", "block3"), groups) == (
+            "stem", "block1")
+    with pytest.raises(ValueError, match="must form a prefix"):
+        calibrated_conversion_prefix(
+            order, ("stem", "block2"), groups)
+    with pytest.raises(ValueError, match="forward prefix"):
+        calibrated_conversion_prefix(
+            order, ("block1",), (("block1",),))
 
 
 class _EasyDict(dict):

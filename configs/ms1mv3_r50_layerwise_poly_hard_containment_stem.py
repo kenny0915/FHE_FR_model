@@ -47,7 +47,10 @@ config.layerwise_poly_freeze_containment_interval = True
 
 # Tail-aware conditioning. The polynomial coefficients are fitted locally,
 # while upstream weights may move slowly enough to place every observed input
-# inside the already fixed interval. Replay replaces 1/8 of each rank's batch.
+# inside the already fixed interval. Replay replaces 1/8 of each rank's batch
+# and remains enabled during blend/final hold; the strong containment loss is
+# then zero for in-range samples and reacts immediately to renewed drift. A
+# final complete-domain audit is mandatory after the last optimizer update.
 config.layerwise_poly_range_penalty_mode = "containment_topk"
 config.layerwise_poly_range_topk_fraction = 0.125
 config.layerwise_poly_range_bulk_weight = 0.01

@@ -24,6 +24,7 @@ from utils.utils_distributed_sampler import setup_seed
 from utils.utils_logging import AverageMeter, init_logging
 from utils.utils_layerwise_poly import (
     activation_range_is_contained,
+    calibrated_conversion_prefix,
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
     pending_group_requires_calibration,
@@ -3981,8 +3982,18 @@ def main(args):
                 if fractional_epoch >= simple_gate_group_epochs[0]:
                     effective_simple_gate_lr_scale = (
                         simple_gate_lr_multiplier)
-            if (layerwise_training_phase == "local_fit"
-                    and layerwise_tail_replay_loader is not None):
+            replay_layerwise_tails = (
+                layerwise_tail_replay_loader is not None
+                and (
+                    layerwise_training_phase == "local_fit"
+                    or (
+                        layerwise_poly_require_full_containment
+                        and layerwise_training_phase in (
+                            "blend", "final_finetune")
+                    )
+                )
+            )
+            if replay_layerwise_tails:
                 replay_batch = next_layerwise_tail_replay_batch()
                 replay_img, replay_labels = replay_batch[:2]
                 replay_count = min(
@@ -4168,25 +4179,39 @@ def main(args):
                 and layerwise_poly_conditioning_backbone_lr_scale > 0.0
                 and layerwise_poly_conditioning_range_loss_weight > 0.0
             )
+            containment_guard_loss = (
+                layerwise_poly_require_full_containment
+                and layerwise_training_phase in ("blend", "final_finetune")
+                and layerwise_poly_conditioning_range_loss_weight > 0.0
+            )
+            layerwise_guard_loss = (
+                conditioning_range_loss or containment_guard_loss)
             if (herpn_enabled
                     and (herpn_range_loss_weight > 0
-                         or conditioning_range_loss)):
+                         or layerwise_guard_loss)):
                 range_penalty_names = (
                     active_layerwise_group
                     if conditioning_range_loss
                     else None
                 )
-                if (conditioning_range_loss
+                if (layerwise_guard_loss
                         and layerwise_poly_require_full_containment):
                     model_order = tuple(
                         backbone.module.layerwise_poly_activation_names())
-                    last_index = model_order.index(
-                        active_layerwise_group[-1])
                     activations = dict(
                         backbone.module.named_progressive_activations())
-                    range_penalty_names = tuple(
-                        name for name in model_order[:last_index + 1]
+                    calibrated_names = tuple(
+                        name for name in model_order
                         if activations[name]._scale_is_calibrated)
+                    range_penalty_names = calibrated_conversion_prefix(
+                        model_order,
+                        calibrated_names,
+                        layerwise_poly_training_groups,
+                    )
+                    if not range_penalty_names:
+                        raise RuntimeError(
+                            "Full-containment training has no calibrated "
+                            "activation prefix to guard")
                 range_penalty = (
                     backbone.module.herpn_range_penalty(range_penalty_names)
                     if range_penalty_names is not None
@@ -4198,7 +4223,7 @@ def main(args):
                     )
                 effective_range_loss_weight = (
                     layerwise_poly_conditioning_range_loss_weight
-                    if range_penalty_names is not None
+                    if layerwise_guard_loss
                     else herpn_range_loss_weight
                 )
                 loss = loss + effective_range_loss_weight * range_penalty
@@ -4788,6 +4813,56 @@ def main(args):
                 
         if cfg.dali:
             train_loader.reset()
+
+    # The post-group audit proves the BN-recalibrated boundary, but subsequent
+    # hold/final-finetune updates can still move that graph.  Re-scan every
+    # accepted interval after the final optimizer step and persist a distinct
+    # checkpoint only when this final state remains fully contained.
+    if (layerwise_poly_enabled
+            and layerwise_poly_require_full_containment
+            and completed_herpn_groups > 0):
+        final_contained_names = tuple(
+            name
+            for group in herpn_conversion_groups[:completed_herpn_groups]
+            for name in group
+        )
+        if rank == 0:
+            logging.info(
+                "Running final complete-domain containment audit for "
+                "%d accepted polynomial group(s): %s",
+                completed_herpn_groups,
+                ", ".join(final_contained_names),
+            )
+        final_containment_results = calibrate_layerwise_poly_group(
+            final_contained_names,
+            allow_recalibration=True,
+            provisional=False,
+        )
+        if rank == 0:
+            final_audited_path = os.path.join(
+                cfg.output,
+                "model_herpn_final_containment_audited.pt",
+            )
+            atomic_torch_save(
+                {
+                    "state_dict_backbone": backbone.module.state_dict(),
+                    "herpn_group": completed_herpn_groups,
+                    "herpn_conversion_groups": herpn_conversion_groups,
+                    "global_step": global_step,
+                    "containment_results": final_containment_results,
+                    "scan_both_orientations": bool(
+                        layerwise_poly_scan_both_orientations),
+                },
+                final_audited_path,
+            )
+            logging.info(
+                "Saved final containment-audited HerPN checkpoint to %s",
+                final_audited_path,
+            )
+        if (distributed.is_available()
+                and distributed.is_initialized()):
+            distributed.barrier()
+        callback_verification(global_step, backbone.module)
 
     if simple_gate_schedule:
         set_simple_gate_blends(
