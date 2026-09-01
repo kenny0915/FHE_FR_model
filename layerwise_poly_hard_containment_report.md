@@ -278,8 +278,52 @@ distributed checkpoint before the gate, so this run moves the blend boundary
 to epoch 6: epoch 5 receives the new guard-band objective, epoch 6 blends, and
 epoch 7 holds before the final audit.
 
-### Pending authoritative gates
+Guard-band recovery job `323754` completed all authoritative gates with exit
+code zero.  Its epoch-5 complete-domain pre-blend scan covered all 10,359,020
+canonical/flip inputs without widening either interval.  The accepted-prefix
+results were:
 
-- second singleton (`layer1.0.prelu`) provisional scan and immutable interval;
-- second-singleton pre-blend, downstream-boundary, post-BN, and final audits;
-- second-singleton final finite validation and checkpoint/hash.
+| activation | immutable `S` | observed absmax | ratio | result |
+|---|---:|---:|---:|---|
+| `prelu` | 2.437089 | 2.342288 | 0.96110 | no violation |
+| `layer1.0.prelu` | 4.984676 | 4.884321 | 0.97987 | no violation |
+
+The second singleton's maximum moved to flipped source 1,791,077, but unlike
+the preceding failures it retained approximately 2% guard-band headroom.
+With `layer1.0.prelu` temporarily set to its fully quadratic path, the
+complete-domain causal scan of downstream boundary `layer1.1.prelu` was also
+finite and passed with maximum `3.739572`.  The second one-epoch blend was
+therefore allowed to proceed.
+
+After the second activation became fully quadratic and BatchNorm was
+recalibrated for 1,000 batches, the mandatory accepted-prefix scan again
+passed: the stem maximum was `2.345515` (`ratio=0.96243`) and the second-site
+maximum was `4.889443` (`ratio=0.98089`).  The resulting intermediate
+checkpoint is `model_herpn_group_02_bnrecalibrated.pt`.  A full guarded hold
+epoch then kept both polynomial activations active while continuing the range
+objective and prioritized rare-tail replay.
+
+The final post-update complete-domain audit passed with more headroom than the
+post-BN audit:
+
+| activation | immutable `S` | final absmax | ratio | result |
+|---|---:|---:|---:|---|
+| `prelu` | 2.437089 | 2.303439 | 0.94516 | no violation |
+| `layer1.0.prelu` | 4.984676 | 4.852946 | 0.97357 | no violation |
+
+Final verification at global step 40,464 was finite: 99.783% LFW, 98.757%
+CFP-FP, and 97.917% AgeDB-30.  Relative to the audited stem-only checkpoint,
+the changes are 0.000, -0.129, and -0.216 percentage points respectively.
+Thus the second replacement is usable and does not exhibit the former
+non-finite-inference failure, although AgeDB-30 shows the largest measurable
+accuracy cost.  Job `323754` completed in 2:13:55 and wrote the two-group
+`model_herpn_final_containment_audited.pt` with `herpn_group=2`, global step
+40,464, and `scan_both_orientations=True`.  Its SHA-256 digest is
+`7028194cfb665924cb8a46b89c1798fa2edb2d86352b4f954b66643882a7b6d1`.
+
+### Completed authoritative gates
+
+- second singleton (`layer1.0.prelu`) immutable-interval pre-blend scan;
+- fully-quadratic downstream-boundary scan;
+- post-BN and final accepted-prefix complete-domain audits;
+- final finite verification and reproducible two-group checkpoint/hash.
