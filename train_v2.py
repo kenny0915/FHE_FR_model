@@ -45,7 +45,10 @@ from utils.utils_pillar import (
     pillar_task_loss_weight_at_epoch,
     pillar_validation_is_strict_at_epoch,
 )
-from utils.utils_tail_recovery import load_fixed_tail_replay_indices
+from utils.utils_tail_recovery import (
+    load_fixed_tail_replay_indices,
+    load_fixed_tail_replay_orientations,
+)
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
 assert torch.__version__ >= "1.12.0", "In order to enjoy the features of the new torch, \
@@ -3128,18 +3131,35 @@ def main(args):
         cfg, "fixed_tail_replay_priority_count", 0))
     fixed_tail_replay_priority_repeats = int(getattr(
         cfg, "fixed_tail_replay_priority_repeats", 1))
+    fixed_tail_replay_orientations_key = str(getattr(
+        cfg, "fixed_tail_replay_orientations_key", ""))
     if fixed_tail_replay_file:
         if fixed_tail_replay_batch_size <= 0:
             raise ValueError(
                 "fixed_tail_replay_file requires a positive replay batch size")
-        fixed_indices = load_fixed_tail_replay_indices(
-            fixed_tail_replay_file)
-        replay_indices = prioritized_tail_replay_indices(
-            fixed_indices,
-            fixed_tail_replay_priority_count,
-            fixed_tail_replay_priority_repeats,
-        )
-        fixed_subset = Subset(train_loader.dataset, replay_indices)
+        if fixed_tail_replay_orientations_key:
+            replay_orientations = load_fixed_tail_replay_orientations(
+                fixed_tail_replay_file,
+                fixed_tail_replay_orientations_key,
+            )
+            oriented_dataset = DatasetWithIndex(
+                train_loader.dataset, both_orientations=True)
+            replay_indices = tuple(
+                2 * source_index + orientation
+                for source_index, orientation in replay_orientations
+            )
+            fixed_subset = Subset(oriented_dataset, replay_indices)
+            fixed_indices = tuple(dict.fromkeys(
+                source_index for source_index, _ in replay_orientations))
+        else:
+            fixed_indices = load_fixed_tail_replay_indices(
+                fixed_tail_replay_file)
+            replay_indices = prioritized_tail_replay_indices(
+                fixed_indices,
+                fixed_tail_replay_priority_count,
+                fixed_tail_replay_priority_repeats,
+            )
+            fixed_subset = Subset(train_loader.dataset, replay_indices)
         fixed_sampler = TorchDistributedSampler(
             fixed_subset,
             num_replicas=world_size,
@@ -3162,11 +3182,13 @@ def main(args):
         if rank == 0:
             logging.info(
                 "Configured fixed hard-tail replay: unique_indices=%d "
-                "weighted_entries=%d priority_count=%d priority_repeats=%d "
+                "replay_entries=%d priority_count=%d priority_repeats=%d "
+                "orientations_key=%s "
                 "batch_size_per_rank=%d manifest=%s",
                 len(fixed_indices), len(replay_indices),
                 min(fixed_tail_replay_priority_count, len(fixed_indices)),
                 fixed_tail_replay_priority_repeats,
+                fixed_tail_replay_orientations_key or "random",
                 fixed_tail_replay_batch_size, fixed_tail_replay_file)
 
     def next_fixed_tail_replay_batch():

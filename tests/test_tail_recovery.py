@@ -7,7 +7,10 @@ from mine_herpn_tails import merge_rank_payloads, update_tail_heap
 from configs.ms1mv3_r50_no_relu_phase2_hard_tail_recovery import (
     config as hard_tail_config,
 )
-from utils.utils_tail_recovery import load_fixed_tail_replay_indices
+from utils.utils_tail_recovery import (
+    load_fixed_tail_replay_indices,
+    load_fixed_tail_replay_orientations,
+)
 
 
 def test_tail_heap_keeps_largest_source_orientation_rows():
@@ -50,6 +53,7 @@ def test_rank_payload_merge_round_robins_activations(tmp_path):
     path = tmp_path / "tails.json"
     path.write_text(json.dumps(merged))
     assert load_fixed_tail_replay_indices(path) == (9, 1, 3, 2)
+    assert load_fixed_tail_replay_orientations(path) == ((9, 1),)
 
 
 def test_fixed_tail_manifest_rejects_invalid_indices(tmp_path):
@@ -57,6 +61,15 @@ def test_fixed_tail_manifest_rejects_invalid_indices(tmp_path):
     path.write_text(json.dumps({"combined_source_indices": [1, -2]}))
     with pytest.raises(ValueError, match="invalid source indices"):
         load_fixed_tail_replay_indices(path)
+
+
+def test_fixed_tail_manifest_rejects_invalid_orientations(tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps({
+        "output_nonfinite": [{"source_index": 1, "orientation": 2}],
+    }))
+    with pytest.raises(ValueError, match="invalid 'output_nonfinite' row"):
+        load_fixed_tail_replay_orientations(path)
 
 
 def test_hard_tail_recovery_covers_stem_through_layer3_only():
