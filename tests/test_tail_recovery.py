@@ -43,12 +43,13 @@ def test_rank_payload_merge_round_robins_activations(tmp_path):
         },
     }
     merged = merge_rank_payloads([payload], ("a", "b"), 2)
-    assert merged["combined_source_indices"] == [1, 3, 2]
+    assert merged["combined_source_indices"] == [9, 1, 3, 2]
+    assert merged["exact_nonfinite_source_count"] == 1
     assert merged["activations"]["b"]["nonfinite_input_count"] == 1
 
     path = tmp_path / "tails.json"
     path.write_text(json.dumps(merged))
-    assert load_fixed_tail_replay_indices(path) == (1, 3, 2)
+    assert load_fixed_tail_replay_indices(path) == (9, 1, 3, 2)
 
 
 def test_fixed_tail_manifest_rejects_invalid_indices(tmp_path):

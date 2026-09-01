@@ -88,8 +88,16 @@ def merge_rank_payloads(payloads, activation_names, topk):
 
     # Round-robin prevents the numerically largest stage from monopolizing
     # replay solely because magnitudes at different depths use different units.
+    # Exact non-finite training sources are the strongest available evidence
+    # and must occupy the replay priority prefix before merely large finite
+    # tails.  Orientation is intentionally collapsed because the training
+    # transform resamples horizontal flips on every replay visit.
     combined = []
     seen = set()
+    for source_index, _ in sorted(output_nonfinite):
+        if source_index not in seen:
+            seen.add(source_index)
+            combined.append(source_index)
     for position in range(topk):
         for name in activation_names:
             ordered = ordered_by_activation[name]
@@ -104,6 +112,8 @@ def merge_rank_payloads(payloads, activation_names, topk):
         "format": "exact_ms1mv3_herpn_tail_v1",
         "activation_names": list(activation_names),
         "topk_per_rank": int(topk),
+        "exact_nonfinite_source_count": len({
+            source_index for source_index, _ in output_nonfinite}),
         "combined_source_indices": combined,
         "output_nonfinite": [
             {"source_index": source_index, "orientation": orientation}
