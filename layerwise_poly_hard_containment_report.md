@@ -87,6 +87,12 @@ post-update audit plus finite validation before writing
 V100 GPUs, 64 CPU cores, and 500 GB RAM.  Eight loader workers per rank use the
 complete CPU allocation.
 
+Commit `c27df8b` adds the non-diluted linear batch-L-infinity containment loss
+and deterministic priority replay of the worst manifest sources.  Commit
+`44af8cf` carries the same hard-max, eval-BN conditioning policy into the
+second singleton configuration, so a continuation cannot silently fall back
+to the earlier squared top-k objective.
+
 The first strict rejection exposed one additional resume invariant: a
 checkpoint retained the fixed interval but the trainer did not reconstruct
 the persisted top-512 replay stream.  The recovery implementation now loads
@@ -191,6 +197,35 @@ blend before the same exact full-domain gate.  Its entry points are
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_hardmax.py` and
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_stem_hardmax.sh`.
 
+Hard-max recovery job `322933` passed the exact pre-blend gate without changing
+the immutable interval.  Its complete-domain maximum was `2.429538`
+(`ratio=0.996900`), leaving 0.007551 absolute headroom below
+`S=2.43708872795105`.  The worst input remained source 2,471,019 in canonical
+orientation, so the improvement is directly attributable to conditioning the
+known rail rather than a change in which sample happened to be largest.  With
+the stem temporarily fully quadratic, the complete-domain scan of its
+immediate `layer1.0.prelu` boundary was finite with maximum `6.723052`; the
+half-epoch blend was therefore allowed to start.
+
+After blend completion and 1,000-batch downstream BatchNorm recalibration, the
+mandatory prefix audit again covered all 10,359,020 inputs.  The stem maximum
+was `2.434547` (`ratio=0.998960`) with no violation, and the audited group-1
+checkpoint was saved as `model_herpn_group_01_bnrecalibrated.pt`.  Validation
+remained finite during the blend; at step 14,000 it reached 99.783% LFW,
+98.914% CFP-FP, and 98.033% AgeDB-30.  The job is now retaining the fully
+quadratic stem for one guarded hold epoch before the required final
+post-update audit.
+
+That final post-update audit also passed: its complete-domain maximum fell to
+`2.412438` (`ratio=0.989890`) under the same immutable interval.  The hold
+remained finite through step 20,000, with 99.783% LFW, 98.943% CFP-FP, and
+98.133% AgeDB-30.  Job `322933` then exposed a bookkeeping-only defect after
+the successful scan: the final checkpoint metadata referenced the configured
+orientation flag through an uninitialized local name.  The epoch-4
+distributed state and audit evidence are intact.  The flag is now initialized
+from the config before use; an audit-only resume repeats the final scan and
+validation before naming the final checkpoint.
+
 If the recovery stem gates pass, the reproducible next run is
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_group02.py`, launched by
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_group02.sh`.  It
@@ -203,12 +238,6 @@ relaxing any immutable-interval check.
 
 ### Pending authoritative gates
 
-- recovery pre-blend complete-domain
-  `observed_absmax <= 2.43708872795105` (the first attempt was correctly
-  rejected at 2.444153);
-- fully quadratic stem downstream-boundary scan is finite;
-- post-blend/BatchNorm complete-domain containment audit;
-- post-hold final complete-domain audit (or an explicitly audited safe group
-  checkpoint for this already-running pre-`b4fd609` job);
+- audited-checkpoint serialization after the audit-only recovery;
 - final validation accuracy and finite embeddings;
 - final checkpoint/hash and reproducible continuation instructions.

@@ -2485,6 +2485,8 @@ def main(args):
         cfg, "layerwise_poly_max_input_scale", 0.0))
     layerwise_poly_require_full_containment = bool(getattr(
         cfg, "layerwise_poly_require_full_containment", False))
+    layerwise_poly_scan_both_orientations = bool(getattr(
+        cfg, "layerwise_poly_scan_both_orientations", False))
     layerwise_poly_freeze_containment_interval = bool(getattr(
         cfg, "layerwise_poly_freeze_containment_interval", False))
     layerwise_poly_tail_topk = int(getattr(
