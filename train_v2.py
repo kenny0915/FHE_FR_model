@@ -1,4 +1,5 @@
 import argparse
+import heapq
 import json
 import logging
 import math
@@ -9,12 +10,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from backbones import get_model
-from dataset import get_dataloader
+from dataset import DatasetWithIndex, get_dataloader
 from losses import build_margin_loss
 from lr_scheduler import CosineLRWarmup, PolynomialLRWarmup
 from partial_fc_v2 import PartialFC_V2
 from torch import distributed
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
+from torch.utils.data.distributed import DistributedSampler as TorchDistributedSampler
 from torch.utils.tensorboard import SummaryWriter
 from utils.utils_callbacks import CallBackLogging, CallBackVerification
 from utils.utils_config import get_config
@@ -809,6 +811,8 @@ def _global_range_source(local_absmax, local_source):
             float(local_absmax.item()),
             rank_value,
             int(local_source.get("batch", -1)),
+            int(local_source.get("dataset_index", -1)),
+            int(local_source.get("orientation", -1)),
             *coordinates,
         ],
         device=device,
@@ -823,11 +827,45 @@ def _global_range_source(local_absmax, local_source):
     return {
         "rank": int(winner[1].item()),
         "batch": int(winner[2].item()),
-        "sample": int(winner[3].item()),
-        "channel": int(winner[4].item()),
-        "height": int(winner[5].item()),
-        "width": int(winner[6].item()),
+        "dataset_index": int(winner[3].item()),
+        "orientation": int(winner[4].item()),
+        "sample": int(winner[5].item()),
+        "channel": int(winner[6].item()),
+        "height": int(winner[7].item()),
+        "width": int(winner[8].item()),
     }
+
+
+def _global_tail_indices(local_tail, count, device):
+    """Merge fixed-size per-rank ``(magnitude, dataset index)`` heaps."""
+    if count <= 0:
+        return ()
+    row = torch.full(
+        (count, 2), -1.0, device=device, dtype=torch.float64)
+    ordered = sorted(local_tail, reverse=True)[:count]
+    for position, (magnitude, dataset_index) in enumerate(ordered):
+        row[position, 0] = float(magnitude)
+        row[position, 1] = int(dataset_index)
+    rows = [row]
+    if (distributed.is_available() and distributed.is_initialized()
+            and distributed.get_world_size() > 1):
+        rows = [
+            torch.empty_like(row)
+            for _ in range(distributed.get_world_size())
+        ]
+        distributed.all_gather(rows, row)
+    by_index = {}
+    for gathered in rows:
+        for magnitude, dataset_index in gathered.cpu().tolist():
+            dataset_index = int(dataset_index)
+            if dataset_index < 0:
+                continue
+            by_index[dataset_index] = max(
+                float(magnitude), by_index.get(dataset_index, float("-inf")))
+    return tuple(
+        index for index, _ in sorted(
+            by_index.items(), key=lambda item: (-item[1], item[0]))[:count]
+    )
 
 
 @torch.no_grad()
@@ -838,7 +876,9 @@ def calibrate_layerwise_poly_input_scales(
         max_tail_ratio=0.0, max_scale_growth=0.0, max_input_scale=0.0,
         allow_recalibration=False, allow_provisional_tail=False,
         enforce_tail_scale_floor=False, tail_scale_floor_margin=1.0,
-        max_tail_scale_expansion=0.0, progress_interval_batches=0):
+        max_tail_scale_expansion=0.0, progress_interval_batches=0,
+        require_full_containment=False, preserve_existing_scale=False,
+        tail_topk=0):
     """Fit separate intervals for one activation group in one loader pass.
 
     All requested activations are observed on the same current eval graph.
@@ -864,6 +904,9 @@ def calibrate_layerwise_poly_input_scales(
     tail_scale_floor_margin = float(tail_scale_floor_margin)
     max_tail_scale_expansion = float(max_tail_scale_expansion)
     progress_interval_batches = int(progress_interval_batches)
+    require_full_containment = bool(require_full_containment)
+    preserve_existing_scale = bool(preserve_existing_scale)
+    tail_topk = int(tail_topk)
     if not 0.0 < quantile <= 1.0:
         raise ValueError("layerwise_poly_range_quantile must be in (0, 1]")
     if quantile_samples <= 0:
@@ -885,6 +928,11 @@ def calibrate_layerwise_poly_input_scales(
             "Tail scale flooring requires layerwise_poly_max_tail_ratio > 0")
     if progress_interval_batches < 0:
         raise ValueError("Calibration progress interval must be non-negative")
+    if tail_topk < 0:
+        raise ValueError("tail_topk must be non-negative")
+    if preserve_existing_scale and not allow_recalibration:
+        raise ValueError(
+            "preserve_existing_scale requires allow_recalibration")
 
     module = backbone.module
     activation_names = tuple(activation_names)
@@ -921,12 +969,20 @@ def calibrate_layerwise_poly_input_scales(
             "calibration_absmax": torch.zeros_like(absmax),
             "holdout_absmax": torch.zeros_like(absmax),
             "quantile": torch.zeros_like(absmax),
-            "source": {"batch": -1, "coordinates": ()},
+            "source": {
+                "batch": -1,
+                "dataset_index": -1,
+                "orientation": -1,
+                "coordinates": (),
+            },
+            "tail": [],
         }
     completed = 0
     calibration_batches = 0
     holdout_batches = 0
     current_is_holdout = False
+    current_dataset_indices = None
+    current_orientations = None
     holdout_stride = (
         max(2, round(1.0 / holdout_fraction))
         if holdout_fraction > 0.0 else 0
@@ -946,6 +1002,7 @@ def calibrate_layerwise_poly_input_scales(
                     f"calibration for {activation_name} at "
                     f"global_step={global_step}")
             absolute = values.abs()
+            sample_absmax = absolute.flatten(1).amax(dim=1)
             batch_absmax, flat_index = absolute.reshape(-1).max(dim=0)
             if batch_absmax > state["absmax"]:
                 state["absmax"].copy_(batch_absmax)
@@ -955,7 +1012,30 @@ def calibrate_layerwise_poly_input_scales(
                     coordinates[dimension] = remaining % values.shape[dimension]
                     remaining //= values.shape[dimension]
                 state["source"]["batch"] = completed
+                state["source"]["dataset_index"] = (
+                    int(current_dataset_indices[coordinates[0]])
+                    if current_dataset_indices is not None else -1)
+                state["source"]["orientation"] = (
+                    int(current_orientations[coordinates[0]])
+                    if current_orientations is not None else -1)
                 state["source"]["coordinates"] = tuple(coordinates)
+            if tail_topk > 0:
+                if current_dataset_indices is None:
+                    raise RuntimeError(
+                        "tail_topk calibration requires a loader that returns "
+                        "stable dataset indices")
+                candidate_count = min(tail_topk, sample_absmax.numel())
+                magnitudes, positions = sample_absmax.topk(candidate_count)
+                for magnitude, position in zip(
+                        magnitudes.cpu().tolist(), positions.cpu().tolist()):
+                    item = (
+                        float(magnitude),
+                        int(current_dataset_indices[int(position)]),
+                    )
+                    if len(state["tail"]) < tail_topk:
+                        heapq.heappush(state["tail"], item)
+                    elif item > state["tail"][0]:
+                        heapq.heapreplace(state["tail"], item)
             if current_is_holdout:
                 state["holdout_absmax"].copy_(torch.maximum(
                     state["holdout_absmax"], batch_absmax))
@@ -978,7 +1058,17 @@ def calibrate_layerwise_poly_input_scales(
     ]
     module.eval()
     try:
-        for img, _ in train_loader:
+        for batch in train_loader:
+            if not isinstance(batch, (tuple, list)) or len(batch) < 2:
+                raise ValueError(
+                    "Layerwise calibration loader must return image and label")
+            img = batch[0]
+            current_dataset_indices = (
+                batch[2].detach().cpu().tolist()
+                if len(batch) >= 3 else None)
+            current_orientations = (
+                batch[3].detach().cpu().tolist()
+                if len(batch) >= 4 else None)
             if img.device != device:
                 img = img.to(device=device, non_blocking=True)
             current_is_holdout = (
@@ -1036,7 +1126,12 @@ def calibrate_layerwise_poly_input_scales(
         holdout_absmax = float(global_values[2].item())
         robust_absmax = float(global_values[3].item())
         robust_scale = max(robust_absmax * margin, min_scale)
-        calibrated_scale = robust_scale
+        activation = activations[activation_name]
+        calibrated_scale = (
+            float(activation.input_scale.item())
+            if (preserve_existing_scale
+                and getattr(activation, "_scale_is_calibrated", False))
+            else robust_scale)
         tail_scale_floor = None
         tail_scale_expansion = 1.0
         tail_floor_applied = False
@@ -1091,6 +1186,9 @@ def calibrate_layerwise_poly_input_scales(
         if max_tail_ratio > 0.0 and tail_ratio > max_tail_ratio:
             provisional_violations.append(
                 f"tail_ratio={tail_ratio:.7g}>{max_tail_ratio:.7g}")
+        if require_full_containment and tail_ratio > 1.0 + 1.0e-6:
+            provisional_violations.append(
+                f"containment_ratio={tail_ratio:.7g}>1")
         if (max_scale_growth > 0.0 and scale_growth is not None
                 and scale_growth > max_scale_growth):
             provisional_violations.append(
@@ -1119,6 +1217,8 @@ def calibrate_layerwise_poly_input_scales(
             "provisional": bool(
                 provisional_violations and allow_provisional_tail),
             "source": source,
+            "tail_indices": _global_tail_indices(
+                state["tail"], tail_topk, device),
             "margin": margin,
             "batches_per_rank": completed,
             "calibration_batches_per_rank": calibration_batches,
@@ -1146,8 +1246,12 @@ def calibrate_layerwise_poly_input_scales(
             f"global_step={global_step}: " + " | ".join(details))
 
     for result in results:
-        module.set_layerwise_poly_input_scale(
-            result["activation"], result["input_scale"])
+        activation = activations[result["activation"]]
+        if not (
+                preserve_existing_scale
+                and getattr(activation, "_scale_is_calibrated", False)):
+            module.set_layerwise_poly_input_scale(
+                result["activation"], result["input_scale"])
     return results
 
 
@@ -1194,7 +1298,11 @@ def verify_layerwise_poly_group_boundary(
         if boundary_module is not None else None)
     module.eval()
     try:
-        for img, _ in train_loader:
+        for batch in train_loader:
+            if not isinstance(batch, (tuple, list)) or len(batch) < 2:
+                raise ValueError(
+                    "Causal verification loader must return image and label")
+            img = batch[0]
             if img.device != device:
                 img = img.to(device=device, non_blocking=True)
             embeddings = module(img)
@@ -1407,10 +1515,23 @@ def main(args):
         # DataLoaderX would leave its background prefetch thread blocked on a
         # full queue after every initial/strict interval fit, so use a regular
         # loader whose iterator workers are released at the end of each pass.
+        indexed_range_dataset = DatasetWithIndex(
+            train_loader.dataset,
+            both_orientations=bool(getattr(
+                cfg, "layerwise_poly_scan_both_orientations", False)),
+        )
+        indexed_range_sampler = TorchDistributedSampler(
+            indexed_range_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False,
+            seed=int(cfg.seed),
+            drop_last=False,
+        )
         layerwise_poly_range_loader = DataLoader(
-            dataset=train_loader.dataset,
+            dataset=indexed_range_dataset,
             batch_size=cfg.batch_size,
-            sampler=train_loader.sampler,
+            sampler=indexed_range_sampler,
             num_workers=cfg.num_workers,
             pin_memory=True,
             drop_last=False,
@@ -1501,6 +1622,12 @@ def main(args):
                 cfg, "layerwise_poly_initial_scale", 1.0)),
             layerwise_poly_distill_eps=float(getattr(
                 cfg, "layerwise_poly_distill_eps", 1e-4)),
+            layerwise_poly_range_penalty_mode=str(getattr(
+                cfg, "layerwise_poly_range_penalty_mode", "legacy")),
+            layerwise_poly_range_topk_fraction=float(getattr(
+                cfg, "layerwise_poly_range_topk_fraction", 0.25)),
+            layerwise_poly_range_bulk_weight=float(getattr(
+                cfg, "layerwise_poly_range_bulk_weight", 0.01)),
             layerwise_poly_progress=float(getattr(
                 cfg, "herpn_initial_progress", 0.0)),
         )
@@ -2328,6 +2455,16 @@ def main(args):
         cfg, "layerwise_poly_max_scale_growth", 0.0))
     layerwise_poly_max_input_scale = float(getattr(
         cfg, "layerwise_poly_max_input_scale", 0.0))
+    layerwise_poly_require_full_containment = bool(getattr(
+        cfg, "layerwise_poly_require_full_containment", False))
+    layerwise_poly_freeze_containment_interval = bool(getattr(
+        cfg, "layerwise_poly_freeze_containment_interval", False))
+    layerwise_poly_tail_topk = int(getattr(
+        cfg, "layerwise_poly_tail_topk", 0))
+    layerwise_poly_tail_replay_batch_size = int(getattr(
+        cfg, "layerwise_poly_tail_replay_batch_size", 0))
+    layerwise_poly_tail_replay_workers = int(getattr(
+        cfg, "layerwise_poly_tail_replay_workers", 0))
     layerwise_poly_staged_training = bool(getattr(
         cfg, "layerwise_poly_staged_training", False))
     layerwise_poly_freeze_backbone_during_local_fit = bool(getattr(
@@ -2384,6 +2521,30 @@ def main(args):
     if layerwise_poly_calibration_log_interval < 0:
         raise ValueError(
             "layerwise_poly_calibration_log_interval must be non-negative")
+    if layerwise_poly_tail_topk < 0:
+        raise ValueError("layerwise_poly_tail_topk must be non-negative")
+    if min(
+            layerwise_poly_tail_replay_batch_size,
+            layerwise_poly_tail_replay_workers) < 0:
+        raise ValueError(
+            "Layerwise tail replay batch size/workers must be non-negative")
+    if (layerwise_poly_tail_replay_batch_size > 0
+            and layerwise_poly_tail_topk <= 0):
+        raise ValueError(
+            "Layerwise tail replay requires layerwise_poly_tail_topk > 0")
+    if layerwise_poly_tail_topk > 0 and cfg.dali:
+        raise ValueError(
+            "Layerwise tail sample indexing requires config.dali=False")
+    if (layerwise_poly_freeze_containment_interval
+            and not layerwise_poly_require_full_containment):
+        raise ValueError(
+            "A frozen containment interval requires full containment")
+    if (layerwise_poly_require_full_containment
+            and (not layerwise_poly_allow_provisional_tail
+                 or not layerwise_poly_strict_recalibrate_before_blend)):
+        raise ValueError(
+            "Full containment requires provisional conditioning and strict "
+            "pre-blend verification")
     if (layerwise_poly_causal_strict_calibration
             and not layerwise_poly_strict_recalibrate_before_blend):
         raise ValueError(
@@ -2436,6 +2597,11 @@ def main(args):
     if herpn_group_schedule:
         validate_herpn_conversion_groups(
             backbone.module, herpn_conversion_groups)
+        if (layerwise_poly_require_full_containment
+                and any(len(group) != 1 for group in herpn_conversion_groups)):
+            raise ValueError(
+                "Full-containment training requires singleton conversion "
+                "groups so every polynomial boundary is audited separately")
         if resumed_herpn_conversion_groups is not None:
             checkpoint_groups = tuple(
                 tuple(group) for group in resumed_herpn_conversion_groups)
@@ -2865,6 +3031,69 @@ def main(args):
     nonfinite_embedding_skips = 0
     validate_after_prepbn_transition = bool(getattr(
         cfg, "validate_after_prepbn_transition", False))
+    layerwise_tail_replay_indices = ()
+    layerwise_tail_replay_loader = None
+    layerwise_tail_replay_iterator = None
+    layerwise_tail_replay_epoch = 0
+
+    def configure_layerwise_tail_replay(results):
+        """Build a distributed replay stream from calibration extrema."""
+        nonlocal layerwise_tail_replay_indices
+        nonlocal layerwise_tail_replay_loader
+        nonlocal layerwise_tail_replay_iterator
+        nonlocal layerwise_tail_replay_epoch
+        if layerwise_poly_tail_replay_batch_size <= 0:
+            return
+        indices = tuple(dict.fromkeys(
+            index
+            for result in results
+            for index in result.get("tail_indices", ())
+        ))
+        if not indices:
+            raise RuntimeError(
+                "Tail replay was enabled but calibration returned no indices")
+        subset = Subset(train_loader.dataset, indices)
+        sampler = TorchDistributedSampler(
+            subset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=int(cfg.seed),
+            drop_last=False,
+        )
+        layerwise_tail_replay_indices = indices
+        layerwise_tail_replay_loader = DataLoader(
+            subset,
+            batch_size=layerwise_poly_tail_replay_batch_size,
+            sampler=sampler,
+            num_workers=layerwise_poly_tail_replay_workers,
+            pin_memory=True,
+            drop_last=False,
+            worker_init_fn=train_loader.worker_init_fn,
+        )
+        layerwise_tail_replay_epoch = 0
+        sampler.set_epoch(layerwise_tail_replay_epoch)
+        layerwise_tail_replay_iterator = iter(layerwise_tail_replay_loader)
+        if rank == 0:
+            logging.info(
+                "Configured layerwise tail replay: unique_indices=%d "
+                "batch_size_per_rank=%d",
+                len(indices), layerwise_poly_tail_replay_batch_size)
+
+    def next_layerwise_tail_replay_batch():
+        nonlocal layerwise_tail_replay_iterator
+        nonlocal layerwise_tail_replay_epoch
+        if layerwise_tail_replay_loader is None:
+            return None
+        try:
+            return next(layerwise_tail_replay_iterator)
+        except StopIteration:
+            layerwise_tail_replay_epoch += 1
+            layerwise_tail_replay_loader.sampler.set_epoch(
+                layerwise_tail_replay_epoch)
+            layerwise_tail_replay_iterator = iter(
+                layerwise_tail_replay_loader)
+            return next(layerwise_tail_replay_iterator)
 
     def calibrate_layerwise_poly_group(
             target_names, *, allow_recalibration=False, provisional=False):
@@ -2903,6 +3132,12 @@ def main(args):
                     layerwise_poly_max_tail_scale_expansion),
                 progress_interval_batches=(
                     layerwise_poly_calibration_log_interval),
+                require_full_containment=(
+                    layerwise_poly_require_full_containment),
+                preserve_existing_scale=(
+                    allow_recalibration
+                    and layerwise_poly_freeze_containment_interval),
+                tail_topk=layerwise_poly_tail_topk,
             )
         except FloatingPointError as error:
             if rank == 0:
@@ -2944,6 +3179,31 @@ def main(args):
                     result["source"],
                     ", ".join(result["violations"]) or "none",
                 )
+                if result["tail_indices"]:
+                    logging.info(
+                        "Layerwise polynomial tail replay indices for %s: %s",
+                        result["activation"],
+                        ",".join(str(index) for index in result["tail_indices"]),
+                    )
+                    tail_path = os.path.join(
+                        cfg.output,
+                        "tail_replay_"
+                        + result["activation"].replace(".", "_")
+                        + ".json",
+                    )
+                    temporary_tail_path = tail_path + ".tmp"
+                    with open(temporary_tail_path, "w") as tail_handle:
+                        json.dump({
+                            "activation": result["activation"],
+                            "global_step": global_step,
+                            "input_scale": result["input_scale"],
+                            "observed_absmax": result["observed_absmax"],
+                            "tail_ratio": result["tail_ratio"],
+                            "source": result["source"],
+                            "dataset_indices": list(result["tail_indices"]),
+                        }, tail_handle, indent=2, sort_keys=True)
+                        tail_handle.write("\n")
+                    os.replace(temporary_tail_path, tail_path)
                 if summary_writer is not None:
                     summary_writer.add_scalar(
                         "LayerwisePoly/InputScale/"
@@ -2969,10 +3229,54 @@ def main(args):
                         result["tail_scale_expansion"],
                         global_step,
                     )
+        configure_layerwise_tail_replay(results)
         return results
 
     def strictly_calibrate_layerwise_poly_group(target_names, group_index):
         target_names = tuple(target_names)
+        if layerwise_poly_require_full_containment:
+            # Re-audit the complete polynomial prefix against its immutable
+            # intervals. Upstream task/blend updates are not allowed to make a
+            # previously accepted activation unsafe while conditioning the
+            # next singleton.
+            model_order = tuple(
+                backbone.module.layerwise_poly_activation_names())
+            last_index = model_order.index(target_names[-1])
+            activations = dict(
+                backbone.module.named_progressive_activations())
+            prefix_names = tuple(
+                name for name in model_order[:last_index + 1]
+                if activations[name]._scale_is_calibrated)
+            results = calibrate_layerwise_poly_group(
+                prefix_names, allow_recalibration=True, provisional=False)
+            if layerwise_poly_verify_singleton_boundary:
+                def verify_contained_singleton(names):
+                    return verify_layerwise_poly_group_boundary(
+                        backbone,
+                        layerwise_poly_range_loader,
+                        names,
+                        layerwise_poly_range_batches,
+                        global_step,
+                        layerwise_poly_max_input_scale,
+                        dali=cfg.dali,
+                        progress_interval_batches=(
+                            layerwise_poly_calibration_log_interval),
+                    )
+
+                _, verification = causally_calibrate_polynomial_group(
+                    backbone.module,
+                    target_names,
+                    lambda name, member_index, member_count: [],
+                    verify_contained_singleton,
+                )
+                if rank == 0:
+                    logging.info(
+                        "Full-containment boundary passed for group %d/%d: "
+                        "boundary=%s absmax=%.7g batches/rank=%d",
+                        group_index + 1, len(herpn_conversion_groups),
+                        verification["boundary"], verification["absmax"],
+                        verification["batches_per_rank"])
+            return results
         use_causal_boundary = (
             layerwise_poly_causal_strict_calibration
             and (len(target_names) > 1
@@ -3345,6 +3649,23 @@ def main(args):
                 )
                 if cfg.dali:
                     train_loader.reset()
+                if layerwise_poly_require_full_containment:
+                    model_order = tuple(
+                        backbone.module.layerwise_poly_activation_names())
+                    completed_last_name = completed_names[-1]
+                    completed_last_index = model_order.index(
+                        completed_last_name)
+                    contained_prefix = model_order[:completed_last_index + 1]
+                    if rank == 0:
+                        logging.info(
+                            "Auditing completed polynomial prefix %d/%d "
+                            "against immutable approximation intervals",
+                            newly_completed, len(herpn_conversion_groups))
+                    calibrate_layerwise_poly_group(
+                        contained_prefix,
+                        allow_recalibration=True,
+                        provisional=False,
+                    )
                 # Persist the known-good completed graph before profiling the
                 # next group. A rejected pending interval can never prevent
                 # recovery of this BatchNorm-recalibrated boundary.
@@ -3616,6 +3937,27 @@ def main(args):
                 if fractional_epoch >= simple_gate_group_epochs[0]:
                     effective_simple_gate_lr_scale = (
                         simple_gate_lr_multiplier)
+            if (layerwise_training_phase == "local_fit"
+                    and layerwise_tail_replay_loader is not None):
+                replay_batch = next_layerwise_tail_replay_batch()
+                replay_img, replay_labels = replay_batch[:2]
+                replay_count = min(
+                    int(img.shape[0]), int(replay_img.shape[0]))
+                if replay_count > 0:
+                    # Keep the distributed batch shape fixed for PartialFC and
+                    # replace only a prefix with the globally identified tail
+                    # samples. Their ordinary stochastic transform is rerun on
+                    # every replay visit.
+                    img = img.clone()
+                    local_labels = local_labels.clone()
+                    img[:replay_count].copy_(replay_img[:replay_count].to(
+                        device=img.device, dtype=img.dtype,
+                        non_blocking=True))
+                    local_labels[:replay_count].copy_(
+                        replay_labels[:replay_count].to(
+                            device=local_labels.device,
+                            dtype=local_labels.dtype,
+                            non_blocking=True))
             batchnorm_snapshot = (
                 snapshot_batchnorm_running_stats(backbone.module)
                 if max_nonfinite_embedding_skips > 0 else None)
@@ -3790,6 +4132,17 @@ def main(args):
                     if conditioning_range_loss
                     else None
                 )
+                if (conditioning_range_loss
+                        and layerwise_poly_require_full_containment):
+                    model_order = tuple(
+                        backbone.module.layerwise_poly_activation_names())
+                    last_index = model_order.index(
+                        active_layerwise_group[-1])
+                    activations = dict(
+                        backbone.module.named_progressive_activations())
+                    range_penalty_names = tuple(
+                        name for name in model_order[:last_index + 1]
+                        if activations[name]._scale_is_calibrated)
                 range_penalty = (
                     backbone.module.herpn_range_penalty(range_penalty_names)
                     if range_penalty_names is not None

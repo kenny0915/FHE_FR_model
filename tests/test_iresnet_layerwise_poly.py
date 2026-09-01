@@ -291,6 +291,34 @@ def test_range_conditioning_penalty_can_select_only_pending_group():
         model.herpn_range_penalty(("missing.prelu",))
 
 
+def test_containment_topk_penalty_focuses_on_worst_samples_and_is_normalized():
+    activation = LayerwisePolynomialActivation(
+        1,
+        degree=2,
+        range_penalty_mode="containment_topk",
+        range_topk_fraction=0.5,
+        range_bulk_weight=0.0,
+    ).train()
+    activation.set_input_scale(2.0)
+    inputs = torch.tensor([1.0, 2.0, 4.0, 6.0]).reshape(4, 1, 1, 1)
+
+    activation(inputs)
+
+    # Relative violations are [0, 0, 1, 2]. The worst half contributes
+    # mean([1^2, 2^2]) = 2.5, independent of the interval's unit scale.
+    assert activation.range_penalty() == pytest.approx(2.5)
+    assert activation.range_stats()["outside_fraction"] == pytest.approx(0.5)
+
+
+def test_containment_penalty_options_are_validated():
+    with pytest.raises(ValueError, match="range_penalty_mode"):
+        LayerwisePolynomialActivation(1, range_penalty_mode="unknown")
+    with pytest.raises(ValueError, match="range_topk_fraction"):
+        LayerwisePolynomialActivation(1, range_topk_fraction=0.0)
+    with pytest.raises(ValueError, match="range_bulk_weight"):
+        LayerwisePolynomialActivation(1, range_bulk_weight=-1.0)
+
+
 def test_r50_config_converts_every_activation_singly_in_forward_order():
     cfg = _load_standalone_config(
         "configs/ms1mv3_r50_layerwise_poly.py")
@@ -326,6 +354,28 @@ def test_r50_config_converts_every_activation_singly_in_forward_order():
     final_conversion_epoch = (
         cfg.herpn_group_epochs[-1] + cfg.herpn_transition_epochs)
     assert cfg.num_epoch - final_conversion_epoch == 4
+
+
+def test_r50_hard_containment_probe_freezes_interval_and_replays_tails():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem.py")
+
+    assert cfg.layerwise_poly_require_full_containment
+    assert cfg.layerwise_poly_freeze_containment_interval
+    assert cfg.layerwise_poly_range_calibration_batches == 0
+    assert cfg.layerwise_poly_scan_both_orientations
+    assert cfg.layerwise_poly_max_tail_ratio == 0.0
+    assert cfg.layerwise_poly_range_penalty_mode == "containment_topk"
+    assert 0.0 < cfg.layerwise_poly_range_topk_fraction < 1.0
+    assert cfg.layerwise_poly_tail_topk >= 256
+    assert cfg.layerwise_poly_tail_replay_batch_size > 0
+    assert cfg.layerwise_poly_allow_provisional_tail_conditioning
+    assert cfg.layerwise_poly_initial_calibration_provisional
+    assert cfg.layerwise_poly_strict_recalibrate_before_blend
+    assert cfg.layerwise_poly_verify_singleton_boundary
+    assert not cfg.layerwise_poly_strict_tail_scale_floor
+    assert cfg.layerwise_poly_training_group_limit == 1
+    assert not cfg.herpn_require_full_conversion
 
 
 def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():

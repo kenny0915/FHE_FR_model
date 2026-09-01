@@ -193,6 +193,12 @@ class MXFaceDataset(Dataset):
         super(MXFaceDataset, self).__init__()
         self.transform = _face_training_transform(
             range_augmentation, to_pil=True)
+        self.oriented_transform = transforms.Compose((
+            transforms.ToPILImage(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        ))
         self.root_dir = root_dir
         self.local_rank = local_rank
         path_imgrec = os.path.join(root_dir, 'train.rec')
@@ -206,7 +212,7 @@ class MXFaceDataset(Dataset):
         else:
             self.imgidx = np.array(list(self.imgrec.keys))
 
-    def __getitem__(self, index):
+    def _read(self, index):
         idx = self.imgidx[index]
         s = self.imgrec.read_idx(idx)
         header, img = mx.recordio.unpack(s)
@@ -215,12 +221,60 @@ class MXFaceDataset(Dataset):
             label = label[0]
         label = torch.tensor(int(label), dtype=torch.long)
         sample = mx.image.imdecode(img).asnumpy()
+        return sample, label
+
+    def __getitem__(self, index):
+        sample, label = self._read(index)
         if self.transform is not None:
             sample = self.transform(sample)
         return sample, label
 
+    def get_oriented(self, index, orientation):
+        """Return a deterministic canonical or horizontally flipped image."""
+        sample, label = self._read(index)
+        sample = self.oriented_transform(sample)
+        if int(orientation):
+            sample = torch.flip(sample, dims=(-1,))
+        return sample, label
+
     def __len__(self):
         return len(self.imgidx)
+
+
+class DatasetWithIndex(Dataset):
+    """Expose the stable source index without changing the training dataset.
+
+    Range calibration uses this wrapper to persist the identities of rare-tail
+    samples. Ordinary training keeps the original two-item ``(image, label)``
+    interface, so existing callers and DALI remain unchanged.
+    """
+
+    def __init__(self, dataset, both_orientations=False):
+        super().__init__()
+        self.dataset = dataset
+        self.both_orientations = bool(both_orientations)
+
+    def __getitem__(self, index):
+        orientation = int(index % 2) if self.both_orientations else 0
+        source_index = int(index // 2) if self.both_orientations else int(index)
+        oriented_getter = getattr(self.dataset, "get_oriented", None)
+        sample = (
+            oriented_getter(source_index, orientation)
+            if self.both_orientations and oriented_getter is not None
+            else self.dataset[source_index]
+        )
+        if not isinstance(sample, (tuple, list)) or len(sample) != 2:
+            raise ValueError(
+                "DatasetWithIndex expects (image, label) dataset samples")
+        image = sample[0]
+        if orientation and not (
+                self.both_orientations and oriented_getter is not None):
+            image = torch.flip(image, dims=(-1,))
+        return image, sample[1], source_index, orientation
+
+    def __len__(self):
+        multiplier = 2 if self.both_orientations else 1
+        return multiplier * len(self.dataset)
 
 
 class SyntheticDataset(Dataset):

@@ -28,6 +28,8 @@ ciphertext-ciphertext multiplication, degree 3 needs two, and the balanced
 degree-8 power schedule has multiplicative depth three.
 """
 
+import math
+
 import torch
 from torch import nn
 
@@ -107,7 +109,10 @@ class LayerwisePolynomialActivation(nn.Module):
     exclude_from_weight_decay = True
 
     def __init__(self, channels, degree=2, initial_scale=1.0,
-                 distill_eps=1e-4, stage_index=0, blend=0.0):
+                 distill_eps=1e-4, stage_index=0, blend=0.0,
+                 range_penalty_mode="legacy",
+                 range_topk_fraction=0.25,
+                 range_bulk_weight=0.01):
         super().__init__()
         if channels <= 0:
             raise ValueError("channels must be positive")
@@ -117,9 +122,19 @@ class LayerwisePolynomialActivation(nn.Module):
             raise ValueError("initial_scale must be positive")
         if distill_eps <= 0:
             raise ValueError("distill_eps must be positive")
+        if range_penalty_mode not in ("legacy", "containment_topk"):
+            raise ValueError(
+                "range_penalty_mode must be 'legacy' or 'containment_topk'")
+        if not 0.0 < float(range_topk_fraction) <= 1.0:
+            raise ValueError("range_topk_fraction must be in (0, 1]")
+        if float(range_bulk_weight) < 0.0:
+            raise ValueError("range_bulk_weight must be non-negative")
 
         self.degree = int(degree)
         self.stage_index = int(stage_index)
+        self.range_penalty_mode = str(range_penalty_mode)
+        self.range_topk_fraction = float(range_topk_fraction)
+        self.range_bulk_weight = float(range_bulk_weight)
         self.prelu = nn.PReLU(channels)
         self.prelu.weight.requires_grad = False
 
@@ -315,10 +330,31 @@ class LayerwisePolynomialActivation(nn.Module):
                 scale = self.input_scale.to(
                     device=x.device, dtype=compute_x.dtype)
                 excess = torch.relu(compute_x.abs() - scale)
-                self._last_range_penalty = (
-                    excess.square().mean()
-                    + 0.1 * excess.flatten(1).amax(dim=1).square().mean()
-                )
+                if self.range_penalty_mode == "containment_topk":
+                    # Normalize by the public approximation interval so the
+                    # loss strength is comparable across layers.  Focusing on
+                    # the worst samples in every batch prevents a single rare
+                    # tail from being diluted by millions of in-range tensor
+                    # elements. This branch is training-only.
+                    relative_excess = excess / scale
+                    sample_violation = relative_excess.flatten(1).amax(dim=1)
+                    topk = max(
+                        1,
+                        math.ceil(
+                            sample_violation.numel()
+                            * self.range_topk_fraction),
+                    )
+                    tail_penalty = sample_violation.square().topk(topk).values.mean()
+                    self._last_range_penalty = (
+                        tail_penalty
+                        + self.range_bulk_weight
+                        * relative_excess.square().mean()
+                    )
+                else:
+                    self._last_range_penalty = (
+                        excess.square().mean()
+                        + 0.1 * excess.flatten(1).amax(dim=1).square().mean()
+                    )
                 self._last_input_absmax = compute_x.detach().abs().amax()
                 self._last_outside_fraction = (
                     (excess.detach() > 0).float().mean())
@@ -407,6 +443,9 @@ class IResNet(_ProgressiveIResNet):
     def __init__(self, *args, layerwise_poly_degree=2,
                  layerwise_poly_initial_scale=1.0,
                  layerwise_poly_distill_eps=1e-4,
+                 layerwise_poly_range_penalty_mode="legacy",
+                 layerwise_poly_range_topk_fraction=0.25,
+                 layerwise_poly_range_bulk_weight=0.01,
                  layerwise_poly_progress=0.0, **kwargs):
         object.__setattr__(self, "layerwise_poly_degree", int(layerwise_poly_degree))
         object.__setattr__(
@@ -415,6 +454,15 @@ class IResNet(_ProgressiveIResNet):
         object.__setattr__(
             self, "layerwise_poly_distill_eps",
             float(layerwise_poly_distill_eps))
+        object.__setattr__(
+            self, "layerwise_poly_range_penalty_mode",
+            str(layerwise_poly_range_penalty_mode))
+        object.__setattr__(
+            self, "layerwise_poly_range_topk_fraction",
+            float(layerwise_poly_range_topk_fraction))
+        object.__setattr__(
+            self, "layerwise_poly_range_bulk_weight",
+            float(layerwise_poly_range_bulk_weight))
         super().__init__(
             *args, herpn_progress=float(layerwise_poly_progress), **kwargs)
 
@@ -424,6 +472,9 @@ class IResNet(_ProgressiveIResNet):
             degree=self.layerwise_poly_degree,
             initial_scale=self.layerwise_poly_initial_scale,
             distill_eps=self.layerwise_poly_distill_eps,
+            range_penalty_mode=self.layerwise_poly_range_penalty_mode,
+            range_topk_fraction=self.layerwise_poly_range_topk_fraction,
+            range_bulk_weight=self.layerwise_poly_range_bulk_weight,
             stage_index=_STAGE_NAMES.index(stage_name),
             blend=0.0,
         )
