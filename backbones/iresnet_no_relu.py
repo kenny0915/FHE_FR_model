@@ -13,6 +13,23 @@ using_ckpt = False
 _HERPN_STAGE_NAMES = ('stem', 'layer1', 'layer2', 'layer3', 'layer4')
 
 
+class _StraightThroughClamp(torch.autograd.Function):
+    """Bound a training forward while preserving the input gradient.
+
+    This is only a numerical surrogate used while conditioning the exact
+    polynomial graph.  Evaluation never calls it, so it cannot become an
+    encrypted-path clamp.
+    """
+
+    @staticmethod
+    def forward(ctx, inputs, limit):
+        return inputs.clamp(min=-limit, max=limit)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, None
+
+
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding."""
     return nn.Conv2d(in_planes,
@@ -127,10 +144,24 @@ class ProgressiveHerPNActivation(nn.Module):
     """PReLU-compatible wrapper for a staged PReLU-to-HerPN conversion."""
 
     def __init__(self, channels, range_limit=6.0, bn_eps=1e-4,
-                 stage_index=0, blend=1.0):
+                 stage_index=0, blend=1.0,
+                 range_penalty_mode='legacy', range_topk_fraction=0.001,
+                 range_bulk_weight=0.01,
+                 training_stabilization_limit=None):
         super().__init__()
         if range_limit <= 0:
             raise ValueError('range_limit must be positive')
+        if range_penalty_mode not in ('legacy', 'linear_tail'):
+            raise ValueError(
+                "range_penalty_mode must be 'legacy' or 'linear_tail'")
+        if not 0.0 < range_topk_fraction <= 1.0:
+            raise ValueError('range_topk_fraction must be in (0, 1]')
+        if range_bulk_weight < 0.0:
+            raise ValueError('range_bulk_weight must be non-negative')
+        if (training_stabilization_limit is not None
+                and float(training_stabilization_limit) <= 0.0):
+            raise ValueError(
+                'training_stabilization_limit must be positive or None')
         self.prelu = nn.PReLU(channels)
         self.herpn = HerPN(channels, eps=bn_eps)
         self.stage_index = int(stage_index)
@@ -141,6 +172,12 @@ class ProgressiveHerPNActivation(nn.Module):
         self._last_distillation_loss = None
         self._last_input_absmax = None
         self._last_outside_fraction = None
+        self.range_penalty_mode = str(range_penalty_mode)
+        self.range_topk_fraction = float(range_topk_fraction)
+        self.range_bulk_weight = float(range_bulk_weight)
+        self.training_stabilization_limit = (
+            None if training_stabilization_limit is None
+            else float(training_stabilization_limit))
         self._blend = 0.0
         self.set_blend(blend)
 
@@ -194,9 +231,26 @@ class ProgressiveHerPNActivation(nn.Module):
             compute_x = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
             limit = self.range_limit.to(device=x.device, dtype=compute_x.dtype)
             excess = torch.relu(compute_x.abs() - limit)
-            mean_tail = excess.square().mean()
-            sample_tail = excess.flatten(1).amax(dim=1).square().mean()
-            self._last_range_penalty = mean_tail + 0.1 * sample_tail
+            if self.range_penalty_mode == 'linear_tail':
+                # Normalize by the immutable approximation radius and focus
+                # on the rare largest elements.  A linear tail remains finite
+                # much farther into FP32's dynamic range than the legacy
+                # squared objective and does not dilute a handful of extreme
+                # faces across an entire feature map.
+                normalized = (excess / limit).flatten()
+                tail_count = max(
+                    1,
+                    int(math.ceil(
+                        normalized.numel() * self.range_topk_fraction)),
+                )
+                top_tail = normalized.topk(tail_count, sorted=False).values
+                self._last_range_penalty = (
+                    top_tail.mean()
+                    + self.range_bulk_weight * normalized.mean())
+            else:
+                mean_tail = excess.square().mean()
+                sample_tail = excess.flatten(1).amax(dim=1).square().mean()
+                self._last_range_penalty = mean_tail + 0.1 * sample_tail
             self._last_input_absmax = compute_x.detach().abs().amax()
             self._last_outside_fraction = (excess.detach() > 0).float().mean()
         else:
@@ -210,12 +264,25 @@ class ProgressiveHerPNActivation(nn.Module):
         # Evaluate both branches in training even at the endpoints. This warms
         # every HerPN BN before conversion and keeps DDP's graph stationary.
         prelu_out = self.prelu(x)
-        herpn_out = self.herpn(x)
+        herpn_input = x
+        if self.training and self.training_stabilization_limit is not None:
+            # The surrogate makes an otherwise overflowing rare sample usable
+            # by the range objective.  The exact, unclipped degree-2 HerPN is
+            # always used by eval/inference.
+            herpn_input = _StraightThroughClamp.apply(
+                x, self.training_stabilization_limit)
+        herpn_out = self.herpn(herpn_input)
         if self.training:
-            target = prelu_out.detach().float()
-            self._last_distillation_loss = (
-                (1.0 - blend) * (herpn_out.float() - target).square().mean()
-            )
+            if blend < 1.0:
+                target = prelu_out.detach().float()
+                self._last_distillation_loss = (
+                    (1.0 - blend)
+                    * (herpn_out.float() - target).square().mean()
+                )
+            else:
+                # Avoid evaluating 0 * Inf when a fully converted activation
+                # sees exactly the tail that recovery is meant to correct.
+                self._last_distillation_loss = herpn_out.flatten()[0] * 0.0
 
         if blend <= 0.0:
             return prelu_out + herpn_out * 0.0
@@ -279,7 +346,10 @@ class IResNet(nn.Module):
                  block, layers, dropout=0, num_features=512, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
                  fp16=False, herpn_range_limit=6.0, herpn_bn_eps=1e-4,
-                 herpn_progress=5.0):
+                 herpn_progress=5.0, herpn_range_penalty_mode='legacy',
+                 herpn_range_topk_fraction=0.001,
+                 herpn_range_bulk_weight=0.01,
+                 herpn_training_stabilization_limit=None):
         super(IResNet, self).__init__()
         self.extra_gflops = 0.0
         self.fp16 = fp16
@@ -287,6 +357,12 @@ class IResNet(nn.Module):
         self.dilation = 1
         self.herpn_range_limit = float(herpn_range_limit)
         self.herpn_bn_eps = float(herpn_bn_eps)
+        self.herpn_range_penalty_mode = str(herpn_range_penalty_mode)
+        self.herpn_range_topk_fraction = float(herpn_range_topk_fraction)
+        self.herpn_range_bulk_weight = float(herpn_range_bulk_weight)
+        self.herpn_training_stabilization_limit = (
+            None if herpn_training_stabilization_limit is None
+            else float(herpn_training_stabilization_limit))
         self.register_buffer(
             'herpn_progress', torch.tensor(float(herpn_progress), dtype=torch.float32),
             persistent=False)
@@ -343,6 +419,11 @@ class IResNet(nn.Module):
             bn_eps=self.herpn_bn_eps,
             stage_index=_HERPN_STAGE_NAMES.index(stage_name),
             blend=0.0,
+            range_penalty_mode=self.herpn_range_penalty_mode,
+            range_topk_fraction=self.herpn_range_topk_fraction,
+            range_bulk_weight=self.herpn_range_bulk_weight,
+            training_stabilization_limit=(
+                self.herpn_training_stabilization_limit),
         )
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False,
@@ -405,17 +486,33 @@ class IResNet(nn.Module):
         ) / len(activations)
         self.herpn_progress.fill_(converted_fraction * len(_HERPN_STAGE_NAMES))
 
-    def herpn_range_penalty(self):
+    def _selected_progressive_activations(self, activation_names=None):
+        activations = {
+            name: module for name, module in self.named_modules()
+            if isinstance(module, ProgressiveHerPNActivation)
+        }
+        if activation_names is None:
+            return tuple(activations.values())
+        names = tuple(activation_names)
+        unknown = sorted(set(names).difference(activations))
+        if unknown:
+            raise ValueError(
+                'Unknown HerPN activation names: {}'.format(unknown))
+        return tuple(activations[name] for name in names)
+
+    def herpn_range_penalty(self, activation_names=None):
         penalties = [activation.range_penalty()
-                     for activation in self.progressive_activations()]
+                     for activation in self._selected_progressive_activations(
+                         activation_names)]
         penalties = [penalty for penalty in penalties if penalty is not None]
         if not penalties:
             return next(self.parameters()).new_zeros(())
         return torch.stack(penalties).mean()
 
-    def herpn_distillation_loss(self):
+    def herpn_distillation_loss(self, activation_names=None):
         losses = [activation.distillation_loss()
-                  for activation in self.progressive_activations()]
+                  for activation in self._selected_progressive_activations(
+                      activation_names)]
         losses = [loss for loss in losses if loss is not None]
         if not losses:
             return next(self.parameters()).new_zeros(())

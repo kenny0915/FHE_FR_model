@@ -1565,6 +1565,17 @@ def main(args):
             herpn_progress=float(getattr(
                 cfg, "herpn_initial_progress", default_herpn_progress)),
         )
+        if cfg.network.endswith("_no_relu"):
+            model_kwargs.update(
+                herpn_range_penalty_mode=str(getattr(
+                    cfg, "herpn_range_penalty_mode", "legacy")),
+                herpn_range_topk_fraction=float(getattr(
+                    cfg, "herpn_range_topk_fraction", 0.001)),
+                herpn_range_bulk_weight=float(getattr(
+                    cfg, "herpn_range_bulk_weight", 0.01)),
+                herpn_training_stabilization_limit=getattr(
+                    cfg, "herpn_training_stabilization_limit", None),
+            )
         if cfg.network.endswith("_prelu_herpn"):
             model_kwargs["prelu_herpn_distill_eps"] = float(getattr(
                 cfg, "prelu_herpn_distill_eps", 1e-4))
@@ -2280,6 +2291,8 @@ def main(args):
     herpn_transition_epochs = float(getattr(cfg, "herpn_transition_epochs", 1.0))
     herpn_range_loss_weight = float(getattr(cfg, "herpn_range_loss_weight", 0.0))
     herpn_distill_loss_weight = float(getattr(cfg, "herpn_distill_loss_weight", 0.0))
+    herpn_range_loss_names = tuple(str(name) for name in getattr(
+        cfg, "herpn_range_loss_names", ()))
     herpn_bn_recalibration_batches = int(
         getattr(cfg, "herpn_bn_recalibration_batches", 0))
     herpn_save_after_group = bool(
@@ -4258,6 +4271,11 @@ def main(args):
                 loss: torch.Tensor = criterion(logits, local_labels)
                 loss_jigsaw = F.cross_entropy(patch_pred, patch_target)
                 loss = loss + float(getattr(cfg, "patch_cnn_jigsaw_weight", 0.005)) * loss_jigsaw
+            elif task_loss_weight == 0.0:
+                # Range-only/distillation recovery does not need to construct
+                # PartialFC's large classifier graph.  Keep a connected scalar
+                # so auxiliary losses can be added normally below.
+                loss = local_embeddings.flatten()[0] * 0.0
             else:
                 loss: torch.Tensor = module_partial_fc(local_embeddings, local_labels)
             task_loss = loss
@@ -4302,7 +4320,7 @@ def main(args):
                 range_penalty_names = (
                     active_layerwise_group
                     if conditioning_range_loss
-                    else None
+                    else (herpn_range_loss_names or None)
                 )
                 if (layerwise_guard_loss
                         and layerwise_poly_require_full_containment):
