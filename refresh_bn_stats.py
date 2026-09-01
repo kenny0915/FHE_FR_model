@@ -39,6 +39,42 @@ def begin_bn_recalibration(module, reset, momentum):
     return batchnorm_layers
 
 
+def snapshot_bn_buffers(batchnorm_layers):
+    """Copy all mutable BN buffers before a potentially rejected forward."""
+    return [
+        (
+            layer,
+            layer.running_mean.detach().clone(),
+            layer.running_var.detach().clone(),
+            layer.num_batches_tracked.detach().clone(),
+        )
+        for layer in batchnorm_layers
+    ]
+
+
+@torch.no_grad()
+def restore_bn_buffers(snapshot):
+    for layer, running_mean, running_var, num_batches_tracked in snapshot:
+        layer.running_mean.copy_(running_mean)
+        layer.running_var.copy_(running_var)
+        layer.num_batches_tracked.copy_(num_batches_tracked)
+
+
+def bn_buffers_are_finite(batchnorm_layers):
+    return all(
+        torch.isfinite(layer.running_mean).all()
+        and torch.isfinite(layer.running_var).all()
+        for layer in batchnorm_layers
+    )
+
+
+def synchronize_bad_forward(local_bad, device):
+    bad = torch.tensor(int(bool(local_bad)), device=device, dtype=torch.int32)
+    if distributed.is_available() and distributed.is_initialized():
+        distributed.all_reduce(bad, op=distributed.ReduceOp.MAX)
+    return bool(bad.item())
+
+
 def merge_cumulative_bn_stats(batchnorm_layers):
     """Merge cumulative BN statistics from disjoint distributed data shards."""
     if not distributed.is_available() or not distributed.is_initialized():
@@ -95,6 +131,9 @@ def main(args):
         "fp16": cfg.fp16,
         "num_features": cfg.embedding_size,
     }
+    for config_name in ("herpn_range_limit", "herpn_bn_eps"):
+        if hasattr(cfg, config_name):
+            model_kwargs[config_name] = getattr(cfg, config_name)
     if cfg.network.startswith("poolformer_no_ln_x2_act"):
         model_kwargs["gate_grouping"] = str(getattr(
             cfg, "simple_gate_grouping", "stage_chunks"))
@@ -146,55 +185,92 @@ def main(args):
         momentum=args.bn_momentum,
     )
 
-    batches_seen = 0
+    attempted_batches = 0
+    accepted_batches = 0
+    skipped_batches = 0
     started_at = time.monotonic()
     with torch.no_grad():
         for epoch in range(args.epochs):
             if isinstance(train_loader, DataLoader):
                 train_loader.sampler.set_epoch(epoch)
             for img, _ in train_loader:
+                attempted_batches += 1
+                snapshot = (
+                    snapshot_bn_buffers(batchnorm_layers)
+                    if args.skip_nonfinite else None
+                )
                 out = backbone(img)
-                if not torch.isfinite(out).all():
-                    raise FloatingPointError(
-                        "Non-finite embedding while refreshing BN stats "
-                        f"at epoch={epoch}, batch={batches_seen}"
-                    )
-                batches_seen += 1
+                local_bad = (
+                    not torch.isfinite(out).all()
+                    or not bn_buffers_are_finite(batchnorm_layers)
+                )
+                bad = synchronize_bad_forward(local_bad, out.device)
+                if bad:
+                    if not args.skip_nonfinite:
+                        raise FloatingPointError(
+                            "Non-finite embedding or BatchNorm buffer while "
+                            "refreshing statistics at "
+                            f"epoch={epoch}, batch={attempted_batches - 1}"
+                        )
+                    restore_bn_buffers(snapshot)
+                    skipped_batches += 1
+                    if skipped_batches > args.max_nonfinite_skips:
+                        raise FloatingPointError(
+                            "BN recalibration exceeded the non-finite skip "
+                            f"limit ({args.max_nonfinite_skips})"
+                        )
+                    if rank == 0:
+                        print(
+                            "Skipped synchronized non-finite BN calibration "
+                            f"batch {attempted_batches - 1}; "
+                            f"skip_count={skipped_batches}",
+                            flush=True,
+                        )
+                    if (args.max_batches > 0
+                            and attempted_batches >= args.max_batches):
+                        break
+                    continue
+                accepted_batches += 1
                 if (
                     rank == 0
                     and args.log_interval > 0
-                    and batches_seen % args.log_interval == 0
+                    and attempted_batches % args.log_interval == 0
                 ):
                     elapsed = time.monotonic() - started_at
-                    global_batches = batches_seen * world_size
+                    global_batches = accepted_batches * world_size
                     print(
-                        f"Recalibrated {global_batches} global batches "
+                        f"Accepted {global_batches} rank-local batches "
                         f"({global_batches * img.shape[0]} images) in "
-                        f"{elapsed:.1f}s",
+                        f"{elapsed:.1f}s; synchronized_skips={skipped_batches}",
                         flush=True,
                     )
-                if args.max_batches > 0 and batches_seen >= args.max_batches:
+                if (args.max_batches > 0
+                        and attempted_batches >= args.max_batches):
                     break
             if cfg.dali:
                 train_loader.reset()
-            if args.max_batches > 0 and batches_seen >= args.max_batches:
+            if (args.max_batches > 0
+                    and attempted_batches >= args.max_batches):
                 break
 
+    if accepted_batches == 0:
+        raise RuntimeError("BN recalibration accepted no finite batches")
+
     merge_cumulative_bn_stats(batchnorm_layers)
-    total_batches = torch.tensor(
-        batches_seen,
-        dtype=torch.long,
-        device=torch.device("cuda", local_rank),
-    )
-    if world_size > 1:
-        distributed.all_reduce(total_batches, op=distributed.ReduceOp.SUM)
 
     if rank == 0:
         output = args.output or args.model.replace(".pt", "_bnrefreshed.pt")
+        output_directory = os.path.dirname(output)
+        if output_directory:
+            os.makedirs(output_directory, exist_ok=True)
         backbone.eval()
         torch.save(backbone.state_dict(), output)
         print(f"Saved BN-refreshed model to {output}")
-        print(f"Used {total_batches.item()} batches across {world_size} rank(s)")
+        print(
+            f"Used {accepted_batches * world_size} rank-local batches across "
+            f"{world_size} rank(s); skipped {skipped_batches} synchronized "
+            f"batch(es) out of {attempted_batches} attempts per rank"
+        )
 
     if distributed.is_available() and distributed.is_initialized():
         distributed.destroy_process_group()
@@ -220,6 +296,20 @@ if __name__ == "__main__":
         "--reset-bn",
         action="store_true",
         help="reset BN running_mean/running_var before recalibration",
+    )
+    parser.add_argument(
+        "--skip-nonfinite",
+        action="store_true",
+        help=(
+            "synchronously reject a non-finite forward and roll back every "
+            "BatchNorm buffer instead of aborting"
+        ),
+    )
+    parser.add_argument(
+        "--max-nonfinite-skips",
+        type=int,
+        default=0,
+        help="maximum synchronized rejected batches when --skip-nonfinite is set",
     )
     parser.add_argument(
         "--simple-gate-blends",
