@@ -4,6 +4,9 @@ import pytest
 import torch
 
 from mine_herpn_tails import merge_rank_payloads, update_tail_heap
+from configs.ms1mv3_r50_no_relu_phase2_hard_tail_recovery import (
+    config as hard_tail_config,
+)
 from utils.utils_tail_recovery import load_fixed_tail_replay_indices
 
 
@@ -53,3 +56,15 @@ def test_fixed_tail_manifest_rejects_invalid_indices(tmp_path):
     path.write_text(json.dumps({"combined_source_indices": [1, -2]}))
     with pytest.raises(ValueError, match="invalid source indices"):
         load_fixed_tail_replay_indices(path)
+
+
+def test_hard_tail_recovery_covers_stem_through_layer3_only():
+    names = hard_tail_config.herpn_range_loss_names
+    assert len(names) == 22
+    assert names[0] == "prelu"
+    assert "layer1.0.prelu" in names
+    assert "layer2.3.prelu" in names
+    assert "layer3.13.prelu" in names
+    assert all(not name.startswith("layer4") for name in names)
+    assert hard_tail_config.freeze_batchnorm_running_stats
+    assert hard_tail_config.freeze_batchnorm_affine
