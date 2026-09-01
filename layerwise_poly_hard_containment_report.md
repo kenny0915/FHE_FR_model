@@ -224,7 +224,13 @@ the successful scan: the final checkpoint metadata referenced the configured
 orientation flag through an uninitialized local name.  The epoch-4
 distributed state and audit evidence are intact.  The flag is now initialized
 from the config before use; an audit-only resume repeats the final scan and
-validation before naming the final checkpoint.
+validation before naming the final checkpoint.  Audit-only job `323381`
+completed successfully and reproduced the exact `2.412438` maximum.  Its
+final validation was finite at 99.783% LFW, 98.886% CFP-FP, and 98.133%
+AgeDB-30.  It wrote
+`model_herpn_final_containment_audited.pt` at global step 20,232 with
+`scan_both_orientations=True`; the SHA-256 digest is
+`dc848c11b6f3b01da7d9d883a7bb98a9391d8dc2a405d8f8a183fa9a6f8c16d5`.
 
 If the recovery stem gates pass, the reproducible next run is
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_group02.py`, launched by
@@ -238,6 +244,6 @@ relaxing any immutable-interval check.
 
 ### Pending authoritative gates
 
-- audited-checkpoint serialization after the audit-only recovery;
-- final validation accuracy and finite embeddings;
-- final checkpoint/hash and reproducible continuation instructions.
+- second singleton (`layer1.0.prelu`) provisional scan and immutable interval;
+- second-singleton pre-blend, downstream-boundary, post-BN, and final audits;
+- second-singleton final finite validation and checkpoint/hash.
