@@ -50,7 +50,7 @@ def main():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--manifest-key", default="output_nonfinite")
-    parser.add_argument("--activation", required=True)
+    parser.add_argument("--activation", action="append", required=True)
     parser.add_argument(
         "--quadratic-scale", action="append", type=float, required=True)
     parser.add_argument("--trace-activation", action="append", default=[])
@@ -90,9 +90,16 @@ def main():
             state.get("state_dict_backbone"), dict):
         state = state["state_dict_backbone"]
     original_state = copy.deepcopy(state)
-    variance_key = f"{args.activation}.herpn.bn2.running_var"
-    if variance_key not in original_state:
-        raise ValueError(f"Checkpoint has no HerPN variance {variance_key!r}")
+    activation_names = tuple(dict.fromkeys(args.activation))
+    variance_keys = {
+        name: f"{name}.herpn.bn2.running_var"
+        for name in activation_names
+    }
+    missing_variances = [
+        key for key in variance_keys.values() if key not in original_state]
+    if missing_variances:
+        raise ValueError(
+            f"Checkpoint has no HerPN variances {missing_variances!r}")
 
     model = get_model(
         cfg.network,
@@ -104,19 +111,26 @@ def main():
         herpn_progress=5.0,
     ).to(device)
     modules = dict(model.named_modules())
-    if args.activation not in modules:
-        raise ValueError(f"Unknown activation {args.activation!r}")
+    missing_activations = [
+        name for name in activation_names if name not in modules]
+    if missing_activations:
+        raise ValueError(f"Unknown activations {missing_activations!r}")
     missing = [name for name in args.trace_activation if name not in modules]
     if missing:
         raise ValueError(f"Unknown trace activations: {missing}")
-    basis_eps = float(modules[args.activation].herpn.bn2.eps)
+    basis_eps = {
+        name: float(modules[name].herpn.bn2.eps)
+        for name in activation_names
+    }
 
     results = []
     saved_scale = None
     for scale in args.quadratic_scale:
         candidate_state = copy.deepcopy(original_state)
-        candidate_state[variance_key] = attenuate_quadratic_basis_variance(
-            original_state[variance_key], basis_eps, scale)
+        for name, variance_key in variance_keys.items():
+            candidate_state[variance_key] = (
+                attenuate_quadratic_basis_variance(
+                    original_state[variance_key], basis_eps[name], scale))
         model.load_state_dict(candidate_state, strict=True)
         model.set_herpn_progress(5.0)
         model.eval()
@@ -169,7 +183,10 @@ def main():
             "trace_nonfinite_input_count": trace_nonfinite,
         }
         results.append(result)
-        print(json.dumps(result, sort_keys=True), flush=True)
+        print(json.dumps({
+            key: value for key, value in result.items()
+            if key != "output_nonfinite"
+        }, sort_keys=True), flush=True)
         if (not output_nonfinite and saved_scale is None
                 and args.save_first_zero_checkpoint):
             directory = os.path.dirname(args.save_first_zero_checkpoint)
@@ -183,7 +200,7 @@ def main():
         "checkpoint": args.checkpoint,
         "manifest": args.manifest,
         "manifest_key": args.manifest_key,
-        "activation": args.activation,
+        "activations": list(activation_names),
         "orientation_count": len(orientations),
         "saved_zero_checkpoint": (
             args.save_first_zero_checkpoint if saved_scale is not None else None),

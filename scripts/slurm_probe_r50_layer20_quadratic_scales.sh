@@ -34,7 +34,12 @@ done
     --manifest \
       work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_tail_mining/epoch23_prefix_tails.json \
     --activation layer2.0.prelu \
+    --activation layer2.1.prelu \
+    --activation layer2.2.prelu \
+    --activation layer2.3.prelu \
     --quadratic-scale 1.0 \
+    --quadratic-scale 0.9 \
+    --quadratic-scale 0.75 \
     --quadratic-scale 0.5 \
     --quadratic-scale 0.25 \
     --quadratic-scale 0.125 \
@@ -44,6 +49,6 @@ done
     --quadratic-scale 0.001 \
     --batch-size 64 \
     --workers 2 \
-    --output "${output}/layer20_quadratic_scales.json" \
-    --save-first-zero-checkpoint "${output}/model_first_zero_ms1m.pt" \
+    --output "${output}/stage2_quadratic_scales.json" \
+    --save-first-zero-checkpoint "${output}/model_stage2_first_zero_ms1m.pt" \
     "${trace_args[@]}"
