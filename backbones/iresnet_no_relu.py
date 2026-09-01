@@ -349,7 +349,8 @@ class IResNet(nn.Module):
                  herpn_progress=5.0, herpn_range_penalty_mode='legacy',
                  herpn_range_topk_fraction=0.001,
                  herpn_range_bulk_weight=0.01,
-                 herpn_training_stabilization_limit=None):
+                 herpn_training_stabilization_limit=None,
+                 herpn_training_stabilization_names=()):
         super(IResNet, self).__init__()
         self.extra_gflops = 0.0
         self.fp16 = fp16
@@ -363,6 +364,8 @@ class IResNet(nn.Module):
         self.herpn_training_stabilization_limit = (
             None if herpn_training_stabilization_limit is None
             else float(herpn_training_stabilization_limit))
+        self.herpn_training_stabilization_names = tuple(
+            herpn_training_stabilization_names)
         self.register_buffer(
             'herpn_progress', torch.tensor(float(herpn_progress), dtype=torch.float32),
             persistent=False)
@@ -411,6 +414,10 @@ class IResNet(nn.Module):
                     nn.init.constant_(module.bn2.weight, 0)
 
         self.set_herpn_progress(herpn_progress)
+        self.set_herpn_training_stabilization(
+            self.herpn_training_stabilization_limit,
+            self.herpn_training_stabilization_names,
+        )
 
     def _make_activation(self, channels, stage_name):
         return ProgressiveHerPNActivation(
@@ -422,8 +429,7 @@ class IResNet(nn.Module):
             range_penalty_mode=self.herpn_range_penalty_mode,
             range_topk_fraction=self.herpn_range_topk_fraction,
             range_bulk_weight=self.herpn_range_bulk_weight,
-            training_stabilization_limit=(
-                self.herpn_training_stabilization_limit),
+            training_stabilization_limit=None,
         )
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False,
@@ -469,6 +475,25 @@ class IResNet(nn.Module):
         for activation in self.progressive_activations():
             activation.set_blend(
                 min(max(progress - activation.stage_index, 0.0), 1.0))
+
+    def set_herpn_training_stabilization(self, limit, activation_names=()):
+        """Select training-only stabilized activations by full module name."""
+        activations = {
+            name: module for name, module in self.named_modules()
+            if isinstance(module, ProgressiveHerPNActivation)
+        }
+        names = tuple(activation_names)
+        unknown = sorted(set(names).difference(activations))
+        if unknown:
+            raise ValueError(
+                'Unknown HerPN stabilization names: {}'.format(unknown))
+        if limit is not None and float(limit) <= 0.0:
+            raise ValueError('HerPN stabilization limit must be positive')
+        selected = set(names if names else activations)
+        for name, activation in activations.items():
+            activation.training_stabilization_limit = (
+                float(limit)
+                if limit is not None and name in selected else None)
 
     def set_herpn_blends(self, blends):
         """Set per-activation blends for schedules that split a large stage."""

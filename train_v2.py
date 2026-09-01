@@ -1576,6 +1576,8 @@ def main(args):
                     cfg, "herpn_range_bulk_weight", 0.01)),
                 herpn_training_stabilization_limit=getattr(
                     cfg, "herpn_training_stabilization_limit", None),
+                herpn_training_stabilization_names=tuple(getattr(
+                    cfg, "herpn_training_stabilization_names", ())),
             )
         if cfg.network.endswith("_prelu_herpn"):
             model_kwargs["prelu_herpn_distill_eps"] = float(getattr(

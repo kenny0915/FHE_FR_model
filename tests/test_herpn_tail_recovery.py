@@ -61,3 +61,21 @@ def test_named_range_penalty_selects_only_requested_activation():
         assert "Unknown HerPN activation" in str(error)
     else:
         raise AssertionError("unknown activation name was silently accepted")
+
+
+def test_training_stabilization_can_start_at_a_named_boundary():
+    model = IResNet(
+        IBasicBlock,
+        [1, 1, 1, 1],
+        herpn_progress=5.0,
+        herpn_training_stabilization_limit=6.0,
+        herpn_training_stabilization_names=(
+            "layer2.0.prelu", "layer3.0.prelu", "layer4.0.prelu"),
+    )
+    activations = {
+        name: module for name, module in model.named_modules()
+        if isinstance(module, ProgressiveHerPNActivation)
+    }
+    assert activations["layer1.0.prelu"].training_stabilization_limit is None
+    assert activations["layer2.0.prelu"].training_stabilization_limit == 6.0
+    assert activations["layer3.0.prelu"].training_stabilization_limit == 6.0
