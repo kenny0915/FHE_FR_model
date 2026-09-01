@@ -21,6 +21,25 @@ def fractional_group_starts_crossed(
     )
 
 
+def pending_group_requires_calibration(
+        uncalibrated_names, conversion_groups, completed_groups):
+    """Whether the immediate next conversion group lacks an interval.
+
+    Later groups are expected to remain uncalibrated and must not make a
+    routine mid-group resume look like a newly expanded conversion frontier.
+    Only the group immediately after the accepted prefix is relevant.
+    """
+    groups = tuple(tuple(group) for group in conversion_groups)
+    completed_groups = int(completed_groups)
+    if not 0 <= completed_groups <= len(groups):
+        raise ValueError(
+            "completed_groups must index the accepted conversion prefix")
+    if completed_groups == len(groups):
+        return False
+    pending = set(uncalibrated_names)
+    return any(name in pending for name in groups[completed_groups])
+
+
 def causally_calibrate_polynomial_group(
         module, activation_names, calibrate_one, verify_group):
     """Calibrate a forward-ordered group on its actual polynomial prefix.

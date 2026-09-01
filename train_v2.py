@@ -25,6 +25,7 @@ from utils.utils_logging import AverageMeter, init_logging
 from utils.utils_layerwise_poly import (
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
+    pending_group_requires_calibration,
 )
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
@@ -3375,9 +3376,49 @@ def main(args):
         return calibrate_layerwise_poly_group(
             target_names, provisional=provisional)
 
-    # Profile the first complete group before local-fit warmup. Resume
-    # checkpoints contain intervals valid at their completed group boundary.
-    if layerwise_poly_enabled and not cfg.resume:
+    # Profile the first pending group before local-fit warmup.  A normal
+    # resume already carries that pending interval in the backbone state.  A
+    # deliberately expanded hard-containment frontier (for example, resuming
+    # a one-group proof with a two-group config) does not: calibrate its first
+    # newly exposed singleton now so the remaining local-fit epochs can replay
+    # the measured tails.  Never discover an interval at or after its blend
+    # boundary, because that would silently skip the conditioning phase.
+    should_calibrate_initial_group = layerwise_poly_enabled and (
+        not cfg.resume
+        or (
+            layerwise_poly_require_full_containment
+            and completed_herpn_groups
+            < layerwise_poly_training_group_limit
+            and pending_group_requires_calibration(
+                backbone.module.uncalibrated_layerwise_poly_names(),
+                layerwise_poly_training_groups,
+                completed_herpn_groups,
+            )
+        )
+    )
+    if should_calibrate_initial_group:
+        if cfg.resume:
+            pending_group_index = completed_herpn_groups
+            pending_start = float(
+                layerwise_poly_training_group_epochs[pending_group_index])
+            if float(start_epoch) >= pending_start:
+                raise RuntimeError(
+                    "Cannot expand a hard-containment conversion frontier at "
+                    "or after the pending blend boundary: "
+                    f"start_epoch={start_epoch}, group="
+                    f"{pending_group_index + 1}, blend_start={pending_start:g}. "
+                    "Move that group's start later so provisional calibration "
+                    "and rare-tail conditioning occur before strict blend "
+                    "revalidation."
+                )
+            if rank == 0:
+                logging.info(
+                    "Expanded hard-containment frontier on resume; "
+                    "provisionally calibrating pending group %d/%d before "
+                    "local-fit conditioning",
+                    pending_group_index + 1,
+                    layerwise_poly_training_group_limit,
+                )
         if isinstance(layerwise_poly_range_loader, DataLoader):
             layerwise_poly_range_loader.sampler.set_epoch(start_epoch)
         calibrate_next_layerwise_poly_group(

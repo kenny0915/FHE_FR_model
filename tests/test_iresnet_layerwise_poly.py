@@ -18,6 +18,7 @@ from eval.non_linear_replacement import PReLU_Approx
 from utils.utils_layerwise_poly import (
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
+    pending_group_requires_calibration,
 )
 
 
@@ -32,6 +33,22 @@ def test_fractional_group_starts_trigger_once_at_half_epoch_boundary():
 
     with pytest.raises(ValueError, match="must not precede"):
         fractional_group_starts_crossed(2, 1.9, starts)
+
+
+def test_resume_calibrates_only_the_immediate_pending_group():
+    groups = (("stem",), ("block1",), ("block2",))
+
+    # Expanding a stem-only frontier exposes block1 and requires calibration.
+    assert pending_group_requires_calibration(
+        ("block1", "block2"), groups, completed_groups=1)
+    # A normal resume already has block1's interval.  The intentionally
+    # uncalibrated later block2 must not trigger premature calibration.
+    assert not pending_group_requires_calibration(
+        ("block2",), groups, completed_groups=1)
+    assert not pending_group_requires_calibration(
+        (), groups, completed_groups=3)
+    with pytest.raises(ValueError, match="completed_groups"):
+        pending_group_requires_calibration((), groups, completed_groups=4)
 
 
 class _EasyDict(dict):
@@ -377,6 +394,25 @@ def test_r50_hard_containment_probe_freezes_interval_and_replays_tails():
     assert cfg.layerwise_poly_verify_singleton_boundary
     assert not cfg.layerwise_poly_strict_tail_scale_floor
     assert cfg.layerwise_poly_training_group_limit == 1
+    assert not cfg.herpn_require_full_conversion
+
+
+def test_r50_hard_containment_group02_resume_preserves_two_conditioning_epochs():
+    stem_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem.py")
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_group02.py")
+
+    assert cfg.resume
+    assert cfg.resume_rebase_lr_scheduler
+    assert cfg.output == stem_cfg.output
+    assert cfg.herpn_conversion_groups == stem_cfg.herpn_conversion_groups
+    assert cfg.layerwise_poly_require_full_containment
+    assert cfg.layerwise_poly_freeze_containment_interval
+    assert cfg.layerwise_poly_training_group_limit == 2
+    assert cfg.herpn_group_epochs[:3] == (2.0, 6.0, 9.0)
+    assert cfg.herpn_group_epochs[1] - 4.0 == pytest.approx(2.0)
+    assert cfg.num_epoch == 8
     assert not cfg.herpn_require_full_conversion
 
 
