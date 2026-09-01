@@ -273,6 +273,10 @@ This changes no inference operation or polynomial coefficient.  Reproducible
 entry points are
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_group02_guardband.py` and
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_group02_guardband.sh`.
+The prior recovery preserved its conditioned PReLU state in the epoch-5
+distributed checkpoint before the gate, so this run moves the blend boundary
+to epoch 6: epoch 5 receives the new guard-band objective, epoch 6 blends, and
+epoch 7 holds before the final audit.
 
 ### Pending authoritative gates
 

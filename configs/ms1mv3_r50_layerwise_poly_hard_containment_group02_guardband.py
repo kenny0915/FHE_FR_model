@@ -17,3 +17,12 @@ from configs.ms1mv3_r50_layerwise_poly_hard_containment_group02_recovery import 
 config = edict(recovery_config.copy())
 config.layerwise_poly_range_guard_ratio = 0.98
 config.layerwise_poly_tail_replay_extra_indices = (3005115, 4498665)
+# The preceding recovery saved its conditioned PReLU state at epoch 5 before
+# the strict gate rejected it.  Resume there, leave one full epoch for the new
+# guard-band objective, blend during epoch 6, and hold during epoch 7.
+config.herpn_group_epochs = (
+    2.0,
+    6.0,
+    *tuple(8.0 + 2.0 * index for index in range(23)),
+)
+config.num_epoch = 8

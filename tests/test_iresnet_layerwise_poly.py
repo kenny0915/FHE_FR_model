@@ -797,8 +797,9 @@ def test_group02_guardband_prioritizes_migrated_rails_inside_fixed_interval():
     assert cfg.layerwise_poly_freeze_containment_interval
     assert cfg.layerwise_poly_range_guard_ratio == pytest.approx(0.98)
     assert cfg.layerwise_poly_tail_replay_extra_indices == (3005115, 4498665)
-    assert cfg.herpn_group_epochs[:2] == (2.0, 5.0)
+    assert cfg.herpn_group_epochs[:2] == (2.0, 6.0)
     assert cfg.herpn_transition_epochs == pytest.approx(1.0)
+    assert cfg.num_epoch == 8
 
 
 def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():
