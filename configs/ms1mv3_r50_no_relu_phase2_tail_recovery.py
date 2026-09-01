@@ -86,6 +86,7 @@ config.task_loss_weight = 0.0
 config.lr = 1e-4
 config.weight_decay = 1e-5
 config.gradient_clip = 1.0
+config.stable_gradient_clip = True
 config.warmup_epoch = 0
 config.num_epoch = 2
 config.verbose = 500
