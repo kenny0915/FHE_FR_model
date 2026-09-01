@@ -43,19 +43,18 @@ done
       work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/model_epoch_23.pt \
     --manifest \
       work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_tail_mining/epoch23_prefix_tails.json \
-    --quadratic-scale 1.0 \
-    --quadratic-scale 0.9 \
-    --quadratic-scale 0.75 \
-    --quadratic-scale 0.5 \
-    --quadratic-scale 0.25 \
-    --quadratic-scale 0.125 \
-    --quadratic-scale 0.0625 \
-    --quadratic-scale 0.03125 \
-    --quadratic-scale 0.01 \
+    --quadratic-scale 0.009 \
+    --quadratic-scale 0.008 \
+    --quadratic-scale 0.007 \
+    --quadratic-scale 0.006 \
+    --quadratic-scale 0.005 \
+    --quadratic-scale 0.004 \
+    --quadratic-scale 0.003 \
+    --quadratic-scale 0.002 \
     --quadratic-scale 0.001 \
     --batch-size 64 \
     --workers 2 \
-    --output "${output}/stage23_quadratic_scales.json" \
-    --save-first-zero-checkpoint "${output}/model_stage23_first_zero_ms1m.pt" \
+    --output "${output}/stage23_quadratic_scales_fine.json" \
+    --save-first-zero-checkpoint "${output}/model_stage23_fine_zero_ms1m.pt" \
     "${attenuate_args[@]}" \
     "${trace_args[@]}"
