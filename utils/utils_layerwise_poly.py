@@ -1,6 +1,8 @@
 """Orchestration helpers for safe grouped polynomial calibration."""
 
+import json
 import math
+import os
 
 
 def activation_range_is_contained(observed_absmax, interval_radius):
@@ -74,6 +76,54 @@ def calibrated_conversion_prefix(
         else:
             found_gap = True
     return tuple(prefix)
+
+
+def load_tail_replay_manifests(output, activation_names):
+    """Load persisted rare-tail indices for a calibrated activation prefix.
+
+    Hard-containment resumes must replay the same extrema that established the
+    immutable intervals.  Silently continuing without a manifest would turn a
+    recovery run into ordinary random sampling, so missing or malformed files
+    are treated as fatal configuration/checkpoint mismatches.
+    """
+    results = []
+    for activation_name in tuple(activation_names):
+        path = os.path.join(
+            os.fspath(output),
+            "tail_replay_" + activation_name.replace(".", "_") + ".json",
+        )
+        try:
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except FileNotFoundError as error:
+            raise FileNotFoundError(
+                "Missing tail replay manifest for calibrated activation "
+                f"{activation_name!r}: {path}"
+            ) from error
+        if not isinstance(payload, dict):
+            raise ValueError(f"Tail replay manifest must be an object: {path}")
+        if payload.get("activation") != activation_name:
+            raise ValueError(
+                "Tail replay manifest activation mismatch: "
+                f"expected={activation_name!r}, "
+                f"observed={payload.get('activation')!r}, path={path}"
+            )
+        indices = payload.get("dataset_indices")
+        if (not isinstance(indices, list) or not indices
+                or any(type(index) is not int or index < 0 for index in indices)):
+            raise ValueError(
+                f"Tail replay manifest has invalid dataset_indices: {path}")
+        input_scale = float(payload.get("input_scale", float("nan")))
+        if not math.isfinite(input_scale) or input_scale <= 0.0:
+            raise ValueError(
+                f"Tail replay manifest has invalid input_scale: {path}")
+        results.append({
+            "activation": activation_name,
+            "input_scale": input_scale,
+            "tail_indices": tuple(indices),
+            "manifest_path": path,
+        })
+    return results
 
 
 def causally_calibrate_polynomial_group(

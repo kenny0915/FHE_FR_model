@@ -27,6 +27,7 @@ from utils.utils_layerwise_poly import (
     calibrated_conversion_prefix,
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
+    load_tail_replay_manifests,
     pending_group_requires_calibration,
 )
 from utils.utils_optimizer import (
@@ -3049,14 +3050,19 @@ def main(args):
         nonlocal layerwise_tail_replay_epoch
         if layerwise_poly_tail_replay_batch_size <= 0:
             return
-        indices = tuple(dict.fromkeys(
+        new_indices = tuple(dict.fromkeys(
             index
             for result in results
             for index in result.get("tail_indices", ())
         ))
-        if not indices:
+        if not new_indices:
             raise RuntimeError(
                 "Tail replay was enabled but calibration returned no indices")
+        # A later singleton's provisional scan must not discard extrema from
+        # the already accepted polynomial prefix.  Keep a stable union across
+        # restored manifests and newly calibrated activations.
+        indices = tuple(dict.fromkeys(
+            (*layerwise_tail_replay_indices, *new_indices)))
         subset = Subset(train_loader.dataset, indices)
         sampler = TorchDistributedSampler(
             subset,
@@ -3400,6 +3406,41 @@ def main(args):
             )
         )
     )
+    if (cfg.resume and layerwise_poly_enabled
+            and layerwise_poly_tail_replay_batch_size > 0):
+        model_order = tuple(
+            backbone.module.layerwise_poly_activation_names())
+        activations = dict(
+            backbone.module.named_progressive_activations())
+        calibrated_names = tuple(
+            name for name in model_order
+            if activations[name]._scale_is_calibrated)
+        calibrated_prefix = calibrated_conversion_prefix(
+            model_order,
+            calibrated_names,
+            layerwise_poly_training_groups,
+        )
+        if calibrated_prefix:
+            manifest_results = load_tail_replay_manifests(
+                cfg.output, calibrated_prefix)
+            for result in manifest_results:
+                checkpoint_scale = float(
+                    activations[result["activation"]].input_scale.item())
+                if not math.isclose(
+                        result["input_scale"], checkpoint_scale,
+                        rel_tol=1e-7, abs_tol=0.0):
+                    raise ValueError(
+                        "Tail replay manifest interval does not match the "
+                        "resume checkpoint: activation="
+                        f"{result['activation']}, manifest="
+                        f"{result['input_scale']:.9g}, checkpoint="
+                        f"{checkpoint_scale:.9g}")
+            configure_layerwise_tail_replay(manifest_results)
+            if rank == 0:
+                logging.info(
+                    "Restored rare-tail replay manifests for calibrated "
+                    "prefix: %s",
+                    ", ".join(calibrated_prefix))
     if should_calibrate_initial_group:
         if cfg.resume:
             pending_group_index = completed_herpn_groups

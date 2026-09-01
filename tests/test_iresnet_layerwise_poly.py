@@ -20,6 +20,7 @@ from utils.utils_layerwise_poly import (
     calibrated_conversion_prefix,
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
+    load_tail_replay_manifests,
     pending_group_requires_calibration,
 )
 
@@ -85,6 +86,39 @@ def test_containment_guard_selects_only_a_contiguous_training_prefix():
     with pytest.raises(ValueError, match="forward prefix"):
         calibrated_conversion_prefix(
             order, ("block1",), (("block1",),))
+
+
+def test_tail_replay_manifests_restore_a_calibrated_prefix(tmp_path):
+    for name, scale, indices in (
+            ("prelu", 2.4370887, [17, 3, 17]),
+            ("layer1.0.prelu", 4.25, [8, 9])):
+        path = tmp_path / ("tail_replay_" + name.replace(".", "_") + ".json")
+        path.write_text(json.dumps({
+            "activation": name,
+            "input_scale": scale,
+            "dataset_indices": indices,
+        }))
+
+    results = load_tail_replay_manifests(
+        tmp_path, ("prelu", "layer1.0.prelu"))
+
+    assert [result["activation"] for result in results] == [
+        "prelu", "layer1.0.prelu"]
+    assert results[0]["tail_indices"] == (17, 3, 17)
+    assert results[1]["input_scale"] == pytest.approx(4.25)
+
+
+def test_tail_replay_manifest_is_mandatory_and_checkpoint_scoped(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Missing tail replay manifest"):
+        load_tail_replay_manifests(tmp_path, ("prelu",))
+
+    (tmp_path / "tail_replay_prelu.json").write_text(json.dumps({
+        "activation": "wrong",
+        "input_scale": 2.0,
+        "dataset_indices": [1],
+    }))
+    with pytest.raises(ValueError, match="activation mismatch"):
+        load_tail_replay_manifests(tmp_path, ("prelu",))
 
 
 class _EasyDict(dict):
@@ -451,6 +485,23 @@ def test_r50_hard_containment_group02_uses_adaptive_half_epoch_probe():
     assert cfg.herpn_group_epochs[1] - 4.0 == pytest.approx(0.5)
     assert cfg.num_epoch == 6
     assert not cfg.herpn_require_full_conversion
+
+
+def test_r50_hard_containment_stem_recovery_is_a_half_epoch_probe():
+    stem_cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem.py")
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_stem_recovery.py")
+
+    assert cfg.resume
+    assert cfg.resume_rebase_lr_scheduler
+    assert cfg.output == stem_cfg.output
+    assert cfg.herpn_conversion_groups == stem_cfg.herpn_conversion_groups
+    assert cfg.layerwise_poly_training_group_limit == 1
+    assert cfg.herpn_transition_epochs == pytest.approx(0.5)
+    assert cfg.herpn_group_epochs[:2] == (2.5, 4.0)
+    assert cfg.herpn_group_epochs[0] - 2.0 == pytest.approx(0.5)
+    assert cfg.num_epoch == 4
 
 
 def test_r50_group4_config_is_stage_aligned_and_finishes_with_joint_tuning():
