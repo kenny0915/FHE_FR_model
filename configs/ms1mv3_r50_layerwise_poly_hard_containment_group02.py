@@ -12,12 +12,12 @@ the gate; its recovery config can move the blend boundary later.
 
 from easydict import EasyDict as edict
 
-from configs.ms1mv3_r50_layerwise_poly_hard_containment_stem import (
-    config as stem_config,
+from configs.ms1mv3_r50_layerwise_poly_hard_containment_stem_hardmax import (
+    config as stem_hardmax_config,
 )
 
 
-config = edict(stem_config.copy())
+config = edict(stem_hardmax_config.copy())
 config.resume = True
 config.resume_rebase_lr_scheduler = True
 
