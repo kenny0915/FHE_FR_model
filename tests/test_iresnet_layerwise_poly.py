@@ -21,6 +21,7 @@ from utils.utils_layerwise_poly import (
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
     load_tail_replay_manifests,
+    merge_tail_replay_indices,
     pending_group_requires_calibration,
     prioritized_tail_replay_indices,
 )
@@ -40,6 +41,21 @@ def test_full_containment_comparison_has_no_hidden_out_of_range_tolerance():
     assert not activation_range_is_contained(float("inf"), radius)
     with pytest.raises(ValueError, match="finite and positive"):
         activation_range_is_contained(0.0, 0.0)
+
+
+def test_tail_replay_prioritizes_explicit_and_deepest_new_rails():
+    merged = merge_tail_replay_indices(
+        existing_indices=(10, 11, 12),
+        result_tail_groups=((10, 20, 21), (30, 31, 20)),
+        extra_priority_indices=(99, 31),
+    )
+
+    assert merged == (99, 31, 30, 20, 10, 21, 11, 12)
+    assert prioritized_tail_replay_indices(
+        merged, priority_count=3, priority_repeats=2
+    )[:6] == (99, 99, 31, 31, 30, 30)
+    with pytest.raises(ValueError, match="non-negative integers"):
+        merge_tail_replay_indices((), ((1, -1),))
 
 
 def test_fractional_group_starts_trigger_once_at_half_epoch_boundary():
@@ -429,6 +445,27 @@ def test_containment_max_penalty_keeps_a_linear_worst_case_gradient():
     assert base_inputs.grad.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.5])
 
 
+def test_containment_guard_band_builds_headroom_without_misreporting_violations():
+    activation = LayerwisePolynomialActivation(
+        1,
+        degree=2,
+        range_penalty_mode="containment_max",
+        range_bulk_weight=0.0,
+        range_guard_ratio=0.98,
+    ).train()
+    activation.set_input_scale(2.0)
+    base_inputs = torch.tensor([1.90, 1.98, 2.04], requires_grad=True)
+
+    activation(base_inputs.reshape(3, 1, 1, 1))
+    penalty = activation.range_penalty()
+    penalty.backward()
+
+    # Penalty begins at 1.96, while the strict interval remains [-2, 2].
+    assert float(penalty.detach()) == pytest.approx((2.04 - 1.96) / 2.0)
+    assert base_inputs.grad.tolist() == pytest.approx([0.0, 0.0, 0.5])
+    assert activation.range_stats()["outside_fraction"] == pytest.approx(1 / 3)
+
+
 def test_containment_penalty_options_are_validated():
     with pytest.raises(ValueError, match="range_penalty_mode"):
         LayerwisePolynomialActivation(1, range_penalty_mode="unknown")
@@ -436,6 +473,8 @@ def test_containment_penalty_options_are_validated():
         LayerwisePolynomialActivation(1, range_topk_fraction=0.0)
     with pytest.raises(ValueError, match="range_bulk_weight"):
         LayerwisePolynomialActivation(1, range_bulk_weight=-1.0)
+    with pytest.raises(ValueError, match="range_guard_ratio"):
+        LayerwisePolynomialActivation(1, range_guard_ratio=0.0)
 
 
 def test_r50_config_converts_every_activation_singly_in_forward_order():
@@ -749,6 +788,17 @@ def test_group02_recovery_repeats_conditioning_without_widening_the_gate():
     assert recovery_cfg.herpn_group_epochs[:2] == (2.0, 5.0)
     assert recovery_cfg.herpn_transition_epochs == pytest.approx(1.0)
     assert recovery_cfg.num_epoch == 7
+
+
+def test_group02_guardband_prioritizes_migrated_rails_inside_fixed_interval():
+    cfg = _load_standalone_config(
+        "configs/ms1mv3_r50_layerwise_poly_hard_containment_group02_guardband.py")
+
+    assert cfg.layerwise_poly_freeze_containment_interval
+    assert cfg.layerwise_poly_range_guard_ratio == pytest.approx(0.98)
+    assert cfg.layerwise_poly_tail_replay_extra_indices == (3005115, 4498665)
+    assert cfg.herpn_group_epochs[:2] == (2.0, 5.0)
+    assert cfg.herpn_transition_epochs == pytest.approx(1.0)
 
 
 def test_r50_cheby8_config_uses_pretrained_checkpoint_and_saved_scales():

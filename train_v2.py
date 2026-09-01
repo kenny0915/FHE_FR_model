@@ -28,6 +28,7 @@ from utils.utils_layerwise_poly import (
     causally_calibrate_polynomial_group,
     fractional_group_starts_crossed,
     load_tail_replay_manifests,
+    merge_tail_replay_indices,
     pending_group_requires_calibration,
     prioritized_tail_replay_indices,
 )
@@ -1635,6 +1636,8 @@ def main(args):
                 cfg, "layerwise_poly_range_topk_fraction", 0.25)),
             layerwise_poly_range_bulk_weight=float(getattr(
                 cfg, "layerwise_poly_range_bulk_weight", 0.01)),
+            layerwise_poly_range_guard_ratio=float(getattr(
+                cfg, "layerwise_poly_range_guard_ratio", 1.0)),
             layerwise_poly_progress=float(getattr(
                 cfg, "herpn_initial_progress", 0.0)),
         )
@@ -2499,6 +2502,8 @@ def main(args):
         cfg, "layerwise_poly_tail_replay_priority_count", 0))
     layerwise_poly_tail_replay_priority_repeats = int(getattr(
         cfg, "layerwise_poly_tail_replay_priority_repeats", 1))
+    layerwise_poly_tail_replay_extra_indices = tuple(getattr(
+        cfg, "layerwise_poly_tail_replay_extra_indices", ()))
     layerwise_poly_staged_training = bool(getattr(
         cfg, "layerwise_poly_staged_training", False))
     layerwise_poly_freeze_backbone_during_local_fit = bool(getattr(
@@ -2555,6 +2560,12 @@ def main(args):
     if layerwise_poly_calibration_log_interval < 0:
         raise ValueError(
             "layerwise_poly_calibration_log_interval must be non-negative")
+    if any(
+            type(index) is not int or index < 0
+            for index in layerwise_poly_tail_replay_extra_indices):
+        raise ValueError(
+            "layerwise_poly_tail_replay_extra_indices must contain "
+            "non-negative integers")
     if layerwise_poly_tail_topk < 0:
         raise ValueError("layerwise_poly_tail_topk must be non-negative")
     if min(
@@ -3096,19 +3107,21 @@ def main(args):
         nonlocal layerwise_tail_replay_epoch
         if layerwise_poly_tail_replay_batch_size <= 0:
             return
+        result_tail_groups = tuple(
+            tuple(result.get("tail_indices", ())) for result in results)
         new_indices = tuple(dict.fromkeys(
-            index
-            for result in results
-            for index in result.get("tail_indices", ())
-        ))
+            index for group in result_tail_groups for index in group))
         if not new_indices:
             raise RuntimeError(
                 "Tail replay was enabled but calibration returned no indices")
         # A later singleton's provisional scan must not discard extrema from
         # the already accepted polynomial prefix.  Keep a stable union across
         # restored manifests and newly calibrated activations.
-        indices = tuple(dict.fromkeys(
-            (*layerwise_tail_replay_indices, *new_indices)))
+        indices = merge_tail_replay_indices(
+            layerwise_tail_replay_indices,
+            result_tail_groups,
+            layerwise_poly_tail_replay_extra_indices,
+        )
         replay_indices = prioritized_tail_replay_indices(
             indices,
             layerwise_poly_tail_replay_priority_count,

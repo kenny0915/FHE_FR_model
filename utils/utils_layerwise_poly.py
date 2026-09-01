@@ -147,6 +147,27 @@ def prioritized_tail_replay_indices(
     )
 
 
+def merge_tail_replay_indices(
+        existing_indices, result_tail_groups, extra_priority_indices=()):
+    """Order replay tails by current relevance while retaining old rails.
+
+    Calibration results follow model order, so the final group is the active
+    or deepest activation.  Put explicit rails first, then newer/deeper result
+    groups, and finally the persistent prefix history.  Stable de-duplication
+    keeps the most relevant occurrence and prevents an accepted early prefix
+    from monopolizing priority repeats for every later singleton.
+    """
+    groups = tuple(tuple(group) for group in result_tail_groups)
+    ordered = (
+        *tuple(extra_priority_indices),
+        *(index for group in reversed(groups) for index in group),
+        *tuple(existing_indices),
+    )
+    if any(type(index) is not int or index < 0 for index in ordered):
+        raise ValueError("tail replay indices must be non-negative integers")
+    return tuple(dict.fromkeys(ordered))
+
+
 def causally_calibrate_polynomial_group(
         module, activation_names, calibrate_one, verify_group):
     """Calibrate a forward-ordered group on its actual polynomial prefix.

@@ -112,7 +112,8 @@ class LayerwisePolynomialActivation(nn.Module):
                  distill_eps=1e-4, stage_index=0, blend=0.0,
                  range_penalty_mode="legacy",
                  range_topk_fraction=0.25,
-                 range_bulk_weight=0.01):
+                 range_bulk_weight=0.01,
+                 range_guard_ratio=1.0):
         super().__init__()
         if channels <= 0:
             raise ValueError("channels must be positive")
@@ -131,12 +132,15 @@ class LayerwisePolynomialActivation(nn.Module):
             raise ValueError("range_topk_fraction must be in (0, 1]")
         if float(range_bulk_weight) < 0.0:
             raise ValueError("range_bulk_weight must be non-negative")
+        if not 0.0 < float(range_guard_ratio) <= 1.0:
+            raise ValueError("range_guard_ratio must be in (0, 1]")
 
         self.degree = int(degree)
         self.stage_index = int(stage_index)
         self.range_penalty_mode = str(range_penalty_mode)
         self.range_topk_fraction = float(range_topk_fraction)
         self.range_bulk_weight = float(range_bulk_weight)
+        self.range_guard_ratio = float(range_guard_ratio)
         self.prelu = nn.PReLU(channels)
         self.prelu.weight.requires_grad = False
 
@@ -331,7 +335,10 @@ class LayerwisePolynomialActivation(nn.Module):
             if calibrated:
                 scale = self.input_scale.to(
                     device=x.device, dtype=compute_x.dtype)
-                excess = torch.relu(compute_x.abs() - scale)
+                absolute = compute_x.abs()
+                actual_excess = torch.relu(absolute - scale)
+                penalty_boundary = scale * self.range_guard_ratio
+                excess = torch.relu(absolute - penalty_boundary)
                 if self.range_penalty_mode in (
                         "containment_topk", "containment_max"):
                     # Normalize by the public approximation interval so the
@@ -345,7 +352,8 @@ class LayerwisePolynomialActivation(nn.Module):
                         # A linear L-infinity hinge does not dilute one rail
                         # pixel across samples and does not lose its gradient
                         # as a rare tail approaches the strict boundary.  It
-                        # is training-only and becomes exactly zero in range.
+                        # is training-only and becomes exactly zero inside the
+                        # configured guard band.
                         tail_penalty = sample_violation.amax()
                     else:
                         topk = max(
@@ -369,7 +377,7 @@ class LayerwisePolynomialActivation(nn.Module):
                     )
                 self._last_input_absmax = compute_x.detach().abs().amax()
                 self._last_outside_fraction = (
-                    (excess.detach() > 0).float().mean())
+                    (actual_excess.detach() > 0).float().mean())
             else:
                 zero = compute_x.sum() * 0.0
                 self._last_range_penalty = zero
@@ -458,6 +466,7 @@ class IResNet(_ProgressiveIResNet):
                  layerwise_poly_range_penalty_mode="legacy",
                  layerwise_poly_range_topk_fraction=0.25,
                  layerwise_poly_range_bulk_weight=0.01,
+                 layerwise_poly_range_guard_ratio=1.0,
                  layerwise_poly_progress=0.0, **kwargs):
         object.__setattr__(self, "layerwise_poly_degree", int(layerwise_poly_degree))
         object.__setattr__(
@@ -475,6 +484,9 @@ class IResNet(_ProgressiveIResNet):
         object.__setattr__(
             self, "layerwise_poly_range_bulk_weight",
             float(layerwise_poly_range_bulk_weight))
+        object.__setattr__(
+            self, "layerwise_poly_range_guard_ratio",
+            float(layerwise_poly_range_guard_ratio))
         super().__init__(
             *args, herpn_progress=float(layerwise_poly_progress), **kwargs)
 
@@ -487,6 +499,7 @@ class IResNet(_ProgressiveIResNet):
             range_penalty_mode=self.layerwise_poly_range_penalty_mode,
             range_topk_fraction=self.layerwise_poly_range_topk_fraction,
             range_bulk_weight=self.layerwise_poly_range_bulk_weight,
+            range_guard_ratio=self.layerwise_poly_range_guard_ratio,
             stage_index=_STAGE_NAMES.index(stage_name),
             blend=0.0,
         )

@@ -254,6 +254,26 @@ and holds for one epoch.  Its entry points are
 `configs/ms1mv3_r50_layerwise_poly_hard_containment_group02_recovery.py` and
 `scripts/slurm_train_r50_layerwise_poly_hard_containment_group02_recovery.sh`.
 
+One full conditioning epoch in recovery job `323542` did not solve that last
+rail: the strict maximum was `4.997492` (`ratio=1.002571`) and migrated again,
+this time to flipped source 3,005,115.  The two post-conditioning maxima are
+not among the initial top-512 manifest, and inspection found a replay-ordering
+bug: persistent stem indices preceded the pending group's indices, so the
+eight priority-repeat slots continued to favor stem rails.  Later singleton
+results now take priority over the older prefix while all prefix indices remain
+in the replay population.  Sources 3,005,115 and 4,498,665 are explicitly
+seeded from the two authoritative failed scans.
+
+The second recovery also adds a training-only guard band: the linear
+L-infinity hinge begins at `0.98*S` while the immutable approximation and
+acceptance interval remains exactly `S=4.984676`.  Values between `0.98*S`
+and `S` therefore continue receiving an inward gradient instead of handing
+the maximum to the next unconditioned source as soon as they cross the rail.
+This changes no inference operation or polynomial coefficient.  Reproducible
+entry points are
+`configs/ms1mv3_r50_layerwise_poly_hard_containment_group02_guardband.py` and
+`scripts/slurm_train_r50_layerwise_poly_hard_containment_group02_guardband.sh`.
+
 ### Pending authoritative gates
 
 - second singleton (`layer1.0.prelu`) provisional scan and immutable interval;
