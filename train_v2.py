@@ -45,6 +45,7 @@ from utils.utils_pillar import (
     pillar_task_loss_weight_at_epoch,
     pillar_validation_is_strict_at_epoch,
 )
+from utils.utils_tail_recovery import load_fixed_tail_replay_indices
 from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import fp16_compress_hook
 
 assert torch.__version__ >= "1.12.0", "In order to enjoy the features of the new torch, \
@@ -3111,6 +3112,74 @@ def main(args):
     layerwise_tail_replay_loader = None
     layerwise_tail_replay_iterator = None
     layerwise_tail_replay_epoch = 0
+    fixed_tail_replay_loader = None
+    fixed_tail_replay_iterator = None
+    fixed_tail_replay_epoch = 0
+
+    fixed_tail_replay_file = str(getattr(
+        cfg, "fixed_tail_replay_file", ""))
+    fixed_tail_replay_batch_size = int(getattr(
+        cfg, "fixed_tail_replay_batch_size", 0))
+    fixed_tail_replay_workers = int(getattr(
+        cfg, "fixed_tail_replay_workers", 0))
+    fixed_tail_replay_priority_count = int(getattr(
+        cfg, "fixed_tail_replay_priority_count", 0))
+    fixed_tail_replay_priority_repeats = int(getattr(
+        cfg, "fixed_tail_replay_priority_repeats", 1))
+    if fixed_tail_replay_file:
+        if fixed_tail_replay_batch_size <= 0:
+            raise ValueError(
+                "fixed_tail_replay_file requires a positive replay batch size")
+        fixed_indices = load_fixed_tail_replay_indices(
+            fixed_tail_replay_file)
+        replay_indices = prioritized_tail_replay_indices(
+            fixed_indices,
+            fixed_tail_replay_priority_count,
+            fixed_tail_replay_priority_repeats,
+        )
+        fixed_subset = Subset(train_loader.dataset, replay_indices)
+        fixed_sampler = TorchDistributedSampler(
+            fixed_subset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=int(cfg.seed),
+            drop_last=False,
+        )
+        fixed_tail_replay_loader = DataLoader(
+            fixed_subset,
+            batch_size=fixed_tail_replay_batch_size,
+            sampler=fixed_sampler,
+            num_workers=fixed_tail_replay_workers,
+            pin_memory=True,
+            drop_last=False,
+            worker_init_fn=train_loader.worker_init_fn,
+        )
+        fixed_sampler.set_epoch(0)
+        fixed_tail_replay_iterator = iter(fixed_tail_replay_loader)
+        if rank == 0:
+            logging.info(
+                "Configured fixed hard-tail replay: unique_indices=%d "
+                "weighted_entries=%d priority_count=%d priority_repeats=%d "
+                "batch_size_per_rank=%d manifest=%s",
+                len(fixed_indices), len(replay_indices),
+                min(fixed_tail_replay_priority_count, len(fixed_indices)),
+                fixed_tail_replay_priority_repeats,
+                fixed_tail_replay_batch_size, fixed_tail_replay_file)
+
+    def next_fixed_tail_replay_batch():
+        nonlocal fixed_tail_replay_iterator
+        nonlocal fixed_tail_replay_epoch
+        if fixed_tail_replay_loader is None:
+            return None
+        try:
+            return next(fixed_tail_replay_iterator)
+        except StopIteration:
+            fixed_tail_replay_epoch += 1
+            fixed_tail_replay_loader.sampler.set_epoch(
+                fixed_tail_replay_epoch)
+            fixed_tail_replay_iterator = iter(fixed_tail_replay_loader)
+            return next(fixed_tail_replay_iterator)
 
     def configure_layerwise_tail_replay(results):
         """Build a distributed replay stream from calibration extrema."""
@@ -4115,6 +4184,22 @@ def main(args):
                     )
                 )
             )
+            if fixed_tail_replay_loader is not None:
+                replay_batch = next_fixed_tail_replay_batch()
+                replay_img, replay_labels = replay_batch[:2]
+                replay_count = min(
+                    int(img.shape[0]), int(replay_img.shape[0]))
+                if replay_count > 0:
+                    img = img.clone()
+                    local_labels = local_labels.clone()
+                    img[:replay_count].copy_(replay_img[:replay_count].to(
+                        device=img.device, dtype=img.dtype,
+                        non_blocking=True))
+                    local_labels[:replay_count].copy_(
+                        replay_labels[:replay_count].to(
+                            device=local_labels.device,
+                            dtype=local_labels.dtype,
+                            non_blocking=True))
             if replay_layerwise_tails:
                 replay_batch = next_layerwise_tail_replay_batch()
                 replay_img, replay_labels = replay_batch[:2]
