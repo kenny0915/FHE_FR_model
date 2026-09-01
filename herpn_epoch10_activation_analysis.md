@@ -1,4 +1,4 @@
-# Epoch-10 eight-HerPN activation analysis and ninth-site plan
+# Epoch-10 eight-HerPN activation analysis and accepted ninth replacement
 
 ## Conclusion
 
@@ -9,9 +9,13 @@ failure is a rare-tail distribution shift: epoch 11 updates the already
 quadratic Layer2 prefix, one rare face leaves its normal range, and four new
 Layer3 quadratics turn that finite tail into a repeated-square overflow.
 
-The next experiment therefore preserves the eight accepted legacy quadratics
-exactly and adds only the terminal `layer4.2.prelu` as a scaled, PReLU-aware
-quadratic. It does not continue the failed four-at-once forward schedule.
+The successful extension preserves the eight accepted legacy quadratics
+exactly and replaces `layer3.9.prelu` with the global channel-wise degree-one
+polynomial `a_c*x`, where `a_c` is its frozen PReLU negative-branch slope.
+Suffix-only embedding distillation recovers the accuracy without changing the
+nine activation functions or the numerically fragile prefix. The accepted
+checkpoint reaches 94.69755% IJB-C TAR at FAR approximately `1e-4`, only
+0.48245 percentage point below epoch 10, with all evaluated embeddings finite.
 
 ## Evidence
 
@@ -304,6 +308,45 @@ gate. The saved step-1500 state is evaluated once, while a separate continuation
 starts from step 1000 at a 10x smaller learning rate to search the narrow
 recovery region without the observed CFP-FP overshoot.
 
+### Accepted ninth-replacement result
+
+Step 1500 of the first recovery reached 94.68221% on the exact ROC operating
+point. A continuation from step 1000 at `3e-5` learning rate then produced:
+
+| checkpoint | LFW | CFP-FP | AgeDB | exact IJB-C TAR | selected FPR |
+|---|---:|---:|---:|---:|---:|
+| low-LR step 250 | 99.750% | 97.843% | 97.433% | 94.68221% | 0.0001003905 |
+| low-LR step 500 | 99.750% | 97.857% | 97.400% | **94.69755%** | 0.0001001347 |
+
+Both IJB score vectors contain 15,658,489 finite pair scores. The selected
+step-500 run processed the complete 469,375-image IJB-C source set in both
+orientations with zero non-finite embeddings. Relative to the epoch-10
+95.18% baseline, its exact loss is 0.48245 percentage point, so it passes the
+predeclared 0.50-point gate by 0.01755 point.
+
+The accepted inference checkpoint is:
+
+```text
+work_dirs/ms1mv3_r50_herpn_epoch10_linear9_layer3_9_low_lr/model_step_00500.pt
+sha256 9b250a23cb546d6f54d97aab3f7584934307e603a04e74c96a4edcbe080edab1
+```
+
+A strict CPU reload confirms all state tensors are finite, all keys match,
+exactly nine of 25 progressive activations have blend 1, and none is partial.
+The converted names are the stem, all three Layer1 sites, all four Layer2
+sites, and `layer3.9.prelu`. At the ninth site the stored linear weight equals
+the frozen PReLU slope exactly, the bias is zero, and both are frozen. It never
+evaluates `x.square()`, so the ninth replacement adds no activation
+multiplication level; only the original eight degree-two activations contribute
+nonlinear multiplicative depth.
+
+The recovery did encounter the already documented source-prefix overflow on
+one MS1M training batch at step 641 and synchronously skipped that optimization
+step. This is not used to relax inference: all three verification sets and the
+complete IJB-C run retain a zero-tolerance finite gate. The checkpoint is
+therefore accepted over the measured natural inference domain, not claimed to
+make the old eight-quadratic prefix globally bounded.
+
 ## Acceptance gates and next replacement
 
 The ninth site is accepted only if:
@@ -315,8 +358,9 @@ The ninth site is accepted only if:
 - IJB-C TAR at FAR `1e-4` is at least 94.68%, no more than 0.50 percentage point
   below the 95.18% epoch-10 baseline.
 
-If numerical safety passes but accuracy does not, recover the fixed nine-site
-graph before attempting another conversion. If both pass, screen each
-remaining zero-blend site on the accepted nine-site graph and choose the next
-site by full-boundary tail and embedding-cosine shock; do not assume forward
-order is optimal.
+The ninth site passes these gates. For a tenth replacement, use this selected
+step-500 checkpoint as the immutable baseline. Screen each of the remaining
+16 zero-blend sites independently with the same globally tail-safe degree-one
+candidate, then rank by complete validation accuracy, known RecordIO-tail
+growth, and embedding-cosine shock. Do not resume the old four-at-once forward
+schedule or assume network order predicts replacement safety.
