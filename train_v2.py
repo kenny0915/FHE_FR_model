@@ -1581,6 +1581,8 @@ def main(args):
                     cfg, "herpn_training_stabilization_limit", None),
                 herpn_training_stabilization_names=tuple(getattr(
                     cfg, "herpn_training_stabilization_names", ())),
+                herpn_independent_basis_scales=bool(getattr(
+                    cfg, "herpn_independent_basis_scales", False)),
             )
         if cfg.network.endswith("_prelu_herpn"):
             model_kwargs["prelu_herpn_distill_eps"] = float(getattr(
@@ -2297,6 +2299,8 @@ def main(args):
     herpn_transition_epochs = float(getattr(cfg, "herpn_transition_epochs", 1.0))
     herpn_range_loss_weight = float(getattr(cfg, "herpn_range_loss_weight", 0.0))
     herpn_distill_loss_weight = float(getattr(cfg, "herpn_distill_loss_weight", 0.0))
+    herpn_basis_anchor_loss_weight = float(getattr(
+        cfg, "herpn_basis_anchor_loss_weight", 0.0))
     herpn_range_loss_names = tuple(str(name) for name in getattr(
         cfg, "herpn_range_loss_names", ()))
     herpn_bn_recalibration_batches = int(
@@ -2309,6 +2313,15 @@ def main(args):
     herpn_enabled = (
         hasattr(backbone.module, "set_herpn_progress")
         and not pillar_enabled)
+    if herpn_basis_anchor_loss_weight < 0.0:
+        raise ValueError(
+            "herpn_basis_anchor_loss_weight must be non-negative")
+    if (herpn_basis_anchor_loss_weight > 0.0
+            and not bool(getattr(
+                cfg, "herpn_independent_basis_scales", False))):
+        raise ValueError(
+            "herpn_basis_anchor_loss_weight requires an independent-basis "
+            "HerPN backbone")
     pillar_target_coefficient = float(getattr(
         cfg, "pillar_regularization_coefficient", 0.0))
     pillar_target_exponent = int(getattr(
@@ -4399,6 +4412,7 @@ def main(args):
                 loss = loss * pillar_task_loss_weight
             range_penalty = local_embeddings.new_zeros(())
             distillation_loss = local_embeddings.new_zeros(())
+            basis_anchor_loss = local_embeddings.new_zeros(())
             simple_gate_range_penalty = local_embeddings.new_zeros(())
             simple_gate_distillation_loss = local_embeddings.new_zeros(())
             nf_range_penalty = local_embeddings.new_zeros(())
@@ -4469,6 +4483,15 @@ def main(args):
                     else herpn_range_loss_weight
                 )
                 loss = loss + effective_range_loss_weight * range_penalty
+            if herpn_enabled and herpn_basis_anchor_loss_weight > 0.0:
+                basis_anchor_loss = (
+                    backbone.module.herpn_basis_anchor_loss())
+                if not torch.isfinite(basis_anchor_loss):
+                    raise FloatingPointError(
+                        "Non-finite HerPN basis anchor loss at "
+                        f"global_step={global_step}")
+                loss = loss + (
+                    herpn_basis_anchor_loss_weight * basis_anchor_loss)
             if (precise_relu_enabled
                     and precise_relu_range_loss_weight > 0.0):
                 precise_relu_range_penalty = (
@@ -4922,6 +4945,7 @@ def main(args):
                         'Loss/Train Loss': loss_am.avg,
                         'Loss/HerPN Range Penalty': range_penalty.item(),
                         'Loss/HerPN Distillation': distillation_loss.item(),
+                        'Loss/HerPN Basis Anchor': basis_anchor_loss.item(),
                         'Loss/SimpleGate Range Penalty': (
                             simple_gate_range_penalty.item()),
                         'Loss/SimpleGate Distillation': (
@@ -5007,6 +5031,9 @@ def main(args):
                         'Loss/HerPN Range Penalty', range_penalty.item(), global_step)
                     summary_writer.add_scalar(
                         'Loss/HerPN Distillation', distillation_loss.item(), global_step)
+                    summary_writer.add_scalar(
+                        'Loss/HerPN Basis Anchor',
+                        basis_anchor_loss.item(), global_step)
                     summary_writer.add_scalar(
                         'Process/HerPN Progress',
                         float(backbone.module.herpn_progress.item()), global_step)

@@ -178,6 +178,8 @@ def main():
         herpn_range_limit=float(getattr(cfg, "herpn_range_limit", 6.0)),
         herpn_bn_eps=float(getattr(cfg, "herpn_bn_eps", 1e-4)),
         herpn_progress=5.0,
+        herpn_independent_basis_scales=bool(getattr(
+            cfg, "herpn_independent_basis_scales", False)),
     ).to(device)
     state = torch.load(args.checkpoint, map_location="cpu")
     if isinstance(state, dict) and isinstance(state.get("state_dict_backbone"), dict):

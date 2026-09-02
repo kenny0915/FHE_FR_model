@@ -59,13 +59,22 @@ class HerPN(nn.Module):
     exactly a channel-wise quadratic A*x^2 + B*x + C at inference time.
     """
 
-    def __init__(self, channels, eps=1e-5):
+    def __init__(self, channels, eps=1e-5,
+                 independent_basis_scales=False):
         super().__init__()
         self.bn0 = nn.BatchNorm2d(channels, eps=eps, affine=False)
         self.bn1 = nn.BatchNorm2d(channels, eps=eps, affine=False)
         self.bn2 = nn.BatchNorm2d(channels, eps=eps, affine=False)
         self.weight = nn.Parameter(torch.ones(channels, 1, 1))
         self.bias = nn.Parameter(torch.zeros(channels, 1, 1))
+        if independent_basis_scales:
+            # Start at the exact legacy HerPN function while allowing H0, H1,
+            # and H2 to move independently during numerical recovery.  This
+            # remains a channel-wise degree-2 polynomial after BN folding.
+            self.basis_scale = nn.Parameter(
+                torch.ones(3, channels, 1, 1))
+        else:
+            self.register_parameter('basis_scale', None)
 
     def forward(self, x):
         compute_dtype = (
@@ -77,10 +86,15 @@ class HerPN(nn.Module):
         x0 = self.bn0(torch.ones_like(compute_x))
         x1 = self.bn1(compute_x)
         x2 = self.bn2((compute_x.square() - 1.0) / math.sqrt(2.0))
+        if self.basis_scale is None:
+            scale0 = scale1 = scale2 = 1.0
+        else:
+            scales = self.basis_scale.to(dtype=compute_dtype)
+            scale0, scale1, scale2 = scales.unbind(dim=0)
         basis = (
-            x0 / math.sqrt(2.0 * math.pi)
-            + x1 / 2.0
-            + x2 / math.sqrt(4.0 * math.pi)
+            scale0 * x0 / math.sqrt(2.0 * math.pi)
+            + scale1 * x1 / 2.0
+            + scale2 * x2 / math.sqrt(4.0 * math.pi)
         )
         out = self.weight.to(dtype=compute_dtype) * basis
         out = out + self.bias.to(dtype=compute_dtype)
@@ -97,14 +111,23 @@ class HerPN(nn.Module):
         mean2, var2 = self.bn2.running_mean, self.bn2.running_var
         weight = self.weight.squeeze(-1).squeeze(-1)
         bias = self.bias.squeeze(-1).squeeze(-1)
+        if self.basis_scale is None:
+            scale0 = scale1 = scale2 = torch.ones_like(weight)
+        else:
+            scale0, scale1, scale2 = (
+                self.basis_scale.squeeze(-1).squeeze(-1).unbind(dim=0))
         eps0, eps1, eps2 = self.bn0.eps, self.bn1.eps, self.bn2.eps
 
-        coefficient2 = weight / torch.sqrt(8.0 * math.pi * (var2 + eps2))
-        coefficient1 = weight / (2.0 * torch.sqrt(var1 + eps1))
+        coefficient2 = (
+            weight * scale2
+            / torch.sqrt(8.0 * math.pi * (var2 + eps2)))
+        coefficient1 = (
+            weight * scale1 / (2.0 * torch.sqrt(var1 + eps1)))
         coefficient0 = bias + weight * (
-            (1.0 - mean0) / torch.sqrt(2.0 * math.pi * (var0 + eps0))
-            - mean1 / (2.0 * torch.sqrt(var1 + eps1))
-            - (1.0 + math.sqrt(2.0) * mean2)
+            scale0 * (1.0 - mean0)
+            / torch.sqrt(2.0 * math.pi * (var0 + eps0))
+            - scale1 * mean1 / (2.0 * torch.sqrt(var1 + eps1))
+            - scale2 * (1.0 + math.sqrt(2.0) * mean2)
             / torch.sqrt(8.0 * math.pi * (var2 + eps2))
         )
         return tuple(
@@ -147,7 +170,8 @@ class ProgressiveHerPNActivation(nn.Module):
                  stage_index=0, blend=1.0,
                  range_penalty_mode='legacy', range_topk_fraction=0.001,
                  range_bulk_weight=0.01,
-                 training_stabilization_limit=None):
+                 training_stabilization_limit=None,
+                 independent_basis_scales=False):
         super().__init__()
         if range_limit <= 0:
             raise ValueError('range_limit must be positive')
@@ -163,7 +187,11 @@ class ProgressiveHerPNActivation(nn.Module):
             raise ValueError(
                 'training_stabilization_limit must be positive or None')
         self.prelu = nn.PReLU(channels)
-        self.herpn = HerPN(channels, eps=bn_eps)
+        self.herpn = HerPN(
+            channels,
+            eps=bn_eps,
+            independent_basis_scales=independent_basis_scales,
+        )
         self.stage_index = int(stage_index)
         self.register_buffer('blend', torch.tensor(float(blend), dtype=torch.float32))
         self.register_buffer(
@@ -220,6 +248,14 @@ class ProgressiveHerPNActivation(nn.Module):
                 full_key = prefix + local_key
                 if full_key not in state_dict:
                     state_dict[full_key] = value.detach()
+        elif self.herpn.basis_scale is not None:
+            # A fully converted legacy checkpoint has complete HerPN state but
+            # predates the optional independent basis scales.  Ones preserve
+            # that checkpoint's function exactly.  Do not fill any other key,
+            # so strict loading still detects partially written checkpoints.
+            basis_key = prefix + 'herpn.basis_scale'
+            if basis_key not in state_dict:
+                state_dict[basis_key] = self.herpn.basis_scale.detach()
 
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict,
@@ -350,7 +386,8 @@ class IResNet(nn.Module):
                  herpn_range_topk_fraction=0.001,
                  herpn_range_bulk_weight=0.01,
                  herpn_training_stabilization_limit=None,
-                 herpn_training_stabilization_names=()):
+                 herpn_training_stabilization_names=(),
+                 herpn_independent_basis_scales=False):
         super(IResNet, self).__init__()
         self.extra_gflops = 0.0
         self.fp16 = fp16
@@ -366,6 +403,8 @@ class IResNet(nn.Module):
             else float(herpn_training_stabilization_limit))
         self.herpn_training_stabilization_names = tuple(
             herpn_training_stabilization_names)
+        self.herpn_independent_basis_scales = bool(
+            herpn_independent_basis_scales)
         self.register_buffer(
             'herpn_progress', torch.tensor(float(herpn_progress), dtype=torch.float32),
             persistent=False)
@@ -430,6 +469,7 @@ class IResNet(nn.Module):
             range_topk_fraction=self.herpn_range_topk_fraction,
             range_bulk_weight=self.herpn_range_bulk_weight,
             training_stabilization_limit=None,
+            independent_basis_scales=self.herpn_independent_basis_scales,
         )
 
     def _make_layer(self, block, planes, blocks, stride=1, dilate=False,
@@ -542,6 +582,18 @@ class IResNet(nn.Module):
         if not losses:
             return next(self.parameters()).new_zeros(())
         return torch.stack(losses).mean()
+
+    def herpn_basis_anchor_loss(self, activation_names=None):
+        """Penalize drift of optional H0/H1/H2 scales from legacy HerPN."""
+        scales = [activation.herpn.basis_scale
+                  for activation in self._selected_progressive_activations(
+                      activation_names)]
+        scales = [scale for scale in scales if scale is not None]
+        if not scales:
+            return next(self.parameters()).new_zeros(())
+        return torch.stack([
+            (scale - 1.0).square().mean() for scale in scales
+        ]).mean()
 
     def herpn_range_stats(self):
         stats = {}
