@@ -127,12 +127,14 @@ def test_grouped_joint_recovery_separates_optimizer_scale_and_clipping():
 
 def test_tensor_joint_recovery_updates_every_tensor_with_sparse_replay():
     assert (tensor_recovery_config.backbone_trainable_prefixes
-            == joint_recovery_config.backbone_trainable_prefixes)
+            == (*joint_recovery_config.backbone_trainable_prefixes, "fc"))
     assert tensor_recovery_config.optimizer == "adamw"
     assert tensor_recovery_config.lr == pytest.approx(1e-7)
     assert tensor_recovery_config.herpn_lr_multiplier == pytest.approx(10.0)
     assert (tensor_recovery_config.conv_herpn_gradient_clip_granularity
             == "tensor")
+    assert tensor_recovery_config.other_backbone_gradient_clip == pytest.approx(
+        1.0)
     assert tensor_recovery_config.fixed_tail_replay_batch_size == 4
     assert tensor_recovery_config.fixed_tail_replay_interval == 8
     average_tail_fraction = (

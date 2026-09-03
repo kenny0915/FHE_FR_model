@@ -1951,23 +1951,13 @@ def main(args):
         if not conv_herpn_parameters["herpn"]:
             raise ValueError(
                 "split_conv_herpn_optimizer selected no HerPN tensors")
-        if conv_herpn_parameters["other"]:
-            other_ids = {
-                id(parameter) for parameter in conv_herpn_parameters["other"]}
-            other_names = [
-                name for name, parameter in backbone.module.named_parameters()
-                if id(parameter) in other_ids
-            ]
-            raise ValueError(
-                "split_conv_herpn_optimizer requires every trainable backbone "
-                "tensor to be Conv or HerPN; unexpected tensors: "
-                + ", ".join(other_names))
         logging.info(
             "Split Conv/HerPN optimizer: conv_tensors=%d lr=%g, "
-            "herpn_tensors=%d lr=%g",
+            "herpn_tensors=%d lr=%g, other_backbone_tensors=%d lr=%g",
             len(conv_herpn_parameters["conv"]), cfg.lr,
             len(conv_herpn_parameters["herpn"]),
             cfg.lr * herpn_lr_multiplier,
+            len(conv_herpn_parameters["other"]), cfg.lr,
         )
 
     if cryptoface_patch_training:
@@ -2022,6 +2012,12 @@ def main(args):
                     "weight_decay": 0.0,
                     "scope": "herpn",
                 },
+                *([{
+                    "params": conv_herpn_parameters["other"],
+                    "lr": cfg.lr,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "other_backbone",
+                }] if conv_herpn_parameters["other"] else []),
                 {
                     "params": module_partial_fc.parameters(),
                     "lr": cfg.lr,
@@ -2113,6 +2109,12 @@ def main(args):
                     "weight_decay": 0.0,
                     "scope": "herpn",
                 },
+                *([{
+                    "params": conv_herpn_parameters["other"],
+                    "lr": cfg.lr,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "other_backbone",
+                }] if conv_herpn_parameters["other"] else []),
                 {
                     "params": module_partial_fc.parameters(),
                     "lr": cfg.lr,
@@ -2394,6 +2396,8 @@ def main(args):
             cfg, "conv_gradient_clip", grad_clip))
         herpn_gradient_clip = float(getattr(
             cfg, "herpn_gradient_clip", grad_clip))
+        other_backbone_gradient_clip = float(getattr(
+            cfg, "other_backbone_gradient_clip", conv_gradient_clip))
         gradient_clip_granularity = str(getattr(
             cfg, "conv_herpn_gradient_clip_granularity", "group"))
         if gradient_clip_granularity not in ("group", "tensor"):
@@ -2413,6 +2417,8 @@ def main(args):
                      conv_gradient_clip),
                     ("herpn", conv_herpn_parameters["herpn"],
                      herpn_gradient_clip),
+                    ("other", conv_herpn_parameters["other"],
+                     other_backbone_gradient_clip),
                 )
                 for parameter in parameters
             }
@@ -2422,21 +2428,31 @@ def main(args):
                     conv_herpn_parameters["conv"], conv_gradient_clip),
                 "herpn": (
                     conv_herpn_parameters["herpn"], herpn_gradient_clip),
+                **({
+                    "other": (
+                        conv_herpn_parameters["other"],
+                        other_backbone_gradient_clip),
+                } if conv_herpn_parameters["other"] else {}),
             }
         # Validate group contents and limits before the first backward pass.
-        if conv_gradient_clip <= 0.0 or herpn_gradient_clip <= 0.0:
+        if (conv_gradient_clip <= 0.0 or herpn_gradient_clip <= 0.0
+                or other_backbone_gradient_clip <= 0.0):
             raise ValueError(
-                "conv_gradient_clip and herpn_gradient_clip must be positive")
+                "Conv, HerPN, and other-backbone gradient clips must be "
+                "positive")
         clipped_params = []
         if rank == 0:
             logging.info(
                 "Separate gradient clipping (%s): conv max=%g tensors=%d; "
-                "herpn max=%g tensors=%d; norm_groups=%d",
+                "herpn max=%g tensors=%d; other max=%g tensors=%d; "
+                "norm_groups=%d",
                 gradient_clip_granularity,
                 conv_gradient_clip,
                 len(conv_herpn_parameters["conv"]),
                 herpn_gradient_clip,
                 len(conv_herpn_parameters["herpn"]),
+                other_backbone_gradient_clip,
+                len(conv_herpn_parameters["other"]),
                 len(gradient_clip_groups),
             )
     else:
@@ -2474,7 +2490,7 @@ def main(args):
                 f"{name}={float(norm.item()):.6g}"
                 for name, norm in group_norms.items())
         summaries = []
-        for family in ("conv", "herpn"):
+        for family in ("conv", "herpn", "other"):
             norms = [
                 norm for name, norm in group_norms.items()
                 if name.startswith(family + ":")

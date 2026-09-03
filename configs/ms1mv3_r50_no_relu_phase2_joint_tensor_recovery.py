@@ -22,6 +22,13 @@ config.output = (
     "work_dirs/"
     "ms1mv3_r50_herpn_full_conversion_phase2_joint_tensor_recovery")
 
+# The parent selects every Conv and HerPN tensor.  Include the final embedding
+# projection as well, leaving only BatchNorm and the dormant PReLU path frozen.
+config.backbone_trainable_prefixes = (
+    *config.backbone_trainable_prefixes,
+    "fc",
+)
+
 # AdamW's per-element state makes updates representable even when a tensor's
 # gradient is much smaller than another tensor in the same stage.  Gradients
 # are clipped before Adam moments are accumulated, preventing FP32 v overflow.
@@ -31,6 +38,7 @@ config.herpn_lr_multiplier = 10.0
 config.conv_herpn_gradient_clip_granularity = "tensor"
 config.conv_gradient_clip = 1.0
 config.herpn_gradient_clip = 0.1
+config.other_backbone_gradient_clip = 1.0
 config.weight_decay = 1e-5
 
 # Four exact orientations per rank every eighth update average 0.39% of the
