@@ -10,6 +10,9 @@ from configs.ms1mv3_r50_no_relu_phase2_hard_tail_recovery import (
 from configs.ms1mv3_r50_no_relu_phase2_joint_recovery import (
     config as joint_recovery_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_joint_grouped_recovery import (
+    config as grouped_recovery_config,
+)
 from utils.utils_tail_recovery import (
     load_fixed_tail_replay_indices,
     load_fixed_tail_replay_orientations,
@@ -102,3 +105,18 @@ def test_joint_recovery_trains_all_convs_and_all_25_polynomials():
     assert joint_recovery_config.freeze_batchnorm_affine
     assert joint_recovery_config.fixed_tail_replay_orientations_key == (
         "output_nonfinite")
+
+
+def test_grouped_joint_recovery_separates_optimizer_scale_and_clipping():
+    assert (grouped_recovery_config.backbone_trainable_prefixes
+            == joint_recovery_config.backbone_trainable_prefixes)
+    assert (grouped_recovery_config.herpn_range_loss_names
+            == joint_recovery_config.herpn_range_loss_names)
+    assert grouped_recovery_config.split_conv_herpn_optimizer
+    assert grouped_recovery_config.separate_conv_herpn_gradient_clip
+    assert grouped_recovery_config.lr == pytest.approx(1e-6)
+    assert grouped_recovery_config.herpn_lr_multiplier == pytest.approx(10.0)
+    assert grouped_recovery_config.conv_gradient_clip == pytest.approx(1.0)
+    assert grouped_recovery_config.herpn_gradient_clip == pytest.approx(0.1)
+    assert grouped_recovery_config.freeze_batchnorm_running_stats
+    assert grouped_recovery_config.freeze_batchnorm_affine

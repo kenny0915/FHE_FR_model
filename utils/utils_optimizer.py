@@ -78,6 +78,46 @@ def split_weight_decay_parameters(module):
     return decay, no_decay
 
 
+def split_trainable_conv_herpn_parameters(module):
+    """Partition trainable tensors into Conv, HerPN, and other groups.
+
+    HerPN parameters are collected only from the activation module itself, so
+    the dormant PReLU branch and the three frozen normalization modules cannot
+    enter the polynomial optimizer group accidentally.
+    """
+    conv_ids = {
+        id(parameter)
+        for submodule in module.modules()
+        if isinstance(submodule, nn.Conv2d)
+        for parameter in submodule.parameters(recurse=False)
+        if parameter.requires_grad
+    }
+    herpn_ids = {
+        id(parameter)
+        for submodule in module.modules()
+        if submodule.__class__.__name__ == "HerPN"
+        for parameter in submodule.parameters(recurse=False)
+        if parameter.requires_grad
+    }
+    overlap = conv_ids.intersection(herpn_ids)
+    if overlap:
+        raise ValueError("Conv and HerPN parameter groups overlap")
+
+    groups = {"conv": [], "herpn": [], "other": []}
+    seen = set()
+    for parameter in module.parameters():
+        if not parameter.requires_grad or id(parameter) in seen:
+            continue
+        seen.add(id(parameter))
+        if id(parameter) in conv_ids:
+            groups["conv"].append(parameter)
+        elif id(parameter) in herpn_ids:
+            groups["herpn"].append(parameter)
+        else:
+            groups["other"].append(parameter)
+    return groups
+
+
 def select_gradient_clip_parameters(optimizer, backbone, scope="all"):
     """Select the parameters controlled by the configured gradient clip.
 
@@ -219,3 +259,46 @@ def clip_grad_norm_stable(parameters, max_norm, error_if_nonfinite=False):
         gradient.mul_(clip_coefficient.to(
             device=gradient.device, dtype=gradient.dtype))
     return total_norm
+
+
+def clip_grad_norm_stable_groups(parameter_groups,
+                                 error_if_nonfinite=False):
+    """Independently clip named groups and return their pre-clip norms.
+
+    ``parameter_groups`` maps each group name to ``(parameters, max_norm)``.
+    A separate coefficient is applied to every group, preventing an extreme
+    convolution gradient from shrinking polynomial gradients (or vice versa).
+    The returned total is diagnostic only: it is the L2 norm of all pre-clip
+    group norms and does not drive a second global clip.
+    """
+    if not parameter_groups:
+        raise ValueError("At least one gradient group is required")
+
+    normalized_groups = {}
+    device = None
+    for name, (parameters, max_norm) in parameter_groups.items():
+        parameters = list(parameters)
+        if not parameters:
+            raise ValueError(f"Gradient group {name!r} has no parameters")
+        if float(max_norm) <= 0.0:
+            raise ValueError(
+                f"Gradient group {name!r} max_norm must be positive")
+        group_device = parameters[0].device
+        if device is None:
+            device = group_device
+        elif group_device != device:
+            raise ValueError(
+                "Stable grouped norm clipping requires one parameter device")
+        normalized_groups[str(name)] = (parameters, float(max_norm))
+
+    group_norms = {
+        name: clip_grad_norm_stable(
+            parameters,
+            max_norm=max_norm,
+            error_if_nonfinite=error_if_nonfinite,
+        ).to(device=device, dtype=torch.float64)
+        for name, (parameters, max_norm) in normalized_groups.items()
+    }
+    total_norm = torch.linalg.vector_norm(
+        torch.stack(tuple(group_norms.values())), ord=2, dtype=torch.float64)
+    return total_norm, group_norms

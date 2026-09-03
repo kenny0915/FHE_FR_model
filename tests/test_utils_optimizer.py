@@ -3,9 +3,11 @@ import pytest
 
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
+    clip_grad_norm_stable_groups,
     nonfinite_gradient_diagnostics,
     nonfinite_gradient_tensor_count,
     select_gradient_clip_parameters,
+    split_trainable_conv_herpn_parameters,
     temporary_optimizer_lr_scale,
 )
 
@@ -64,6 +66,52 @@ def test_stable_gradient_clip_handles_finite_fp32_norm_overflow():
     assert total_norm.item() == pytest.approx(2 ** 0.5 * 1e30, rel=1e-6)
     assert torch.linalg.vector_norm(parameter.grad).item() == pytest.approx(
         1.0, rel=1e-6)
+
+
+def test_stable_group_clipping_keeps_conv_and_herpn_independent():
+    conv = torch.nn.Parameter(torch.zeros(2))
+    herpn = torch.nn.Parameter(torch.zeros(2))
+    conv.grad = torch.tensor([1e30, -1e30])
+    herpn.grad = torch.tensor([3.0, 4.0])
+
+    total_norm, group_norms = clip_grad_norm_stable_groups({
+        "conv": ([conv], 1.0),
+        "herpn": ([herpn], 0.1),
+    }, error_if_nonfinite=True)
+
+    assert torch.isfinite(total_norm)
+    assert group_norms["conv"].item() == pytest.approx(
+        2 ** 0.5 * 1e30, rel=1e-6)
+    assert group_norms["herpn"].item() == pytest.approx(5.0)
+    assert torch.linalg.vector_norm(conv.grad).item() == pytest.approx(
+        1.0, rel=1e-6)
+    assert torch.linalg.vector_norm(herpn.grad).item() == pytest.approx(
+        0.1, rel=1e-6)
+
+
+def test_trainable_conv_herpn_partition_reports_other_parameters():
+    class HerPN(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(torch.ones(2))
+            self.bias = torch.nn.Parameter(torch.zeros(2))
+
+    class ToyModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(2, 2, 1, bias=False)
+            self.herpn = HerPN()
+            self.fc = torch.nn.Linear(2, 2)
+
+    model = ToyModel()
+    groups = split_trainable_conv_herpn_parameters(model)
+
+    assert {id(parameter) for parameter in groups["conv"]} == {
+        id(model.conv.weight)}
+    assert {id(parameter) for parameter in groups["herpn"]} == {
+        id(model.herpn.weight), id(model.herpn.bias)}
+    assert {id(parameter) for parameter in groups["other"]} == {
+        id(model.fc.weight), id(model.fc.bias)}
 
 
 def test_temporary_optimizer_lr_scale_restores_scheduler_lr():

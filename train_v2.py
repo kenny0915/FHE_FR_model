@@ -34,9 +34,11 @@ from utils.utils_layerwise_poly import (
 )
 from utils.utils_optimizer import (
     clip_grad_norm_stable,
+    clip_grad_norm_stable_groups,
     nonfinite_gradient_diagnostics,
     nonfinite_gradient_tensor_count,
     select_gradient_clip_parameters,
+    split_trainable_conv_herpn_parameters,
     split_weight_decay_parameters,
     temporary_optimizer_lr_scale,
 )
@@ -1926,6 +1928,46 @@ def main(args):
     layerwise_poly_parameter_ids = {
         id(parameter) for parameter in layerwise_poly_parameters
     }
+    split_conv_herpn_optimizer = bool(getattr(
+        cfg, "split_conv_herpn_optimizer", False))
+    herpn_lr_multiplier = float(getattr(cfg, "herpn_lr_multiplier", 1.0))
+    conv_herpn_parameters = {"conv": [], "herpn": [], "other": []}
+    if split_conv_herpn_optimizer:
+        if cfg.optimizer != "sgd":
+            raise ValueError(
+                "split_conv_herpn_optimizer currently requires optimizer='sgd'")
+        if use_layerwise_staged_optimizer:
+            raise ValueError(
+                "split_conv_herpn_optimizer is incompatible with the "
+                "layerwise staged optimizer")
+        if herpn_lr_multiplier <= 0.0:
+            raise ValueError("herpn_lr_multiplier must be positive")
+        conv_herpn_parameters = split_trainable_conv_herpn_parameters(
+            backbone.module)
+        if not conv_herpn_parameters["conv"]:
+            raise ValueError(
+                "split_conv_herpn_optimizer selected no convolution tensors")
+        if not conv_herpn_parameters["herpn"]:
+            raise ValueError(
+                "split_conv_herpn_optimizer selected no HerPN tensors")
+        if conv_herpn_parameters["other"]:
+            other_ids = {
+                id(parameter) for parameter in conv_herpn_parameters["other"]}
+            other_names = [
+                name for name, parameter in backbone.module.named_parameters()
+                if id(parameter) in other_ids
+            ]
+            raise ValueError(
+                "split_conv_herpn_optimizer requires every trainable backbone "
+                "tensor to be Conv or HerPN; unexpected tensors: "
+                + ", ".join(other_names))
+        logging.info(
+            "Split Conv/HerPN optimizer: conv_tensors=%d lr=%g, "
+            "herpn_tensors=%d lr=%g",
+            len(conv_herpn_parameters["conv"]), cfg.lr,
+            len(conv_herpn_parameters["herpn"]),
+            cfg.lr * herpn_lr_multiplier,
+        )
 
     if cryptoface_patch_training:
         module_partial_fc = CryptoFaceArcFaceHead(
@@ -1965,7 +2007,28 @@ def main(args):
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
         # TODO the params of partial fc must be last in the params list
-        if getattr(cfg, "selective_weight_decay", False):
+        if split_conv_herpn_optimizer:
+            parameter_groups = [
+                {
+                    "params": conv_herpn_parameters["conv"],
+                    "lr": cfg.lr,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "conv",
+                },
+                {
+                    "params": conv_herpn_parameters["herpn"],
+                    "lr": cfg.lr * herpn_lr_multiplier,
+                    "weight_decay": 0.0,
+                    "scope": "herpn",
+                },
+                {
+                    "params": module_partial_fc.parameters(),
+                    "lr": cfg.lr,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "classifier",
+                },
+            ]
+        elif getattr(cfg, "selective_weight_decay", False):
             decay_params, no_decay_params = split_weight_decay_parameters(
                 backbone)
             decay_params = [
@@ -2285,12 +2348,76 @@ def main(args):
         )
     grad_clip = float(getattr(cfg, "gradient_clip", 5.0))
     gradient_clip_scope = str(getattr(cfg, "gradient_clip_scope", "all"))
-    clipped_params = select_gradient_clip_parameters(
-        opt, backbone, scope=gradient_clip_scope)
-    if rank == 0:
-        logging.info(
-            "Gradient clipping: scope=%s, max=%g, tensors=%d",
-            gradient_clip_scope, grad_clip, len(clipped_params))
+    separate_conv_herpn_gradient_clip = bool(getattr(
+        cfg, "separate_conv_herpn_gradient_clip", False))
+    gradient_clip_groups = {}
+    if separate_conv_herpn_gradient_clip:
+        if not split_conv_herpn_optimizer:
+            raise ValueError(
+                "separate_conv_herpn_gradient_clip requires "
+                "split_conv_herpn_optimizer")
+        if str(getattr(cfg, "gradient_clip_type", "norm")) != "norm":
+            raise ValueError(
+                "separate_conv_herpn_gradient_clip requires norm clipping")
+        if not bool(getattr(cfg, "stable_gradient_clip", False)):
+            raise ValueError(
+                "separate_conv_herpn_gradient_clip requires "
+                "stable_gradient_clip=True")
+        if task_loss_weight != 0.0:
+            raise ValueError(
+                "separate_conv_herpn_gradient_clip currently requires "
+                "task_loss_weight=0 so no classifier gradient is left "
+                "outside the named groups")
+        conv_gradient_clip = float(getattr(
+            cfg, "conv_gradient_clip", grad_clip))
+        herpn_gradient_clip = float(getattr(
+            cfg, "herpn_gradient_clip", grad_clip))
+        gradient_clip_groups = {
+            "conv": (
+                conv_herpn_parameters["conv"], conv_gradient_clip),
+            "herpn": (
+                conv_herpn_parameters["herpn"], herpn_gradient_clip),
+        }
+        # Validate group contents and limits before the first backward pass.
+        if conv_gradient_clip <= 0.0 or herpn_gradient_clip <= 0.0:
+            raise ValueError(
+                "conv_gradient_clip and herpn_gradient_clip must be positive")
+        clipped_params = []
+        if rank == 0:
+            logging.info(
+                "Separate gradient clipping: conv max=%g tensors=%d; "
+                "herpn max=%g tensors=%d",
+                conv_gradient_clip,
+                len(conv_herpn_parameters["conv"]),
+                herpn_gradient_clip,
+                len(conv_herpn_parameters["herpn"]),
+            )
+    else:
+        clipped_params = select_gradient_clip_parameters(
+            opt, backbone, scope=gradient_clip_scope)
+        if rank == 0:
+            logging.info(
+                "Gradient clipping: scope=%s, max=%g, tensors=%d",
+                gradient_clip_scope, grad_clip, len(clipped_params))
+
+    def clip_configured_gradients(device, *, error_if_nonfinite):
+        if separate_conv_herpn_gradient_clip:
+            return clip_grad_norm_stable_groups(
+                gradient_clip_groups,
+                error_if_nonfinite=error_if_nonfinite,
+            )
+        if getattr(cfg, "gradient_clip_type", "norm") == "value":
+            torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
+            return torch.tensor(0.0, device=device), {}
+        if getattr(cfg, "stable_gradient_clip", False):
+            total_norm = clip_grad_norm_stable(
+                clipped_params, grad_clip,
+                error_if_nonfinite=error_if_nonfinite)
+        else:
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                clipped_params, grad_clip,
+                error_if_nonfinite=error_if_nonfinite)
+        return total_norm, {}
 
     herpn_stage_epochs = tuple(getattr(cfg, "herpn_stage_epochs", ()))
     herpn_conversion_groups = tuple(
@@ -4669,17 +4796,11 @@ def main(args):
                     elif getattr(cfg, "check_finite_grads", False):
                         check_finite_gradients(backbone, "backbone", global_step)
                         check_finite_gradients(module_partial_fc, "partial_fc", global_step)
-                    if getattr(cfg, "gradient_clip_type", "norm") == "value":
-                        torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
-                        total_norm = torch.tensor(0.0, device=local_embeddings.device)
-                    elif getattr(cfg, "stable_gradient_clip", False):
-                        total_norm = clip_grad_norm_stable(
-                            clipped_params, grad_clip,
-                            error_if_nonfinite=False)
-                    else:
-                        total_norm = torch.nn.utils.clip_grad_norm_(
-                            clipped_params, grad_clip, error_if_nonfinite=False
-                        )
+                    total_norm, gradient_group_norms = (
+                        clip_configured_gradients(
+                            local_embeddings.device,
+                            error_if_nonfinite=False,
+                        ))
                     local_bad_gradient = (
                         local_nonfinite_tensor_count > 0
                     ) | (~torch.isfinite(total_norm).to(
@@ -4805,18 +4926,12 @@ def main(args):
                             backbone, "backbone", global_step)
                         check_finite_gradients(
                             module_partial_fc, "partial_fc", global_step)
-                    if getattr(cfg, "gradient_clip_type", "norm") == "value":
-                        torch.nn.utils.clip_grad_value_(clipped_params, grad_clip)
-                        total_norm = torch.tensor(
-                            0.0, device=local_embeddings.device)
-                    elif getattr(cfg, "stable_gradient_clip", False):
-                        total_norm = clip_grad_norm_stable(
-                            clipped_params, grad_clip,
-                            error_if_nonfinite=not skip_nonfinite_gradients)
-                    else:
-                        total_norm = torch.nn.utils.clip_grad_norm_(
-                            clipped_params, grad_clip,
-                            error_if_nonfinite=not skip_nonfinite_gradients)
+                    total_norm, gradient_group_norms = (
+                        clip_configured_gradients(
+                            local_embeddings.device,
+                            error_if_nonfinite=(
+                                not skip_nonfinite_gradients),
+                        ))
                     local_bad_gradient = (
                         local_nonfinite_tensor_count > 0
                     ) | (~torch.isfinite(total_norm).to(
@@ -4840,10 +4955,17 @@ def main(args):
                             and global_step % gradient_norm_warning_interval == 0
                             and total_norm.item()
                             > gradient_norm_warning_threshold):
+                        group_details = ", ".join(
+                            f"{name}={float(norm.item()):.6g}"
+                            for name, norm in gradient_group_norms.items())
                         logging.warning(
                             "Large finite pre-clip gradient norm at "
-                            "global_step=%d: %.6g (clipped to %.6g)",
-                            global_step, total_norm.item(), grad_clip)
+                            "global_step=%d: %.6g (clipped to %s)%s%s",
+                            global_step, total_norm.item(),
+                            ("separate group limits"
+                             if gradient_group_norms else f"{grad_clip:.6g}"),
+                            "; groups=" if group_details else "",
+                            group_details)
                     if not global_bad_gradient:
                         with temporary_optimizer_lr_scale(
                                 opt, effective_simple_gate_lr_scale):
