@@ -1933,9 +1933,10 @@ def main(args):
     herpn_lr_multiplier = float(getattr(cfg, "herpn_lr_multiplier", 1.0))
     conv_herpn_parameters = {"conv": [], "herpn": [], "other": []}
     if split_conv_herpn_optimizer:
-        if cfg.optimizer != "sgd":
+        if cfg.optimizer not in ("sgd", "adamw"):
             raise ValueError(
-                "split_conv_herpn_optimizer currently requires optimizer='sgd'")
+                "split_conv_herpn_optimizer requires optimizer='sgd' or "
+                "optimizer='adamw'")
         if use_layerwise_staged_optimizer:
             raise ValueError(
                 "split_conv_herpn_optimizer is incompatible with the "
@@ -2098,7 +2099,28 @@ def main(args):
             margin_loss, cfg.embedding_size, cfg.num_classes,
             cfg.sample_rate, False)
         module_partial_fc.train().cuda()
-        if getattr(cfg, "selective_weight_decay", False):
+        if split_conv_herpn_optimizer:
+            parameter_groups = [
+                {
+                    "params": conv_herpn_parameters["conv"],
+                    "lr": cfg.lr,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "conv",
+                },
+                {
+                    "params": conv_herpn_parameters["herpn"],
+                    "lr": cfg.lr * herpn_lr_multiplier,
+                    "weight_decay": 0.0,
+                    "scope": "herpn",
+                },
+                {
+                    "params": module_partial_fc.parameters(),
+                    "lr": cfg.lr,
+                    "weight_decay": cfg.weight_decay,
+                    "scope": "classifier",
+                },
+            ]
+        elif getattr(cfg, "selective_weight_decay", False):
             decay_params, no_decay_params = split_weight_decay_parameters(
                 backbone)
             parameter_groups = [
@@ -2372,12 +2394,35 @@ def main(args):
             cfg, "conv_gradient_clip", grad_clip))
         herpn_gradient_clip = float(getattr(
             cfg, "herpn_gradient_clip", grad_clip))
-        gradient_clip_groups = {
-            "conv": (
-                conv_herpn_parameters["conv"], conv_gradient_clip),
-            "herpn": (
-                conv_herpn_parameters["herpn"], herpn_gradient_clip),
-        }
+        gradient_clip_granularity = str(getattr(
+            cfg, "conv_herpn_gradient_clip_granularity", "group"))
+        if gradient_clip_granularity not in ("group", "tensor"):
+            raise ValueError(
+                "conv_herpn_gradient_clip_granularity must be 'group' or "
+                "'tensor'")
+        if gradient_clip_granularity == "tensor":
+            parameter_names = {
+                id(parameter): name
+                for name, parameter in backbone.module.named_parameters()
+            }
+            gradient_clip_groups = {
+                f"{family}:{parameter_names[id(parameter)]}": (
+                    [parameter], limit)
+                for family, parameters, limit in (
+                    ("conv", conv_herpn_parameters["conv"],
+                     conv_gradient_clip),
+                    ("herpn", conv_herpn_parameters["herpn"],
+                     herpn_gradient_clip),
+                )
+                for parameter in parameters
+            }
+        else:
+            gradient_clip_groups = {
+                "conv": (
+                    conv_herpn_parameters["conv"], conv_gradient_clip),
+                "herpn": (
+                    conv_herpn_parameters["herpn"], herpn_gradient_clip),
+            }
         # Validate group contents and limits before the first backward pass.
         if conv_gradient_clip <= 0.0 or herpn_gradient_clip <= 0.0:
             raise ValueError(
@@ -2385,12 +2430,14 @@ def main(args):
         clipped_params = []
         if rank == 0:
             logging.info(
-                "Separate gradient clipping: conv max=%g tensors=%d; "
-                "herpn max=%g tensors=%d",
+                "Separate gradient clipping (%s): conv max=%g tensors=%d; "
+                "herpn max=%g tensors=%d; norm_groups=%d",
+                gradient_clip_granularity,
                 conv_gradient_clip,
                 len(conv_herpn_parameters["conv"]),
                 herpn_gradient_clip,
                 len(conv_herpn_parameters["herpn"]),
+                len(gradient_clip_groups),
             )
     else:
         clipped_params = select_gradient_clip_parameters(
@@ -2418,6 +2465,29 @@ def main(args):
                 clipped_params, grad_clip,
                 error_if_nonfinite=error_if_nonfinite)
         return total_norm, {}
+
+    def summarize_gradient_group_norms(group_norms):
+        if not group_norms:
+            return ""
+        if all(":" not in name for name in group_norms):
+            return ", ".join(
+                f"{name}={float(norm.item()):.6g}"
+                for name, norm in group_norms.items())
+        summaries = []
+        for family in ("conv", "herpn"):
+            norms = [
+                norm for name, norm in group_norms.items()
+                if name.startswith(family + ":")
+            ]
+            if not norms:
+                continue
+            values = torch.stack(norms)
+            summaries.append(
+                f"{family}[min/median/max]="
+                f"{float(values.amin().item()):.6g}/"
+                f"{float(values.median().item()):.6g}/"
+                f"{float(values.amax().item()):.6g}")
+        return ", ".join(summaries)
 
     herpn_stage_epochs = tuple(getattr(cfg, "herpn_stage_epochs", ()))
     herpn_conversion_groups = tuple(
@@ -3267,6 +3337,8 @@ def main(args):
         cfg, "fixed_tail_replay_batch_size", 0))
     fixed_tail_replay_workers = int(getattr(
         cfg, "fixed_tail_replay_workers", 0))
+    fixed_tail_replay_interval = int(getattr(
+        cfg, "fixed_tail_replay_interval", 1))
     fixed_tail_replay_priority_count = int(getattr(
         cfg, "fixed_tail_replay_priority_count", 0))
     fixed_tail_replay_priority_repeats = int(getattr(
@@ -3277,6 +3349,9 @@ def main(args):
         if fixed_tail_replay_batch_size <= 0:
             raise ValueError(
                 "fixed_tail_replay_file requires a positive replay batch size")
+        if fixed_tail_replay_interval <= 0:
+            raise ValueError(
+                "fixed_tail_replay_interval must be positive")
         if fixed_tail_replay_orientations_key:
             replay_orientations = load_fixed_tail_replay_orientations(
                 fixed_tail_replay_file,
@@ -3329,12 +3404,14 @@ def main(args):
                 "Configured fixed hard-tail replay: unique_indices=%d "
                 "replay_entries=%d priority_count=%d priority_repeats=%d "
                 "orientations_key=%s "
-                "batch_size_per_rank=%d manifest=%s",
+                "batch_size_per_rank=%d interval=%d manifest=%s",
                 len(fixed_indices), len(replay_indices),
                 min(fixed_tail_replay_priority_count, len(fixed_indices)),
                 fixed_tail_replay_priority_repeats,
                 fixed_tail_replay_orientations_key or "random",
-                fixed_tail_replay_batch_size, fixed_tail_replay_file)
+                fixed_tail_replay_batch_size,
+                fixed_tail_replay_interval,
+                fixed_tail_replay_file)
 
     def next_fixed_tail_replay_batch():
         nonlocal fixed_tail_replay_iterator
@@ -4353,7 +4430,8 @@ def main(args):
                     )
                 )
             )
-            if fixed_tail_replay_loader is not None:
+            if (fixed_tail_replay_loader is not None
+                    and global_step % fixed_tail_replay_interval == 0):
                 replay_batch = next_fixed_tail_replay_batch()
                 replay_img, replay_labels = replay_batch[:2]
                 replay_count = min(
@@ -4955,9 +5033,8 @@ def main(args):
                             and global_step % gradient_norm_warning_interval == 0
                             and total_norm.item()
                             > gradient_norm_warning_threshold):
-                        group_details = ", ".join(
-                            f"{name}={float(norm.item()):.6g}"
-                            for name, norm in gradient_group_norms.items())
+                        group_details = summarize_gradient_group_norms(
+                            gradient_group_norms)
                         logging.warning(
                             "Large finite pre-clip gradient norm at "
                             "global_step=%d: %.6g (clipped to %s)%s%s",

@@ -13,6 +13,9 @@ from configs.ms1mv3_r50_no_relu_phase2_joint_recovery import (
 from configs.ms1mv3_r50_no_relu_phase2_joint_grouped_recovery import (
     config as grouped_recovery_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_joint_tensor_recovery import (
+    config as tensor_recovery_config,
+)
 from utils.utils_tail_recovery import (
     load_fixed_tail_replay_indices,
     load_fixed_tail_replay_orientations,
@@ -120,3 +123,22 @@ def test_grouped_joint_recovery_separates_optimizer_scale_and_clipping():
     assert grouped_recovery_config.herpn_gradient_clip == pytest.approx(0.1)
     assert grouped_recovery_config.freeze_batchnorm_running_stats
     assert grouped_recovery_config.freeze_batchnorm_affine
+
+
+def test_tensor_joint_recovery_updates_every_tensor_with_sparse_replay():
+    assert (tensor_recovery_config.backbone_trainable_prefixes
+            == joint_recovery_config.backbone_trainable_prefixes)
+    assert tensor_recovery_config.optimizer == "adamw"
+    assert tensor_recovery_config.lr == pytest.approx(1e-7)
+    assert tensor_recovery_config.herpn_lr_multiplier == pytest.approx(10.0)
+    assert (tensor_recovery_config.conv_herpn_gradient_clip_granularity
+            == "tensor")
+    assert tensor_recovery_config.fixed_tail_replay_batch_size == 4
+    assert tensor_recovery_config.fixed_tail_replay_interval == 8
+    average_tail_fraction = (
+        tensor_recovery_config.fixed_tail_replay_batch_size
+        / tensor_recovery_config.batch_size
+        / tensor_recovery_config.fixed_tail_replay_interval)
+    assert average_tail_fraction == pytest.approx(0.00390625)
+    assert tensor_recovery_config.freeze_batchnorm_running_stats
+    assert tensor_recovery_config.freeze_batchnorm_affine
