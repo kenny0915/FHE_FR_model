@@ -25,6 +25,9 @@ from configs.ms1mv3_r50_no_relu_phase2_conflict_aware_recovery import (
 from configs.ms1mv3_r50_no_relu_phase2_ijbc_numerical_calibration import (
     config as ijbc_calibration_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_ijbc_numerical_focus1 import (
+    config as ijbc_focus1_config,
+)
 from backbones.iresnet_no_relu import iresnet18
 from utils.utils_multi_objective import (
     combine_conflict_aware_gradients,
@@ -242,6 +245,10 @@ def test_ijbc_calibration_replays_latest_failures_with_fixed_bn_graph():
     assert ijbc_calibration_config.ijbc_gate_failure_repeats == 16
     assert ijbc_calibration_config.causal_range_reduction == "mean_max"
     assert ijbc_calibration_config.parameter_trust_region_ratio <= 0.01
+    assert ijbc_focus1_config.backbone_init.endswith("model_epoch_05.pt")
+    assert ijbc_focus1_config.ijbc_gate_failure_repeats == 64
+    assert ijbc_focus1_config.ijbc_priority_manifests[0].endswith(
+        "full_gate_epoch_05.json")
 
 
 def test_causal_range_penalty_uses_earliest_violation_per_sample():
