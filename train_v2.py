@@ -1579,6 +1579,8 @@ def main(args):
                     cfg, "herpn_range_topk_fraction", 0.001)),
                 herpn_range_bulk_weight=float(getattr(
                     cfg, "herpn_range_bulk_weight", 0.01)),
+                herpn_range_guard_ratio=float(getattr(
+                    cfg, "herpn_range_guard_ratio", 1.0)),
                 herpn_training_stabilization_limit=getattr(
                     cfg, "herpn_training_stabilization_limit", None),
                 herpn_training_stabilization_names=tuple(getattr(

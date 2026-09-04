@@ -169,19 +169,23 @@ class ProgressiveHerPNActivation(nn.Module):
     def __init__(self, channels, range_limit=6.0, bn_eps=1e-4,
                  stage_index=0, blend=1.0,
                  range_penalty_mode='legacy', range_topk_fraction=0.001,
-                 range_bulk_weight=0.01,
+                 range_bulk_weight=0.01, range_guard_ratio=1.0,
                  training_stabilization_limit=None,
                  independent_basis_scales=False):
         super().__init__()
         if range_limit <= 0:
             raise ValueError('range_limit must be positive')
-        if range_penalty_mode not in ('legacy', 'linear_tail'):
+        if range_penalty_mode not in (
+                'legacy', 'linear_tail', 'sample_max_tail'):
             raise ValueError(
-                "range_penalty_mode must be 'legacy' or 'linear_tail'")
+                "range_penalty_mode must be 'legacy', 'linear_tail', or "
+                "'sample_max_tail'")
         if not 0.0 < range_topk_fraction <= 1.0:
             raise ValueError('range_topk_fraction must be in (0, 1]')
         if range_bulk_weight < 0.0:
             raise ValueError('range_bulk_weight must be non-negative')
+        if not 0.0 < float(range_guard_ratio) <= 1.0:
+            raise ValueError('range_guard_ratio must be in (0, 1]')
         if (training_stabilization_limit is not None
                 and float(training_stabilization_limit) <= 0.0):
             raise ValueError(
@@ -197,12 +201,14 @@ class ProgressiveHerPNActivation(nn.Module):
         self.register_buffer(
             'range_limit', torch.tensor(float(range_limit), dtype=torch.float32))
         self._last_range_penalty = None
+        self._last_sample_range_penalty = None
         self._last_distillation_loss = None
         self._last_input_absmax = None
         self._last_outside_fraction = None
         self.range_penalty_mode = str(range_penalty_mode)
         self.range_topk_fraction = float(range_topk_fraction)
         self.range_bulk_weight = float(range_bulk_weight)
+        self.range_guard_ratio = float(range_guard_ratio)
         self.training_stabilization_limit = (
             None if training_stabilization_limit is None
             else float(training_stabilization_limit))
@@ -218,6 +224,9 @@ class ProgressiveHerPNActivation(nn.Module):
 
     def range_penalty(self):
         return self._last_range_penalty
+
+    def sample_range_penalty(self):
+        return self._last_sample_range_penalty
 
     def distillation_loss(self):
         return self._last_distillation_loss
@@ -267,7 +276,17 @@ class ProgressiveHerPNActivation(nn.Module):
             compute_x = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
             limit = self.range_limit.to(device=x.device, dtype=compute_x.dtype)
             excess = torch.relu(compute_x.abs() - limit)
-            if self.range_penalty_mode == 'linear_tail':
+            sample_peak = compute_x.abs().flatten(1).amax(dim=1)
+            self._last_sample_range_penalty = torch.relu(
+                sample_peak / limit - self.range_guard_ratio)
+            if self.range_penalty_mode == 'sample_max_tail':
+                # Each image contributes through its worst channel/spatial
+                # token.  The network-level causal reducer then selects the
+                # earliest unsafe activation, avoiding both feature-count and
+                # depth dilution of the handful of initiating outliers.
+                self._last_range_penalty = (
+                    self._last_sample_range_penalty.amax())
+            elif self.range_penalty_mode == 'linear_tail':
                 # Normalize by the immutable approximation radius and focus
                 # on the rare largest elements.  A linear tail remains finite
                 # much farther into FP32's dynamic range than the legacy
@@ -291,6 +310,7 @@ class ProgressiveHerPNActivation(nn.Module):
             self._last_outside_fraction = (excess.detach() > 0).float().mean()
         else:
             self._last_range_penalty = None
+            self._last_sample_range_penalty = None
             self._last_distillation_loss = None
 
         blend = self._blend
@@ -385,6 +405,7 @@ class IResNet(nn.Module):
                  herpn_progress=5.0, herpn_range_penalty_mode='legacy',
                  herpn_range_topk_fraction=0.001,
                  herpn_range_bulk_weight=0.01,
+                 herpn_range_guard_ratio=1.0,
                  herpn_training_stabilization_limit=None,
                  herpn_training_stabilization_names=(),
                  herpn_independent_basis_scales=False):
@@ -398,6 +419,7 @@ class IResNet(nn.Module):
         self.herpn_range_penalty_mode = str(herpn_range_penalty_mode)
         self.herpn_range_topk_fraction = float(herpn_range_topk_fraction)
         self.herpn_range_bulk_weight = float(herpn_range_bulk_weight)
+        self.herpn_range_guard_ratio = float(herpn_range_guard_ratio)
         self.herpn_training_stabilization_limit = (
             None if herpn_training_stabilization_limit is None
             else float(herpn_training_stabilization_limit))
@@ -468,6 +490,7 @@ class IResNet(nn.Module):
             range_penalty_mode=self.herpn_range_penalty_mode,
             range_topk_fraction=self.herpn_range_topk_fraction,
             range_bulk_weight=self.herpn_range_bulk_weight,
+            range_guard_ratio=self.herpn_range_guard_ratio,
             training_stabilization_limit=None,
             independent_basis_scales=self.herpn_independent_basis_scales,
         )
@@ -573,6 +596,30 @@ class IResNet(nn.Module):
         if not penalties:
             return next(self.parameters()).new_zeros(())
         return torch.stack(penalties).mean()
+
+    def herpn_causal_range_penalty(self, activation_names):
+        """Return the worst sample's earliest unsafe activation penalty.
+
+        The ordered activation list defines causality.  Later polynomial
+        explosions cannot dominate the objective once an earlier producer has
+        already crossed the guard interval for that sample.  This is a
+        training-only loss reducer and does not alter the inference graph.
+        """
+        activations = self._selected_progressive_activations(activation_names)
+        penalties = [
+            activation.sample_range_penalty() for activation in activations
+        ]
+        if not penalties or any(penalty is None for penalty in penalties):
+            return next(self.parameters()).new_zeros(())
+        batch_sizes = {int(penalty.shape[0]) for penalty in penalties}
+        if len(batch_sizes) != 1:
+            raise RuntimeError(
+                "Causal HerPN penalties have inconsistent batch sizes")
+        stacked = torch.stack(penalties, dim=0)
+        violating = stacked.detach() > 0
+        earliest = violating & (violating.cumsum(dim=0) == 1)
+        per_sample = (stacked * earliest.to(dtype=stacked.dtype)).sum(dim=0)
+        return per_sample.amax()
 
     def herpn_distillation_loss(self, activation_names=None):
         losses = [activation.distillation_loss()

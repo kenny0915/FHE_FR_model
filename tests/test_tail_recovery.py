@@ -16,6 +16,17 @@ from configs.ms1mv3_r50_no_relu_phase2_joint_grouped_recovery import (
 from configs.ms1mv3_r50_no_relu_phase2_joint_tensor_recovery import (
     config as tensor_recovery_config,
 )
+from configs.ms1mv3_r50_no_relu_phase1_epoch24_plus3 import (
+    config as phase1_plus3_config,
+)
+from configs.ms1mv3_r50_no_relu_phase2_conflict_aware_recovery import (
+    config as conflict_recovery_config,
+)
+from backbones.iresnet_no_relu import iresnet18
+from utils.utils_multi_objective import (
+    combine_conflict_aware_gradients,
+    project_to_relative_trust_region,
+)
 from utils.utils_tail_recovery import (
     load_fixed_tail_replay_indices,
     load_fixed_tail_replay_orientations,
@@ -144,3 +155,71 @@ def test_tensor_joint_recovery_updates_every_tensor_with_sparse_replay():
     assert average_tail_fraction == pytest.approx(0.00390625)
     assert tensor_recovery_config.freeze_batchnorm_running_stats
     assert tensor_recovery_config.freeze_batchnorm_affine
+
+
+def test_phase1_plus3_resumes_epoch24_optimizer_into_epoch27():
+    assert phase1_plus3_config.resume
+    assert phase1_plus3_config.resume_optimizer_state
+    assert phase1_plus3_config.resume_rebase_lr_scheduler
+    assert phase1_plus3_config.num_epoch == 27
+    assert phase1_plus3_config.resume_checkpoint_dir.endswith(
+        "herpn_full_conversion_phase1")
+    assert phase1_plus3_config.output != (
+        phase1_plus3_config.resume_checkpoint_dir)
+
+
+def test_conflict_recovery_keeps_exact_quadratic_and_separates_bn_policy():
+    assert conflict_recovery_config.backbone_init.endswith(
+        "model_epoch_23.pt")
+    assert conflict_recovery_config.herpn_range_limit == pytest.approx(6.0)
+    assert conflict_recovery_config.herpn_range_guard_ratio == pytest.approx(
+        0.8)
+    assert conflict_recovery_config.herpn_range_penalty_mode == (
+        "sample_max_tail")
+    assert conflict_recovery_config.herpn_training_stabilization_limit == (
+        pytest.approx(6.0))
+    assert conflict_recovery_config.optimizer == "sgd"
+    assert conflict_recovery_config.momentum == pytest.approx(0.0)
+    assert conflict_recovery_config.parameter_trust_region_ratio == (
+        pytest.approx(0.005))
+    assert conflict_recovery_config.parameter_trust_region_interval == 100
+    assert conflict_recovery_config.num_epoch == 3
+
+
+def test_causal_range_penalty_uses_earliest_violation_per_sample():
+    model = iresnet18(
+        herpn_progress=5.0,
+        herpn_range_penalty_mode="sample_max_tail",
+    )
+    activations = dict(model.named_modules())
+    names = ("layer1.0.prelu", "layer1.1.prelu", "layer2.0.prelu")
+    activations[names[0]]._last_sample_range_penalty = torch.tensor([0.2, 0.0])
+    activations[names[1]]._last_sample_range_penalty = torch.tensor([9.0, 0.3])
+    activations[names[2]]._last_sample_range_penalty = torch.tensor([99.0, 7.0])
+    # Sample zero selects 0.2 from the first layer; sample one selects 0.3
+    # from the second.  Later explosions cannot dominate either sample.
+    assert model.herpn_causal_range_penalty(names).item() == pytest.approx(0.3)
+
+
+def test_conflict_gradient_projection_and_trust_region_are_bounded():
+    parameter = torch.nn.Parameter(torch.tensor([1.0, 0.0]))
+    clean = (torch.tensor([1.0, 0.0]),)
+    tail = (torch.tensor([-2.0, 2.0]),)
+    combined, stats = combine_conflict_aware_gradients(
+        (parameter,), clean, tail,
+        learning_rate=0.1,
+        tail_to_clean_ratio=1.0,
+        max_step_update_ratio=1.0,
+        scale_floor=1.0,
+    )
+    assert stats["conflicts"] == 1
+    assert torch.dot(combined[0] - clean[0], clean[0]) >= 0
+
+    anchor = parameter.detach().clone()
+    with torch.no_grad():
+        parameter.add_(torch.tensor([2.0, 0.0]))
+    trust = project_to_relative_trust_region(
+        (parameter,), (anchor,), ratio=0.01, scale_floor=1.0)
+    assert trust["projected"] == 1
+    assert torch.linalg.vector_norm(parameter - anchor).item() == pytest.approx(
+        0.01)
