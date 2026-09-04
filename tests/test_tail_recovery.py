@@ -22,6 +22,9 @@ from configs.ms1mv3_r50_no_relu_phase1_epoch24_plus3 import (
 from configs.ms1mv3_r50_no_relu_phase2_conflict_aware_recovery import (
     config as conflict_recovery_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_ijbc_numerical_calibration import (
+    config as ijbc_calibration_config,
+)
 from backbones.iresnet_no_relu import iresnet18
 from utils.utils_multi_objective import (
     combine_conflict_aware_gradients,
@@ -230,6 +233,15 @@ def test_conflict_recovery_keeps_exact_quadratic_and_separates_bn_policy():
         pytest.approx(0.005))
     assert conflict_recovery_config.parameter_trust_region_interval == 100
     assert conflict_recovery_config.num_epoch == 3
+
+
+def test_ijbc_calibration_replays_latest_failures_with_fixed_bn_graph():
+    assert ijbc_calibration_config.backbone_init.endswith("model_epoch_23.pt")
+    assert ijbc_calibration_config.herpn_range_limit == pytest.approx(6.0)
+    assert ijbc_calibration_config.herpn_range_guard_ratio == pytest.approx(0.75)
+    assert ijbc_calibration_config.ijbc_gate_failure_repeats == 16
+    assert ijbc_calibration_config.causal_range_reduction == "mean_max"
+    assert ijbc_calibration_config.parameter_trust_region_ratio <= 0.01
 
 
 def test_causal_range_penalty_uses_earliest_violation_per_sample():

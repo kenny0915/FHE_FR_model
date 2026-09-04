@@ -150,6 +150,14 @@ def main(config_path):
     replay = load_ijbc_replay_orientations(
         tuple(cfg.ijbc_replay_manifests),
         activation_topk=int(cfg.ijbc_replay_activation_topk))
+    priority_manifest_paths = tuple(getattr(
+        cfg, "ijbc_priority_manifests", ()))
+    priority = (
+        load_ijbc_replay_orientations(priority_manifest_paths)
+        if priority_manifest_paths else ())
+    priority_repeats = int(getattr(cfg, "ijbc_gate_failure_repeats", 1))
+    if priority_repeats <= 0:
+        raise ValueError("ijbc_gate_failure_repeats must be positive")
     source_dataset = IJBCSourceDataset(cfg.ijbc_root, cfg.ijbc_target)
     excluded_sources = {index for index, _ in replay}
     preservation = choose_preservation_orientations(
@@ -197,7 +205,8 @@ def main(config_path):
 
     global_step = 0
     skipped = 0
-    replay_rows = list(replay)
+    background_replay = list(replay)
+    replay_rows = list(priority) * priority_repeats + background_replay
     for epoch in range(1, int(cfg.num_epoch) + 1):
         preservation_sampler.set_epoch(epoch)
         preservation_iterator = iter(preservation_loader)
@@ -316,9 +325,13 @@ def main(config_path):
                     os.path.join(cfg.output, "model_numerical_gate_zero.pt"))
                 logging.info("Zero non-finite IJB-C gate achieved; stopping")
             break
-        known = set(replay_rows)
+        known = set(background_replay)
         new_failures = [row for row in failures if row not in known]
-        replay_rows.extend(new_failures)
+        background_replay.extend(new_failures)
+        # The active failures are deliberately duplicated.  Once only a few
+        # rows remain, uniform replay of all previously resolved tails would
+        # otherwise produce almost exclusively zero numerical losses.
+        replay_rows = list(failures) * priority_repeats + background_replay
         if rank == 0:
             logging.info(
                 "Added %d newly failing orientations; next replay=%d",

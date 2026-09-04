@@ -24,6 +24,8 @@ config.ijbc_replay_manifests = (
     "epoch23_ijbc_tails.json",
 )
 config.ijbc_replay_activation_topk = 64
+config.ijbc_priority_manifests = ()
+config.ijbc_gate_failure_repeats = 16
 config.ijbc_preservation_count = 8192
 config.ijbc_workers = 4
 config.replay_batch_size = 8
