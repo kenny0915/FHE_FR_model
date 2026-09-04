@@ -66,3 +66,27 @@ embeddings, and its manifest contains only the CSV header. Full diagnostic TAR:
 - Independent TAR: `work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbc_focus1_zero/r50_full_poly_focus1_zero/ijbc_tar_at_far.csv`
 - Training log: `work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/slurm-338924.out`
 - Independent evaluation log: `work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/ijbc-338951.out`
+
+## IJB-B cross-protocol evaluation
+
+The same fixed checkpoint was subsequently evaluated on the local IJB-B
+protocol:
+
+- Non-finite augmented embeddings: 0 / 455,260
+- TAR at FAR 1e-4: 92.96%
+- Full TAR at FAR 1e-6 through 1e-1: 34.43, 86.48, 92.96, 95.65,
+  97.24, and 98.42 percent
+
+This result is numerically valid but is **not an untouched test result**.
+Although the calibration code did not open the `ijb/IJBB` directory, 222,340
+of its 227,630 metadata rows (97.68%) have landmark/score signatures also
+present in the local IJB-C release. Spot checks of corresponding differently
+numbered files are byte-identical. Full IJB-C was also used as the numerical
+checkpoint-selection gate. The defensible description is therefore
+"IJB-B cross-protocol evaluation after IJB-C numerical calibration."
+
+IJB-B artifacts:
+
+- Manifest: `work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbb_focus1_zero/nonfinite_manifest.csv`
+- TAR: `work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbb_focus1_zero/r50_full_poly_ijbb_focus1_zero/ijbb_tar_at_far.csv`
+- Log: `work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbb-339058.out`
