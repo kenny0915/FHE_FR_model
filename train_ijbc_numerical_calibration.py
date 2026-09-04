@@ -190,7 +190,7 @@ def main(config_path):
             len(preservation), len(trainable_parameters), world_size)
         logging.info(
             "Exact target=PReLU on [-%g,%g], degree=2; training guard=%g; "
-            "all %d BN running buffers are immutable",
+            "all %d BN modules (%d running buffers) are immutable",
             cfg.herpn_range_limit, cfg.herpn_range_limit,
             cfg.herpn_range_guard_ratio,
             frozen_batchnorm_count, len(bn_reference))
