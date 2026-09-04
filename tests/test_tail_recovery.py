@@ -31,6 +31,8 @@ from utils.utils_tail_recovery import (
     load_fixed_tail_replay_indices,
     load_fixed_tail_replay_orientations,
 )
+from utils.utils_ijbc_replay import load_ijbc_replay_orientations
+from mine_ijbc_herpn_tails import merge_payloads as merge_ijbc_payloads
 
 
 def test_tail_heap_keeps_largest_source_orientation_rows():
@@ -90,6 +92,49 @@ def test_fixed_tail_manifest_rejects_invalid_orientations(tmp_path):
     }))
     with pytest.raises(ValueError, match="invalid 'output_nonfinite' row"):
         load_fixed_tail_replay_orientations(path)
+
+
+def test_ijbc_replay_merges_exact_csv_and_per_activation_json(tmp_path):
+    csv_path = tmp_path / "nonfinite.csv"
+    csv_path.write_text(
+        "source_index,orientation\n9,flip\n10,original\n",
+        encoding="utf-8")
+    json_path = tmp_path / "tails.json"
+    json_path.write_text(json.dumps({
+        "output_nonfinite": [
+            {"source_index": 9, "orientation": 1},
+        ],
+        "activations": {
+            "prelu": {"tail": [
+                {"source_index": 11, "orientation": 0, "absmax": 7.0},
+                {"source_index": 12, "orientation": 1, "absmax": 6.5},
+            ]},
+        },
+    }), encoding="utf-8")
+    assert load_ijbc_replay_orientations(
+        (csv_path, json_path), activation_topk=1) == (
+            (9, 1), (10, 0), (11, 0))
+
+
+def test_ijbc_tail_merge_keeps_global_topk_and_failures():
+    def payload(failure, value, index):
+        return {
+            "output_nonfinite": [
+                {"source_index": failure, "orientation": 1}],
+            "activations": {"prelu": {
+                "nonfinite_input_count": failure,
+                "tail": [{"source_index": index, "orientation": 0,
+                          "absmax": value}],
+            }},
+        }
+    merged = merge_ijbc_payloads(
+        (payload(2, 8.0, 20), payload(3, 9.0, 30)), ("prelu",), 1)
+    assert merged["output_nonfinite"] == [
+        {"source_index": 2, "orientation": 1},
+        {"source_index": 3, "orientation": 1},
+    ]
+    assert merged["activations"]["prelu"]["tail"][0]["source_index"] == 30
+    assert merged["activations"]["prelu"]["nonfinite_input_count"] == 5
 
 
 def test_hard_tail_recovery_covers_stem_through_layer3_only():
@@ -200,6 +245,12 @@ def test_causal_range_penalty_uses_earliest_violation_per_sample():
     # Sample zero selects 0.2 from the first layer; sample one selects 0.3
     # from the second.  Later explosions cannot dominate either sample.
     assert model.herpn_causal_range_penalty(names).item() == pytest.approx(0.3)
+    assert model.herpn_causal_range_penalty(
+        names, reduction="mean").item() == pytest.approx(0.25)
+    assert model.herpn_causal_range_penalty(
+        names, reduction="mean_max").item() == pytest.approx(0.28)
+    with pytest.raises(ValueError, match="causal range reduction"):
+        model.herpn_causal_range_penalty(names, reduction="sum")
 
 
 def test_conflict_gradient_projection_and_trust_region_are_bounded():

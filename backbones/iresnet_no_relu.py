@@ -597,7 +597,7 @@ class IResNet(nn.Module):
             return next(self.parameters()).new_zeros(())
         return torch.stack(penalties).mean()
 
-    def herpn_causal_range_penalty(self, activation_names):
+    def herpn_causal_range_penalty(self, activation_names, reduction='max'):
         """Return the worst sample's earliest unsafe activation penalty.
 
         The ordered activation list defines causality.  Later polynomial
@@ -619,7 +619,14 @@ class IResNet(nn.Module):
         violating = stacked.detach() > 0
         earliest = violating & (violating.cumsum(dim=0) == 1)
         per_sample = (stacked * earliest.to(dtype=stacked.dtype)).sum(dim=0)
-        return per_sample.amax()
+        if reduction == 'max':
+            return per_sample.amax()
+        if reduction == 'mean':
+            return per_sample.mean()
+        if reduction == 'mean_max':
+            return per_sample.mean() + 0.1 * per_sample.amax()
+        raise ValueError(
+            "causal range reduction must be 'max', 'mean', or 'mean_max'")
 
     def herpn_distillation_loss(self, activation_names=None):
         losses = [activation.distillation_loss()
