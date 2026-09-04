@@ -23,7 +23,10 @@ config.resume_checkpoint_dir = (
 
 # Preserve the actual epoch-24 optimizer/PartialFC state.  Rebase only the LR
 # schedule onto a 27-epoch horizon so epochs 25--27 have non-zero learning
-# rates while retaining the same polynomial decay rule.
+# rates while retaining the same polynomial decay rule.  Lowering the base LR
+# by 100x makes the first resumed rate about 1.2e-5, continuous with the final
+# epoch-24 updates instead of rewinding the optimizer to an early-epoch rate.
 config.resume_optimizer_state = True
 config.resume_rebase_lr_scheduler = True
+config.lr = 1e-4
 config.num_epoch = 27

@@ -161,6 +161,7 @@ def test_phase1_plus3_resumes_epoch24_optimizer_into_epoch27():
     assert phase1_plus3_config.resume
     assert phase1_plus3_config.resume_optimizer_state
     assert phase1_plus3_config.resume_rebase_lr_scheduler
+    assert phase1_plus3_config.lr == pytest.approx(1e-4)
     assert phase1_plus3_config.num_epoch == 27
     assert phase1_plus3_config.resume_checkpoint_dir.endswith(
         "herpn_full_conversion_phase1")
