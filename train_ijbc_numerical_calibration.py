@@ -40,6 +40,7 @@ from utils.utils_multi_objective import (
     project_to_relative_trust_region,
     synchronize_and_assign_gradients,
 )
+from utils.utils_widerface import WIDERFaceDataset
 
 
 def freeze_batchnorm_buffers(model):
@@ -256,7 +257,7 @@ def make_calibration_datasets(cfg, local_rank):
             return IJBCOrientationDataset(
                 cfg.ijbc_root, rows, cfg.ijbc_target)
 
-        return dataset_name, source_dataset, orientations
+        return dataset_name, source_dataset, orientations, source_dataset
     if dataset_name == "ms1mv3":
         base_dataset = MXFaceDataset(cfg.rec, local_rank)
         source_dataset = PairedOrientationDataset(base_dataset)
@@ -270,9 +271,37 @@ def make_calibration_datasets(cfg, local_rank):
                  for index, orientation in rows],
             )
 
-        return dataset_name, source_dataset, orientations
+        return dataset_name, source_dataset, orientations, source_dataset
+    if dataset_name == "wider":
+        common = {
+            "validation_modulo": int(cfg.wider_validation_modulo),
+            "validation_fold": int(cfg.wider_validation_fold),
+            "min_face_size": int(cfg.wider_min_face_size),
+            "crop_scale": float(cfg.wider_crop_scale),
+        }
+        base_dataset = WIDERFaceDataset(
+            cfg.wider_image_root, cfg.wider_annotation_path,
+            split="calibration", **common)
+        gate_base_dataset = WIDERFaceDataset(
+            cfg.wider_image_root, cfg.wider_annotation_path,
+            split="validation", **common)
+        source_dataset = PairedOrientationDataset(base_dataset)
+        gate_source_dataset = PairedOrientationDataset(gate_base_dataset)
+        oriented_dataset = DatasetWithIndex(
+            base_dataset, both_orientations=True)
+
+        def orientations(rows):
+            return Subset(
+                oriented_dataset,
+                [2 * int(index) + int(orientation)
+                 for index, orientation in rows],
+            )
+
+        return (
+            dataset_name, source_dataset, orientations,
+            gate_source_dataset)
     raise ValueError(
-        "calibration_dataset must be either 'ijbc' or 'ms1mv3'")
+        "calibration_dataset must be ijbc, ms1mv3, or wider")
 
 
 def main(config_path):
@@ -303,7 +332,7 @@ def main(config_path):
     priority_repeats = int(getattr(cfg, "ijbc_gate_failure_repeats", 1))
     if priority_repeats <= 0:
         raise ValueError("ijbc_gate_failure_repeats must be positive")
-    dataset_name, source_dataset, orientation_dataset = (
+    dataset_name, source_dataset, orientation_dataset, gate_source_dataset = (
         make_calibration_datasets(cfg, local_rank))
     excluded_sources = {index for index, _ in replay}
     preservation = choose_preservation_orientations(
@@ -316,7 +345,7 @@ def main(config_path):
     preservation_iterator = iter(preservation_loader)
     preservation_cycle = 0
     gate_loader, gate_sampler = make_loader(
-        source_dataset, cfg.full_gate_source_batch_size,
+        gate_source_dataset, cfg.full_gate_source_batch_size,
         cfg.ijbc_workers, rank, world_size, False, cfg.seed)
 
     model = build_model(cfg, cfg.backbone_init, device, penalty_mode=True)
@@ -340,13 +369,16 @@ def main(config_path):
         None if range_gate_limit is None else float(range_gate_limit))
     adversarial_enabled = bool(getattr(
         cfg, "adversarial_tail_enabled", False))
+    replay_gate_failures = bool(getattr(
+        cfg, "replay_gate_failures", True))
 
     if rank == 0:
         logging.info(
             "%s numerical calibration: checkpoint=%s, hard=%d, preserve=%d, "
-            "trainable=%d, world=%d", dataset_name.upper(),
+            "gate_sources=%d, trainable=%d, world=%d", dataset_name.upper(),
             cfg.backbone_init, len(replay),
-            len(preservation), len(trainable_parameters), world_size)
+            len(preservation), len(gate_source_dataset),
+            len(trainable_parameters), world_size)
         logging.info(
             "Exact target=PReLU on [-%g,%g], degree=2; training guard=%g; "
             "all %d BN modules (%d running buffers) are immutable",
@@ -486,7 +518,7 @@ def main(config_path):
             "dataset": dataset_name,
             "epoch": epoch,
             "checkpoint": model_path,
-            "total_augmented_embeddings": 2 * len(source_dataset),
+            "total_augmented_embeddings": 2 * len(gate_source_dataset),
             "nonfinite_count": len(output_failures),
             "range_gate_limit": range_gate_limit,
             "range_violation_count": len(range_violations),
@@ -513,7 +545,7 @@ def main(config_path):
                 "numerical=%d/%d max_preherpn=%s", epoch,
                 dataset_name.upper(), len(output_failures),
                 len(range_violations), len(failures),
-                2 * len(source_dataset), gate["max_preherpn_absmax"])
+                2 * len(gate_source_dataset), gate["max_preherpn_absmax"])
         if not failures:
             if rank == 0:
                 atomic_torch_save(
@@ -523,17 +555,23 @@ def main(config_path):
                     "Zero non-finite %s gate achieved; stopping",
                     dataset_name.upper())
             break
-        known = set(background_replay)
-        new_failures = [row for row in failures if row not in known]
-        background_replay.extend(new_failures)
-        # The active failures are deliberately duplicated.  Once only a few
-        # rows remain, uniform replay of all previously resolved tails would
-        # otherwise produce almost exclusively zero numerical losses.
-        replay_rows = list(failures) * priority_repeats + background_replay
-        if rank == 0:
+        if replay_gate_failures:
+            known = set(background_replay)
+            new_failures = [row for row in failures if row not in known]
+            background_replay.extend(new_failures)
+            # The active failures are deliberately duplicated.  Once only a
+            # few rows remain, uniform replay of all previously resolved tails
+            # would otherwise produce almost exclusively zero losses.
+            replay_rows = (
+                list(failures) * priority_repeats + background_replay)
+            if rank == 0:
+                logging.info(
+                    "Added %d newly failing orientations; next replay=%d",
+                    len(new_failures), len(replay_rows))
+        elif rank == 0:
             logging.info(
-                "Added %d newly failing orientations; next replay=%d",
-                len(new_failures), len(replay_rows))
+                "Held-out gate failures are not replayed; next replay=%d",
+                len(replay_rows))
         distributed.barrier()
 
     if rank == 0:

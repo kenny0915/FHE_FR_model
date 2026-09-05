@@ -7,7 +7,6 @@ import os
 import cv2
 import numpy as np
 import torch
-from skimage import transform as trans
 from torch.utils.data import Dataset
 
 
@@ -92,6 +91,11 @@ def _read_metadata(root, target):
 
 def align_ijbc_pair(image, landmarks):
     """Match the original ``eval_ijbc.py`` alignment and normalization."""
+    # Keep the optional IJB/scikit-image dependency out of MS1Mv3 and WIDER
+    # calibration processes.  Some deployment environments intentionally
+    # install only the training data stack.
+    from skimage import transform as trans
+
     transform = trans.SimilarityTransform()
     if not transform.estimate(
             np.asarray(landmarks, dtype=np.float32), _ALIGNMENT_TEMPLATE):

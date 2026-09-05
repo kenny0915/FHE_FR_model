@@ -1,4 +1,4 @@
-"""Mine exact MS1Mv3 activation tails for a fully polynomial R50.
+"""Mine exact activation tails for a fully polynomial R50.
 
 This scanner never changes model state.  It evaluates the unclipped epoch-23
 graph in eval mode, records per-image pre-HerPN maxima, and writes stable
@@ -19,6 +19,7 @@ from torch.utils.data.distributed import DistributedSampler
 from backbones import get_model
 from dataset import DatasetWithIndex, get_dataloader
 from utils.utils_config import get_config
+from utils.utils_widerface import WIDERFaceDataset
 
 
 def atomic_json_dump(payload, path):
@@ -148,11 +149,29 @@ def main():
     device = torch.device("cuda", local_rank)
 
     cfg = get_config(args.config)
-    base_loader = get_dataloader(
-        cfg.rec, local_rank, args.batch_size, False, False,
-        cfg.seed, args.workers, drop_last=False, range_augmentation=None)
+    dataset_name = str(getattr(
+        cfg, "calibration_dataset", "ms1mv3")).lower()
+    if dataset_name == "wider":
+        base_dataset = WIDERFaceDataset(
+            cfg.wider_image_root, cfg.wider_annotation_path,
+            split=str(getattr(cfg, "wider_mining_split", "calibration")),
+            validation_modulo=int(cfg.wider_validation_modulo),
+            validation_fold=int(cfg.wider_validation_fold),
+            min_face_size=int(cfg.wider_min_face_size),
+            crop_scale=float(cfg.wider_crop_scale),
+        )
+        worker_init = None
+    elif dataset_name == "ms1mv3":
+        base_loader = get_dataloader(
+            cfg.rec, local_rank, args.batch_size, False, False,
+            cfg.seed, args.workers, drop_last=False, range_augmentation=None)
+        base_dataset = base_loader.dataset
+        worker_init = base_loader.worker_init_fn
+    else:
+        raise ValueError(
+            "Tail mining calibration_dataset must be ms1mv3 or wider")
     indexed_dataset = DatasetWithIndex(
-        base_loader.dataset, both_orientations=args.both_orientations)
+        base_dataset, both_orientations=args.both_orientations)
     sampler = DistributedSampler(
         indexed_dataset,
         num_replicas=world_size,
@@ -167,7 +186,7 @@ def main():
         num_workers=args.workers,
         pin_memory=True,
         drop_last=False,
-        worker_init_fn=base_loader.worker_init_fn,
+        worker_init_fn=worker_init,
     )
 
     model = get_model(
@@ -281,9 +300,12 @@ def main():
                     encoding="utf-8") as handle:
                 payloads.append(json.load(handle))
         merged = merge_rank_payloads(payloads, activation_names, args.topk)
+        merged["format"] = f"exact_{dataset_name}_herpn_tail_v1"
         merged.update({
             "checkpoint": args.checkpoint,
-            "dataset": cfg.rec,
+            "dataset": dataset_name,
+            "source_count": len(base_dataset),
+            "source_image_count": getattr(base_dataset, "image_count", None),
             "both_orientations": bool(args.both_orientations),
             "world_size": world_size,
             "batches_per_rank": completed,

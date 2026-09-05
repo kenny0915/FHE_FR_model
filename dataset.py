@@ -289,9 +289,14 @@ class PairedOrientationDataset(Dataset):
 
     def __getitem__(self, index):
         index = int(index)
-        original = self.dataset.get_oriented(index, 0)[0]
-        flipped = self.dataset.get_oriented(index, 1)[0]
-        return torch.stack((original, flipped)), index
+        pair_getter = getattr(self.dataset, "get_pair", None)
+        if callable(pair_getter):
+            pair = pair_getter(index)
+        else:
+            original = self.dataset.get_oriented(index, 0)[0]
+            flipped = self.dataset.get_oriented(index, 1)[0]
+            pair = torch.stack((original, flipped))
+        return pair, index
 
     def __len__(self):
         return len(self.dataset)
