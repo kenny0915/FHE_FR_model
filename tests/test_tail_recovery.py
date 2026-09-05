@@ -120,6 +120,10 @@ def test_ijbc_replay_merges_exact_csv_and_per_activation_json(tmp_path):
         "output_nonfinite": [
             {"source_index": 9, "orientation": 1},
         ],
+        "range_violations": [
+            {"source_index": 13, "orientation": 1,
+             "first_activation": "prelu", "input_absmax": 4.2},
+        ],
         "activations": {
             "prelu": {"tail": [
                 {"source_index": 11, "orientation": 0, "absmax": 7.0},
@@ -129,7 +133,7 @@ def test_ijbc_replay_merges_exact_csv_and_per_activation_json(tmp_path):
     }), encoding="utf-8")
     assert load_ijbc_replay_orientations(
         (csv_path, json_path), activation_topk=1) == (
-            (9, 1), (10, 0), (11, 0))
+            (9, 1), (10, 0), (13, 1), (11, 0))
 
 
 def test_ijbc_tail_merge_keeps_global_topk_and_failures():

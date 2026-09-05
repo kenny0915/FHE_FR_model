@@ -60,6 +60,11 @@ def load_ijbc_replay_orientations(paths, activation_topk=0):
                 int(row["source_index"]),
                 normalize_orientation(row["orientation"]),
             ))
+        for row in payload.get("range_violations", ()):
+            rows.append((
+                int(row["source_index"]),
+                normalize_orientation(row["orientation"]),
+            ))
         if activation_topk:
             for activation in payload.get("activations", {}).values():
                 for row in activation.get("tail", ())[:activation_topk]:
