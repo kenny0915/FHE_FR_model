@@ -10,6 +10,9 @@ from configs.ms1mv3_r50_no_relu_phase2_wider_robust_margin import (
 from configs.ms1mv3_r50_no_relu_phase2_wider_ms1mv3_focus1 import (
     config as wider_ms1mv3_focus_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_wider_ms1mv3_focus2 import (
+    config as wider_ms1mv3_focus2_config,
+)
 from dataset import MXFaceDataset, PairedOrientationDataset
 from evaluate_numerical_gate import make_gate_dataset
 from utils.utils_widerface import (
@@ -105,6 +108,15 @@ def test_wider_experiment_keeps_ijb_out_of_training_and_selection():
     assert focus.calibration_replay_activation_topk == 64
     assert focus.ijbc_gate_failure_repeats == 128
     assert focus.numerical_range_gate_limit == pytest.approx(4.0)
+    focus2 = wider_ms1mv3_focus2_config
+    assert focus2.backbone_init.endswith(
+        "wider_ms1mv3_focus1/model_epoch_04.pt")
+    assert len(focus2.calibration_priority_manifests) == 5
+    assert all("wider_ms1mv3_focus1/full_gate_epoch_" in path
+               for path in focus2.calibration_priority_manifests)
+    assert focus2.ijbc_gate_failure_repeats == 256
+    assert focus2.max_step_update_ratio == pytest.approx(5e-6)
+    assert focus2.steps_per_epoch == 300
 
 
 def test_standalone_wider_gate_uses_held_out_fold():
