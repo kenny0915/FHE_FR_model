@@ -37,6 +37,9 @@ from configs.ms1mv3_r50_no_relu_phase2_ms1mv3_numerical_focus1 import (
 from configs.ms1mv3_r50_no_relu_phase2_ms1mv3_robust_margin import (
     config as ms1mv3_robust_margin_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_ms1mv3_robust_margin_focus1 import (
+    config as ms1mv3_robust_margin_focus1_config,
+)
 from backbones.iresnet_no_relu import iresnet18
 from train_ijbc_numerical_calibration import make_adversarial_tail_images
 from utils.utils_multi_objective import (
@@ -284,6 +287,13 @@ def test_ms1mv3_robust_margin_uses_wide_replay_and_bounded_attack():
     assert config.adversarial_tail_enabled
     assert config.adversarial_tail_epsilon == pytest.approx(16.0 / 255.0)
     assert config.adversarial_tail_steps == 3
+    focus = ms1mv3_robust_margin_focus1_config
+    assert focus.backbone_init.endswith("model_epoch_03.pt")
+    assert focus.calibration_priority_manifests[0].endswith(
+        "full_gate_epoch_03.json")
+    assert focus.calibration_replay_activation_topk == 64
+    assert focus.ijbc_gate_failure_repeats == 256
+    assert focus.numerical_range_gate_limit == pytest.approx(4.0)
 
 
 def test_causal_range_penalty_uses_earliest_violation_per_sample():
