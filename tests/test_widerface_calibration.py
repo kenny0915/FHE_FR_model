@@ -6,7 +6,7 @@ import torch
 from configs.ms1mv3_r50_no_relu_phase2_wider_robust_margin import (
     config as wider_config,
 )
-from dataset import PairedOrientationDataset
+from dataset import MXFaceDataset, PairedOrientationDataset
 from evaluate_numerical_gate import make_gate_dataset
 from utils.utils_widerface import (
     WIDERFaceDataset,
@@ -102,3 +102,16 @@ def test_wider_crop_rejects_invalid_boxes():
     image = np.zeros((20, 20, 3), dtype=np.uint8)
     with pytest.raises(ValueError, match="must be positive"):
         crop_wider_face(image, (1, 1, 0, 10))
+
+
+def test_mxface_oriented_conversion_does_not_require_numpy_bridge():
+    dataset = object.__new__(MXFaceDataset)
+    pixels = np.array([[[0, 127, 255], [255, 127, 0]]], dtype=np.uint8)
+    dataset._read = lambda index: (pixels, torch.tensor(3))
+    original, label = dataset.get_oriented(0, 0)
+    flipped, _ = dataset.get_oriented(0, 1)
+    assert label.item() == 3
+    assert original.shape == (3, 1, 2)
+    assert original[0, 0, 0].item() == pytest.approx(-1.0)
+    assert original[2, 0, 0].item() == pytest.approx(1.0)
+    torch.testing.assert_close(flipped, torch.flip(original, dims=(-1,)))

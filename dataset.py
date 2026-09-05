@@ -232,7 +232,16 @@ class MXFaceDataset(Dataset):
     def get_oriented(self, index, orientation):
         """Return a deterministic canonical or horizontally flipped image."""
         sample, label = self._read(index)
-        sample = self.oriented_transform(sample)
+        # Match ToTensor + Normalize([.5] * 3, [.5] * 3) without relying on
+        # PyTorch's optional NumPy bridge.  This remains usable when a
+        # NumPy-1-built PyTorch is deployed beside NumPy 2.x.
+        height, width, channels = sample.shape
+        if channels != 3 or sample.dtype != np.uint8:
+            raise ValueError("MXFace deterministic input must be uint8 HWC RGB")
+        buffer = bytearray(np.ascontiguousarray(sample).tobytes())
+        sample = torch.frombuffer(buffer, dtype=torch.uint8).reshape(
+            height, width, channels).permute(2, 0, 1).float()
+        sample = sample / 127.5 - 1.0
         if int(orientation):
             sample = torch.flip(sample, dims=(-1,))
         return sample, label
