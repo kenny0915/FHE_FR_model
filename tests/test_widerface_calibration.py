@@ -6,6 +6,9 @@ import torch
 from configs.ms1mv3_r50_no_relu_phase2_wider_robust_margin import (
     config as wider_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_wider_ms1mv3_focus1 import (
+    config as wider_ms1mv3_focus_config,
+)
 from dataset import MXFaceDataset, PairedOrientationDataset
 from evaluate_numerical_gate import make_gate_dataset
 from utils.utils_widerface import (
@@ -92,6 +95,15 @@ def test_wider_experiment_keeps_ijb_out_of_training_and_selection():
     assert config.numerical_range_gate_limit == pytest.approx(4.0)
     assert config.herpn_range_limit == pytest.approx(6.0)
     assert config.adversarial_tail_enabled
+    focus = wider_ms1mv3_focus_config
+    assert focus.calibration_dataset == "ms1mv3"
+    assert focus.backbone_init.endswith(
+        "wider_robust_margin/model_numerical_gate_zero.pt")
+    assert focus.calibration_priority_manifests[0].endswith(
+        "model_numerical_gate_zero_ms1mv3_gate.json")
+    assert focus.calibration_replay_activation_topk == 64
+    assert focus.ijbc_gate_failure_repeats == 128
+    assert focus.numerical_range_gate_limit == pytest.approx(4.0)
 
 
 def test_standalone_wider_gate_uses_held_out_fold():
