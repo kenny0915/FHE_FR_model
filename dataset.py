@@ -6,6 +6,11 @@ from typing import Iterable
 
 import numpy as np
 
+# MXNet 1.x still imports the legacy scalar alias removed by NumPy 1.24.
+# Inspect ``__dict__`` directly because ``hasattr(np, "bool")`` itself emits
+# a FutureWarning on the affected NumPy releases.
+if 'bool' not in np.__dict__:
+    np.bool = np.bool_
 if not hasattr(np, 'PZERO'):
     np.PZERO = 0.0
 if not hasattr(np, 'NZERO'):

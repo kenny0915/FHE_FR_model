@@ -121,6 +121,7 @@ def test_wider_crop_rejects_invalid_boxes():
 
 
 def test_mxface_oriented_conversion_does_not_require_numpy_bridge():
+    assert np.bool is np.bool_
     dataset = object.__new__(MXFaceDataset)
     pixels = np.array([[[0, 127, 255], [255, 127, 0]]], dtype=np.uint8)
     dataset._read = lambda index: (pixels, torch.tensor(3))
