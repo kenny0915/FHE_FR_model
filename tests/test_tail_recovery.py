@@ -41,7 +41,10 @@ from configs.ms1mv3_r50_no_relu_phase2_ms1mv3_robust_margin_focus1 import (
     config as ms1mv3_robust_margin_focus1_config,
 )
 from backbones.iresnet_no_relu import iresnet18
-from train_ijbc_numerical_calibration import make_adversarial_tail_images
+from train_ijbc_numerical_calibration import (
+    all_gather_variable_rows,
+    make_adversarial_tail_images,
+)
 from utils.utils_multi_objective import (
     combine_conflict_aware_gradients,
     project_to_relative_trust_region,
@@ -366,6 +369,15 @@ def test_adversarial_tail_images_respect_pixel_and_epsilon_bounds():
     assert torch.all(adversarial >= -1.0)
     assert objective.item() > 0.0
     assert not torch.equal(adversarial, images)
+
+
+def test_variable_row_gather_has_numpy_free_single_rank_fallback():
+    rows = torch.tensor([[3, 1], [7, 0]], dtype=torch.long)
+    gathered = all_gather_variable_rows(rows)
+    assert len(gathered) == 1
+    torch.testing.assert_close(gathered[0], rows)
+    with pytest.raises(ValueError, match="2-D"):
+        all_gather_variable_rows(torch.tensor([1, 2]))
 
 
 def test_conflict_gradient_projection_and_trust_region_are_bounded():

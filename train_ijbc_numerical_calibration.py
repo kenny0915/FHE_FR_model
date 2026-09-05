@@ -89,6 +89,33 @@ def next_cycled(iterator, loader, sampler, cycle):
         return next(iterator), iterator, cycle
 
 
+def all_gather_variable_rows(rows):
+    """Gather a 2-D tensor without PyTorch's NumPy-based object collective."""
+    if rows.ndim != 2:
+        raise ValueError("Distributed row gather expects a 2-D tensor")
+    if not distributed.is_initialized() or distributed.get_world_size() == 1:
+        return (rows.detach().cpu(),)
+    world_size = distributed.get_world_size()
+    local_count = torch.tensor(
+        [rows.shape[0]], dtype=torch.long, device=rows.device)
+    counts = [torch.zeros_like(local_count) for _ in range(world_size)]
+    distributed.all_gather(counts, local_count)
+    counts = [int(count.item()) for count in counts]
+    maximum = max(counts)
+    if maximum == 0:
+        return tuple(
+            rows.new_empty((0, rows.shape[1])).cpu()
+            for _ in range(world_size))
+    padded = rows.new_zeros((maximum, rows.shape[1]))
+    if rows.shape[0]:
+        padded[:rows.shape[0]].copy_(rows)
+    gathered = [torch.empty_like(padded) for _ in range(world_size)]
+    distributed.all_gather(gathered, padded)
+    return tuple(
+        shard[:count].detach().cpu()
+        for shard, count in zip(gathered, counts))
+
+
 def choose_preservation_orientations(source_count, excluded_sources, count, seed):
     candidates = [index for index in range(source_count)
                   if index not in excluded_sources]
@@ -172,19 +199,28 @@ def full_dataset_gate(
     finally:
         for handle in handles:
             handle.remove()
-    gathered_outputs = [None] * world_size
-    gathered_ranges = [None] * world_size
-    distributed.all_gather_object(
-        gathered_outputs, sorted(local_output_failures))
-    distributed.all_gather_object(gathered_ranges, local_range_failures)
+    local_outputs = torch.tensor(
+        sorted(local_output_failures), dtype=torch.long,
+        device=device).reshape(-1, 2)
+    gathered_outputs = all_gather_variable_rows(local_outputs)
+    activation_indices = {
+        name: index for index, name in enumerate(activation_names)}
+    local_ranges = torch.tensor([
+        (index, orientation, activation_indices[value[0]], value[1])
+        for (index, orientation), value in sorted(local_range_failures.items())
+    ], dtype=torch.float64, device=device).reshape(-1, 4)
+    gathered_ranges = all_gather_variable_rows(local_ranges)
     distributed.all_reduce(local_global_peak, op=distributed.ReduceOp.MAX)
     output_failures = tuple(sorted({
-        row for shard in gathered_outputs for row in shard
+        (int(row[0]), int(row[1]))
+        for shard in gathered_outputs for row in shard.tolist()
     }))
     range_failures = {}
     for shard in gathered_ranges:
-        for key, value in shard.items():
-            range_failures.setdefault(key, value)
+        for index, orientation, activation_index, peak in shard.tolist():
+            range_failures.setdefault(
+                (int(index), int(orientation)),
+                (activation_names[int(activation_index)], float(peak)))
     return {
         "output_nonfinite": output_failures,
         "range_violations": tuple(
