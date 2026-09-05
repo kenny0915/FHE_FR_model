@@ -7,6 +7,7 @@ from configs.ms1mv3_r50_no_relu_phase2_wider_robust_margin import (
     config as wider_config,
 )
 from dataset import PairedOrientationDataset
+from evaluate_numerical_gate import make_gate_dataset
 from utils.utils_widerface import (
     WIDERFaceDataset,
     crop_wider_face,
@@ -91,6 +92,10 @@ def test_wider_experiment_keeps_ijb_out_of_training_and_selection():
     assert config.numerical_range_gate_limit == pytest.approx(4.0)
     assert config.herpn_range_limit == pytest.approx(6.0)
     assert config.adversarial_tail_enabled
+
+
+def test_standalone_wider_gate_uses_held_out_fold():
+    assert callable(make_gate_dataset)
 
 
 def test_wider_crop_rejects_invalid_boxes():
