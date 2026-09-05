@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import pytest
 import torch
+from pathlib import Path
 
 from configs.ms1mv3_r50_no_relu_phase2_wider_robust_margin import (
     config as wider_config,
@@ -108,6 +109,9 @@ def test_wider_experiment_keeps_ijb_out_of_training_and_selection():
 
 def test_standalone_wider_gate_uses_held_out_fold():
     assert callable(make_gate_dataset)
+    script = Path("scripts/slurm_gate_wider_validation_checkpoints.sh").read_text()
+    assert "--dataset wider --wider-split validation" in script
+    assert "--range-gate-limit 4" in script
 
 
 def test_wider_crop_rejects_invalid_boxes():
