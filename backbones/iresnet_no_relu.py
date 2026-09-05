@@ -204,6 +204,7 @@ class ProgressiveHerPNActivation(nn.Module):
         self._last_sample_range_penalty = None
         self._last_distillation_loss = None
         self._last_input_absmax = None
+        self._last_sample_input_ratio = None
         self._last_outside_fraction = None
         self.range_penalty_mode = str(range_penalty_mode)
         self.range_topk_fraction = float(range_topk_fraction)
@@ -227,6 +228,9 @@ class ProgressiveHerPNActivation(nn.Module):
 
     def sample_range_penalty(self):
         return self._last_sample_range_penalty
+
+    def sample_input_ratio(self):
+        return self._last_sample_input_ratio
 
     def distillation_loss(self):
         return self._last_distillation_loss
@@ -277,8 +281,9 @@ class ProgressiveHerPNActivation(nn.Module):
             limit = self.range_limit.to(device=x.device, dtype=compute_x.dtype)
             excess = torch.relu(compute_x.abs() - limit)
             sample_peak = compute_x.abs().flatten(1).amax(dim=1)
+            self._last_sample_input_ratio = sample_peak / limit
             self._last_sample_range_penalty = torch.relu(
-                sample_peak / limit - self.range_guard_ratio)
+                self._last_sample_input_ratio - self.range_guard_ratio)
             if self.range_penalty_mode == 'sample_max_tail':
                 # Each image contributes through its worst channel/spatial
                 # token.  The network-level causal reducer then selects the
@@ -311,6 +316,7 @@ class ProgressiveHerPNActivation(nn.Module):
         else:
             self._last_range_penalty = None
             self._last_sample_range_penalty = None
+            self._last_sample_input_ratio = None
             self._last_distillation_loss = None
 
         blend = self._blend
@@ -627,6 +633,35 @@ class IResNet(nn.Module):
             return per_sample.mean() + 0.1 * per_sample.amax()
         raise ValueError(
             "causal range reduction must be 'max', 'mean', or 'mean_max'")
+
+    def herpn_adversarial_range_objective(
+            self, activation_names, reduction='mean_max'):
+        """Smoothly expose the largest pre-HerPN ratio to an input attack.
+
+        Unlike the containment penalty, this objective retains an input
+        gradient below the guard interval.  It is used only to synthesize
+        bounded training examples and never changes the inference graph.
+        ``log1p`` prevents an already-large layer from overwhelming the
+        numerical objective.
+        """
+        activations = self._selected_progressive_activations(activation_names)
+        ratios = [activation.sample_input_ratio() for activation in activations]
+        if not ratios or any(ratio is None for ratio in ratios):
+            return next(self.parameters()).new_zeros(())
+        batch_sizes = {int(ratio.shape[0]) for ratio in ratios}
+        if len(batch_sizes) != 1:
+            raise RuntimeError(
+                "Adversarial HerPN ratios have inconsistent batch sizes")
+        per_sample = torch.log1p(torch.stack(ratios, dim=0)).amax(dim=0)
+        if reduction == 'mean':
+            return per_sample.mean()
+        if reduction == 'max':
+            return per_sample.amax()
+        if reduction == 'mean_max':
+            return per_sample.mean() + 0.1 * per_sample.amax()
+        raise ValueError(
+            "adversarial range reduction must be 'max', 'mean', or "
+            "'mean_max'")
 
     def herpn_distillation_loss(self, activation_names=None):
         losses = [activation.distillation_loss()

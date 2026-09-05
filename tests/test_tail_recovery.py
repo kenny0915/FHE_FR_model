@@ -34,7 +34,11 @@ from configs.ms1mv3_r50_no_relu_phase2_ms1mv3_numerical_calibration import (
 from configs.ms1mv3_r50_no_relu_phase2_ms1mv3_numerical_focus1 import (
     config as ms1mv3_focus1_config,
 )
+from configs.ms1mv3_r50_no_relu_phase2_ms1mv3_robust_margin import (
+    config as ms1mv3_robust_margin_config,
+)
 from backbones.iresnet_no_relu import iresnet18
+from train_ijbc_numerical_calibration import make_adversarial_tail_images
 from utils.utils_multi_objective import (
     combine_conflict_aware_gradients,
     project_to_relative_trust_region,
@@ -266,6 +270,18 @@ def test_ijbc_calibration_replays_latest_failures_with_fixed_bn_graph():
         "full_gate_epoch_04.json")
 
 
+def test_ms1mv3_robust_margin_uses_wide_replay_and_bounded_attack():
+    config = ms1mv3_robust_margin_config
+    assert config.backbone_init.endswith("model_epoch_23.pt")
+    assert config.calibration_replay_activation_topk == 4096
+    assert config.herpn_range_limit == pytest.approx(6.0)
+    assert config.herpn_range_guard_ratio == pytest.approx(2.0 / 3.0)
+    assert config.numerical_range_gate_limit == pytest.approx(4.0)
+    assert config.adversarial_tail_enabled
+    assert config.adversarial_tail_epsilon == pytest.approx(16.0 / 255.0)
+    assert config.adversarial_tail_steps == 3
+
+
 def test_causal_range_penalty_uses_earliest_violation_per_sample():
     model = iresnet18(
         herpn_progress=5.0,
@@ -285,6 +301,57 @@ def test_causal_range_penalty_uses_earliest_violation_per_sample():
         names, reduction="mean_max").item() == pytest.approx(0.28)
     with pytest.raises(ValueError, match="causal range reduction"):
         model.herpn_causal_range_penalty(names, reduction="sum")
+
+
+def test_adversarial_range_objective_has_gradient_below_guard():
+    model = iresnet18(
+        herpn_progress=5.0,
+        herpn_range_penalty_mode="sample_max_tail",
+    )
+    activations = dict(model.named_modules())
+    names = ("layer1.0.prelu", "layer1.1.prelu")
+    first = torch.tensor([0.2, 0.4], requires_grad=True)
+    second = torch.tensor([0.3, 0.1], requires_grad=True)
+    activations[names[0]]._last_sample_input_ratio = first
+    activations[names[1]]._last_sample_input_ratio = second
+    objective = model.herpn_adversarial_range_objective(names, reduction="mean")
+    expected = torch.log1p(torch.tensor([0.3, 0.4])).mean()
+    assert objective.item() == pytest.approx(expected.item())
+    objective.backward()
+    assert first.grad is not None
+    assert second.grad is not None
+    assert first.grad[1] > 0
+    assert second.grad[0] > 0
+
+
+def test_adversarial_tail_images_respect_pixel_and_epsilon_bounds():
+    class ToyRangeModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.ones(()))
+            self.ratio = None
+
+        def forward(self, images):
+            self.ratio = images.square().flatten(1).mean(dim=1) * self.scale
+            return images.flatten(1)
+
+        def herpn_adversarial_range_objective(self, names, reduction):
+            assert names == ("toy",)
+            assert reduction == "mean_max"
+            values = torch.log1p(self.ratio)
+            return values.mean() + 0.1 * values.amax()
+
+    model = ToyRangeModel()
+    images = torch.full((2, 3, 4, 4), 0.25)
+    adversarial, objective = make_adversarial_tail_images(
+        model, images, ("toy",), epsilon=0.1, step_size=0.05,
+        steps=2, random_start=False)
+    assert torch.all(adversarial <= images + 0.1 + 1e-7)
+    assert torch.all(adversarial >= images - 0.1 - 1e-7)
+    assert torch.all(adversarial <= 1.0)
+    assert torch.all(adversarial >= -1.0)
+    assert objective.item() > 0.0
+    assert not torch.equal(adversarial, images)
 
 
 def test_conflict_gradient_projection_and_trust_region_are_bounded():

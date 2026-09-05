@@ -101,24 +101,135 @@ def choose_preservation_orientations(source_count, excluded_sources, count, seed
 
 
 @torch.no_grad()
-def full_dataset_gate(model, loader, device, rank, world_size):
+def full_dataset_gate(
+        model, loader, device, rank, world_size, *,
+        activation_names=(), range_gate_limit=None):
     model.set_herpn_training_stabilization(None)
     model.eval()
-    local_failures = []
-    for pairs, source_indices in loader:
-        images = pairs.flatten(0, 1).to(device, non_blocking=True)
-        embeddings = model(images)
-        finite = torch.isfinite(embeddings).all(dim=1).cpu().tolist()
-        indices = source_indices.repeat_interleave(2).tolist()
-        orientations = [0, 1] * int(source_indices.numel())
-        local_failures.extend(
-            (int(index), orientation)
-            for index, orientation, ok in zip(indices, orientations, finite)
-            if not ok)
-    gathered = [None] * world_size
-    distributed.all_gather_object(gathered, local_failures)
-    failures = sorted({row for shard in gathered for row in shard})
-    return tuple(failures)
+    activation_names = tuple(activation_names)
+    if range_gate_limit is not None and float(range_gate_limit) <= 0.0:
+        raise ValueError("range_gate_limit must be positive or None")
+    modules = dict(model.named_modules())
+    unknown = sorted(set(activation_names).difference(modules))
+    if unknown:
+        raise ValueError(f"Unknown range-gate activations: {unknown}")
+    local_output_failures = set()
+    local_range_failures = {}
+    batch_peaks = []
+    handles = []
+    if range_gate_limit is not None:
+        def capture(_, inputs):
+            values = inputs[0].detach().float()
+            finite = torch.isfinite(values).flatten(1).all(dim=1)
+            peaks = torch.nan_to_num(
+                values.abs(), nan=torch.finfo(torch.float32).max,
+                posinf=torch.finfo(torch.float32).max,
+                neginf=torch.finfo(torch.float32).max,
+            ).flatten(1).amax(dim=1)
+            batch_peaks.append((peaks, finite))
+
+        handles = [
+            modules[name].register_forward_pre_hook(capture)
+            for name in activation_names
+        ]
+    local_global_peak = torch.zeros((), device=device)
+    try:
+        for pairs, source_indices in loader:
+            images = pairs.flatten(0, 1).to(device, non_blocking=True)
+            indices = source_indices.repeat_interleave(2).tolist()
+            orientations = [0, 1] * int(source_indices.numel())
+            batch_peaks.clear()
+            embeddings = model(images)
+            finite_output = torch.isfinite(embeddings).all(dim=1).cpu().tolist()
+            local_output_failures.update(
+                (int(index), orientation)
+                for index, orientation, ok in zip(
+                    indices, orientations, finite_output)
+                if not ok)
+            if range_gate_limit is None:
+                continue
+            if len(batch_peaks) != len(activation_names):
+                raise RuntimeError(
+                    "Range gate did not observe every HerPN activation")
+            peaks = torch.stack([row[0] for row in batch_peaks], dim=0)
+            finite_inputs = torch.stack(
+                [row[1] for row in batch_peaks], dim=0)
+            violations = (~finite_inputs) | (peaks > float(range_gate_limit))
+            any_violation = violations.any(dim=0)
+            first_activation = violations.to(torch.uint8).argmax(dim=0)
+            first_peak = peaks.gather(0, first_activation.unsqueeze(0)).squeeze(0)
+            local_global_peak = torch.maximum(local_global_peak, peaks.amax())
+            positions = any_violation.nonzero(as_tuple=False).flatten().cpu().tolist()
+            first_activation = first_activation.cpu().tolist()
+            first_peak = first_peak.cpu().tolist()
+            for position in positions:
+                key = (int(indices[position]), int(orientations[position]))
+                local_range_failures.setdefault(key, (
+                    activation_names[int(first_activation[position])],
+                    float(first_peak[position]),
+                ))
+    finally:
+        for handle in handles:
+            handle.remove()
+    gathered_outputs = [None] * world_size
+    gathered_ranges = [None] * world_size
+    distributed.all_gather_object(
+        gathered_outputs, sorted(local_output_failures))
+    distributed.all_gather_object(gathered_ranges, local_range_failures)
+    distributed.all_reduce(local_global_peak, op=distributed.ReduceOp.MAX)
+    output_failures = tuple(sorted({
+        row for shard in gathered_outputs for row in shard
+    }))
+    range_failures = {}
+    for shard in gathered_ranges:
+        for key, value in shard.items():
+            range_failures.setdefault(key, value)
+    return {
+        "output_nonfinite": output_failures,
+        "range_violations": tuple(
+            (key[0], key[1], value[0], value[1])
+            for key, value in sorted(range_failures.items())
+        ),
+        "max_preherpn_absmax": (
+            None if range_gate_limit is None
+            else float(local_global_peak.cpu().item())
+        ),
+    }
+
+
+def make_adversarial_tail_images(
+        model, images, activation_names, *, epsilon, step_size, steps,
+        random_start=True):
+    """Maximize pre-HerPN ranges inside a bounded normalized-pixel ball."""
+    epsilon = float(epsilon)
+    step_size = float(step_size)
+    steps = int(steps)
+    if epsilon <= 0.0 or step_size <= 0.0 or steps <= 0:
+        raise ValueError("adversarial epsilon/step-size/steps must be positive")
+    clean = images.detach()
+    lower = torch.maximum(clean - epsilon, clean.new_tensor(-1.0))
+    upper = torch.minimum(clean + epsilon, clean.new_tensor(1.0))
+    adversarial = clean.clone()
+    if random_start:
+        adversarial.add_(
+            torch.empty_like(adversarial).uniform_(-epsilon, epsilon))
+        adversarial = torch.maximum(torch.minimum(adversarial, upper), lower)
+    last_objective = clean.new_zeros(())
+    for _ in range(steps):
+        adversarial.requires_grad_(True)
+        model(adversarial)
+        objective = model.herpn_adversarial_range_objective(
+            activation_names, reduction="mean_max")
+        gradient, = torch.autograd.grad(
+            objective, adversarial, only_inputs=True)
+        if not torch.isfinite(gradient).all():
+            break
+        with torch.no_grad():
+            adversarial = adversarial + step_size * gradient.sign()
+            adversarial = torch.maximum(
+                torch.minimum(adversarial, upper), lower)
+        last_objective = objective.detach()
+    return adversarial.detach(), last_objective
 
 
 def build_model(cfg, checkpoint, device, penalty_mode=True):
@@ -224,6 +335,11 @@ def main(config_path):
     if len(activation_names) != 25:
         raise RuntimeError(f"Expected 25 HerPN activations, found {len(activation_names)}")
     frozen_batchnorm_count = freeze_batchnorm_buffers(model)
+    range_gate_limit = getattr(cfg, "numerical_range_gate_limit", None)
+    range_gate_limit = (
+        None if range_gate_limit is None else float(range_gate_limit))
+    adversarial_enabled = bool(getattr(
+        cfg, "adversarial_tail_enabled", False))
 
     if rank == 0:
         logging.info(
@@ -237,6 +353,10 @@ def main(config_path):
             cfg.herpn_range_limit, cfg.herpn_range_limit,
             cfg.herpn_range_guard_ratio,
             frozen_batchnorm_count, len(bn_reference))
+        logging.info(
+            "Range gate=%s; adversarial tail=%s",
+            "disabled" if range_gate_limit is None else range_gate_limit,
+            adversarial_enabled)
 
     global_step = 0
     skipped = 0
@@ -275,6 +395,17 @@ def main(config_path):
                 - F.normalize(teacher_embeddings.float(), dim=1, eps=1e-6)
             ).square().sum(dim=1).mean()
 
+            adversarial_objective = tail_images.new_zeros(())
+            if adversarial_enabled:
+                adversarial_images, adversarial_objective = (
+                    make_adversarial_tail_images(
+                        model, tail_images, activation_names,
+                        epsilon=float(cfg.adversarial_tail_epsilon),
+                        step_size=float(cfg.adversarial_tail_step_size),
+                        steps=int(cfg.adversarial_tail_steps),
+                        random_start=bool(cfg.adversarial_tail_random_start),
+                    ))
+                tail_images = torch.cat((tail_images, adversarial_images), dim=0)
             tail_embeddings = model(tail_images)
             range_penalty = model.herpn_causal_range_penalty(
                 activation_names, reduction=str(cfg.causal_range_reduction))
@@ -325,6 +456,11 @@ def main(config_path):
                     stats["conflicts"], stats["tail_limited"],
                     stats["update_limited"], trust["worst_relative_delta"],
                     skipped)
+                if adversarial_enabled:
+                    logging.info(
+                        "epoch=%d step=%d/%d adversarial_objective=%.7g",
+                        epoch, step, cfg.steps_per_epoch,
+                        float(adversarial_objective))
 
         assert_batchnorm_buffers_unchanged(model, bn_reference)
         model_path = os.path.join(cfg.output, f"model_epoch_{epoch:02d}.pt")
@@ -333,27 +469,51 @@ def main(config_path):
         distributed.barrier()
 
         gate_sampler.set_epoch(epoch)
-        failures = full_dataset_gate(
-            model, gate_loader, device, rank, world_size)
+        gate = full_dataset_gate(
+            model, gate_loader, device, rank, world_size,
+            activation_names=activation_names,
+            range_gate_limit=range_gate_limit)
+        output_failures = gate["output_nonfinite"]
+        range_violations = gate["range_violations"]
+        range_failure_rows = {
+            (index, orientation)
+            for index, orientation, _, _ in range_violations
+        }
+        failures = tuple(sorted(
+            set(output_failures).union(range_failure_rows)))
         gate_payload = {
             "format": f"exact_{dataset_name}_numerical_gate_v1",
             "dataset": dataset_name,
             "epoch": epoch,
             "checkpoint": model_path,
             "total_augmented_embeddings": 2 * len(source_dataset),
-            "nonfinite_count": len(failures),
+            "nonfinite_count": len(output_failures),
+            "range_gate_limit": range_gate_limit,
+            "range_violation_count": len(range_violations),
+            "numerical_failure_count": len(failures),
+            "max_preherpn_absmax": gate["max_preherpn_absmax"],
             "output_nonfinite": [
                 {"source_index": index, "orientation": orientation}
-                for index, orientation in failures],
+                for index, orientation in output_failures],
+            "range_violations": [
+                {
+                    "source_index": index,
+                    "orientation": orientation,
+                    "first_activation": activation,
+                    "input_absmax": peak,
+                }
+                for index, orientation, activation, peak in range_violations],
         }
         if rank == 0:
             atomic_json_dump(
                 gate_payload,
                 os.path.join(cfg.output, f"full_gate_epoch_{epoch:02d}.json"))
             logging.info(
-                "Epoch %d full %s gate: nonfinite=%d/%d", epoch,
-                dataset_name.upper(),
-                len(failures), 2 * len(source_dataset))
+                "Epoch %d full %s gate: nonfinite=%d range=%d "
+                "numerical=%d/%d max_preherpn=%s", epoch,
+                dataset_name.upper(), len(output_failures),
+                len(range_violations), len(failures),
+                2 * len(source_dataset), gate["max_preherpn_absmax"])
         if not failures:
             if rank == 0:
                 atomic_torch_save(
