@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset
 
-from dataset import DatasetWithIndex
+from dataset import DatasetWithIndex, PairedOrientationDataset
 
 
 class _TinyDataset(Dataset):
@@ -28,3 +28,19 @@ def test_dataset_with_index_can_scan_both_orientations():
     assert (first_orientation, flipped_orientation) == (0, 1)
     assert torch.equal(second, torch.tensor([[11, 12]]))
 
+
+class _OrientedTinyDataset(_TinyDataset):
+    def get_oriented(self, index, orientation):
+        image, label = self[index]
+        if orientation:
+            image = torch.flip(image, dims=(-1,))
+        return image, label
+
+
+def test_paired_orientation_dataset_returns_original_and_flip():
+    wrapped = PairedOrientationDataset(_OrientedTinyDataset())
+    pair, index = wrapped[1]
+    assert index == 1
+    assert pair.shape == (2, 1, 2)
+    assert torch.equal(pair[0], torch.tensor([[11, 12]]))
+    assert torch.equal(pair[1], torch.tensor([[12, 11]]))

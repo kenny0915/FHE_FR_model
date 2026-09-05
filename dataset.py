@@ -277,6 +277,26 @@ class DatasetWithIndex(Dataset):
         return multiplier * len(self.dataset)
 
 
+class PairedOrientationDataset(Dataset):
+    """Return deterministic original/flip pairs for a training dataset."""
+
+    def __init__(self, dataset):
+        super().__init__()
+        if not callable(getattr(dataset, "get_oriented", None)):
+            raise ValueError(
+                "PairedOrientationDataset requires dataset.get_oriented")
+        self.dataset = dataset
+
+    def __getitem__(self, index):
+        index = int(index)
+        original = self.dataset.get_oriented(index, 0)[0]
+        flipped = self.dataset.get_oriented(index, 1)[0]
+        return torch.stack((original, flipped)), index
+
+    def __len__(self):
+        return len(self.dataset)
+
+
 class SyntheticDataset(Dataset):
     def __init__(self):
         super(SyntheticDataset, self).__init__()

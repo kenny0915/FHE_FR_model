@@ -15,10 +15,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from backbones import get_model
+from dataset import DatasetWithIndex, MXFaceDataset, PairedOrientationDataset
 from mine_herpn_tails import atomic_json_dump
 from train_tail_recovery import (
     atomic_torch_save,
@@ -100,7 +101,7 @@ def choose_preservation_orientations(source_count, excluded_sources, count, seed
 
 
 @torch.no_grad()
-def full_ijbc_gate(model, loader, device, rank, world_size):
+def full_dataset_gate(model, loader, device, rank, world_size):
     model.set_herpn_training_stabilization(None)
     model.eval()
     local_failures = []
@@ -135,6 +136,34 @@ def build_model(cfg, checkpoint, device, penalty_mode=True):
     return model
 
 
+def make_calibration_datasets(cfg, local_rank):
+    dataset_name = str(getattr(cfg, "calibration_dataset", "ijbc")).lower()
+    if dataset_name == "ijbc":
+        source_dataset = IJBCSourceDataset(cfg.ijbc_root, cfg.ijbc_target)
+
+        def orientations(rows):
+            return IJBCOrientationDataset(
+                cfg.ijbc_root, rows, cfg.ijbc_target)
+
+        return dataset_name, source_dataset, orientations
+    if dataset_name == "ms1mv3":
+        base_dataset = MXFaceDataset(cfg.rec, local_rank)
+        source_dataset = PairedOrientationDataset(base_dataset)
+        oriented_dataset = DatasetWithIndex(
+            base_dataset, both_orientations=True)
+
+        def orientations(rows):
+            return Subset(
+                oriented_dataset,
+                [2 * int(index) + int(orientation)
+                 for index, orientation in rows],
+            )
+
+        return dataset_name, source_dataset, orientations
+    raise ValueError(
+        "calibration_dataset must be either 'ijbc' or 'ms1mv3'")
+
+
 def main(config_path):
     distributed.init_process_group("nccl")
     rank = distributed.get_rank()
@@ -147,24 +176,29 @@ def main(config_path):
     os.makedirs(cfg.output, exist_ok=True)
     init_logging(rank, cfg.output)
 
+    replay_manifest_paths = tuple(getattr(
+        cfg, "calibration_replay_manifests", cfg.ijbc_replay_manifests))
+    replay_activation_topk = int(getattr(
+        cfg, "calibration_replay_activation_topk",
+        cfg.ijbc_replay_activation_topk))
     replay = load_ijbc_replay_orientations(
-        tuple(cfg.ijbc_replay_manifests),
-        activation_topk=int(cfg.ijbc_replay_activation_topk))
+        replay_manifest_paths, activation_topk=replay_activation_topk)
     priority_manifest_paths = tuple(getattr(
-        cfg, "ijbc_priority_manifests", ()))
+        cfg, "calibration_priority_manifests",
+        getattr(cfg, "ijbc_priority_manifests", ())))
     priority = (
         load_ijbc_replay_orientations(priority_manifest_paths)
         if priority_manifest_paths else ())
     priority_repeats = int(getattr(cfg, "ijbc_gate_failure_repeats", 1))
     if priority_repeats <= 0:
         raise ValueError("ijbc_gate_failure_repeats must be positive")
-    source_dataset = IJBCSourceDataset(cfg.ijbc_root, cfg.ijbc_target)
+    dataset_name, source_dataset, orientation_dataset = (
+        make_calibration_datasets(cfg, local_rank))
     excluded_sources = {index for index, _ in replay}
     preservation = choose_preservation_orientations(
         len(source_dataset), excluded_sources,
         int(cfg.ijbc_preservation_count), int(cfg.seed))
-    preservation_dataset = IJBCOrientationDataset(
-        cfg.ijbc_root, preservation, cfg.ijbc_target)
+    preservation_dataset = orientation_dataset(preservation)
     preservation_loader, preservation_sampler = make_loader(
         preservation_dataset, cfg.preservation_batch_size,
         cfg.ijbc_workers, rank, world_size, True, cfg.seed)
@@ -193,8 +227,9 @@ def main(config_path):
 
     if rank == 0:
         logging.info(
-            "IJB numerical calibration: checkpoint=%s, hard=%d, preserve=%d, "
-            "trainable=%d, world=%d", cfg.backbone_init, len(replay),
+            "%s numerical calibration: checkpoint=%s, hard=%d, preserve=%d, "
+            "trainable=%d, world=%d", dataset_name.upper(),
+            cfg.backbone_init, len(replay),
             len(preservation), len(trainable_parameters), world_size)
         logging.info(
             "Exact target=PReLU on [-%g,%g], degree=2; training guard=%g; "
@@ -211,8 +246,7 @@ def main(config_path):
         preservation_sampler.set_epoch(epoch)
         preservation_iterator = iter(preservation_loader)
         preservation_cycle = epoch
-        replay_dataset = IJBCOrientationDataset(
-            cfg.ijbc_root, replay_rows, cfg.ijbc_target)
+        replay_dataset = orientation_dataset(replay_rows)
         replay_loader, replay_sampler = make_loader(
             replay_dataset, cfg.replay_batch_size, cfg.ijbc_workers,
             rank, world_size, True, int(cfg.seed) + epoch)
@@ -299,10 +333,11 @@ def main(config_path):
         distributed.barrier()
 
         gate_sampler.set_epoch(epoch)
-        failures = full_ijbc_gate(
+        failures = full_dataset_gate(
             model, gate_loader, device, rank, world_size)
         gate_payload = {
-            "format": "exact_ijbc_numerical_gate_v1",
+            "format": f"exact_{dataset_name}_numerical_gate_v1",
+            "dataset": dataset_name,
             "epoch": epoch,
             "checkpoint": model_path,
             "total_augmented_embeddings": 2 * len(source_dataset),
@@ -316,14 +351,17 @@ def main(config_path):
                 gate_payload,
                 os.path.join(cfg.output, f"full_gate_epoch_{epoch:02d}.json"))
             logging.info(
-                "Epoch %d full IJB-C gate: nonfinite=%d/%d", epoch,
+                "Epoch %d full %s gate: nonfinite=%d/%d", epoch,
+                dataset_name.upper(),
                 len(failures), 2 * len(source_dataset))
         if not failures:
             if rank == 0:
                 atomic_torch_save(
                     model.state_dict(),
                     os.path.join(cfg.output, "model_numerical_gate_zero.pt"))
-                logging.info("Zero non-finite IJB-C gate achieved; stopping")
+                logging.info(
+                    "Zero non-finite %s gate achieved; stopping",
+                    dataset_name.upper())
             break
         known = set(background_replay)
         new_failures = [row for row in failures if row not in known]
