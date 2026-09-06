@@ -432,7 +432,7 @@ def main():
                     f"emb={float(embedding):.4f} hint={float(hint):.4f} "
                     f"pen={float(range_penalty):.3g} oor={np.mean(list(oor.values())):.2e} "
                     f"max/lam={maxima[worst]:.2f}@{worst} "
-                    f"poly={sum(a >= 1 for a in alphas)}/25 {throughput:.0f} img/s",
+                    f"poly={sum(a >= 1 for a in alphas.values())}/25 {throughput:.0f} img/s",
                     flush=True,
                 )
 
