@@ -12,6 +12,7 @@ python -c 'import numpy as np, torch; assert int(np.__version__.split(".")[0]) <
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-work_dirs/controlled_direct_degree2}"
 CANARY_ROOT="${CANARY_ROOT:-${DATASET_ROOT}}"
+CANARY_SETS="${CANARY_SETS:-lfw}"
 GPUS="${GPUS:-4}"
 STAGE="${1:-all}"
 
@@ -42,6 +43,7 @@ if [[ "${STAGE}" == "train" || "${STAGE}" == "all" ]]; then
     --teacher "${TEACHER_CKPT}" \
     --dataset-root "${DATASET_ROOT}" \
     --canary-root "${CANARY_ROOT}" \
+    --canary-sets "${CANARY_SETS}" \
     --output-dir "${OUTPUT_ROOT}/progressive" \
     --epochs 8 \
     --batch-size 128 \
@@ -64,6 +66,7 @@ if [[ "${STAGE}" == "train" || "${STAGE}" == "all" ]]; then
     --teacher "${TEACHER_CKPT}" \
     --dataset-root "${DATASET_ROOT}" \
     --canary-root "${CANARY_ROOT}" \
+    --canary-sets "${CANARY_SETS}" \
     --output-dir "${OUTPUT_ROOT}/polish" \
     --epochs 3 \
     --batch-size 128 \
