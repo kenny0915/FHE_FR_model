@@ -89,6 +89,13 @@ def get_iresnet_layerwise_poly(depth, pretrained=False, progress=True, **kwargs)
     return factory(pretrained=pretrained, progress=progress, **kwargs)
 
 
+def get_controlled_direct_degree2(pretrained=False, progress=True, **kwargs):
+    """Controlled run10-style direct quadratic iResNet-50 experiment."""
+    del pretrained, progress
+    from controlled_degree2.model import build_controlled_iresnet50
+    return build_controlled_iresnet50(**kwargs)
+
+
 def get_iresnet_precise_relu(depth, pretrained=False, progress=True, **kwargs):
     from . import iresnet_precise_relu
     factory = {
@@ -149,7 +156,9 @@ def get_mbf_large_no_relu(fp16=False, num_features=512, blocks=(2, 8, 12, 4), sc
 
 def get_model(name, **kwargs):
     # no-ReLU / FHE-friendly CryptoFace polynomial variants
-    if name in ("r18_herpn_residual_scale",):
+    if name in ("r50_controlled_d2",):
+        return get_controlled_direct_degree2(False, **kwargs)
+    elif name in ("r18_herpn_residual_scale",):
         return get_iresnet_herpn_residual_scale(18, False, **kwargs)
     elif name in ("r34_herpn_residual_scale",):
         return get_iresnet_herpn_residual_scale(34, False, **kwargs)
