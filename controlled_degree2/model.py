@@ -64,7 +64,10 @@ def prelu_to_quadratic_coefficients(
     if even_coeffs is None:
         even = uniform_even_abs_coefficients(lam, channels)
     else:
-        even = torch.as_tensor(even_coeffs, dtype=torch.float32).reshape(channels, 2)
+        even = torch.as_tensor(
+            even_coeffs, dtype=torch.float32, device=slope.device
+        ).reshape(channels, 2)
+    even = even.to(device=slope.device)
     linear = (1.0 + slope) / 2.0
     even_weight = (1.0 - slope) / 2.0
     return torch.stack(
