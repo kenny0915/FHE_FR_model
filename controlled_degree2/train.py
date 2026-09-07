@@ -31,6 +31,7 @@ from controlled_degree2.model import (
     operator_bound_targets,
     quadratic_modules,
     save_checkpoint,
+    scale_intervals,
     set_lam_reg_ratio,
     set_quadratic_schedule,
 )
@@ -76,6 +77,12 @@ def parse_args():
     parser.add_argument("--tail-replay-warmup-steps", type=int, default=100)
     parser.add_argument("--causal-tail-beta", type=float, default=1.0)
     parser.add_argument("--activation-guard-ratio", type=float, default=1.0)
+    parser.add_argument(
+        "--activation-lam-scale",
+        type=float,
+        default=1.0,
+        help="widen every quadratic activation interval before MS1MV3 training",
+    )
     parser.add_argument("--operator-bound-weight", type=float, default=1e-4)
     parser.add_argument("--operator-bound-margin", type=float, default=0.10)
 
@@ -250,6 +257,8 @@ def main():
         raise ValueError("tail and operator-bound weights must be non-negative")
     if args.activation_guard_ratio <= 0 or args.operator_bound_margin < 0:
         raise ValueError("activation guard ratio must be positive and margin non-negative")
+    if args.activation_lam_scale <= 0:
+        raise ValueError("activation lam scale must be positive")
     rank, world_size, local_rank, device = distributed_context()
     seed_everything(args.seed, rank)
     is_primary = rank == 0
@@ -270,6 +279,12 @@ def main():
     for parameter in teacher.parameters():
         parameter.requires_grad_(False)
     calibration = init_payload["poly_calib"]
+    if args.activation_lam_scale != 1.0:
+        scale_intervals(
+            student,
+            calibration,
+            {"all": args.activation_lam_scale},
+        )
     set_lam_reg_ratio(student, args.lam_reg_ratio)
     operator_targets = operator_bound_targets(student, args.operator_bound_margin)
     for entry in calibration.values():
@@ -363,6 +378,7 @@ def main():
         "reference_ranges": "exact run10 checkpoint buffers",
         "causal_tail_layers": causal_names,
         "operator_bound_proxy": "max convolution row Frobenius norm",
+        "activation_lam_scale": args.activation_lam_scale,
     }
     if is_primary:
         with open(
