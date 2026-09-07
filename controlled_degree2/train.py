@@ -83,6 +83,12 @@ def parse_args():
         default=1.0,
         help="widen every quadratic activation interval before MS1MV3 training",
     )
+    parser.add_argument(
+        "--activation-lam-scale-layer3",
+        type=float,
+        default=1.0,
+        help="additional interval widening for layer3 activations",
+    )
     parser.add_argument("--operator-bound-weight", type=float, default=1e-4)
     parser.add_argument("--operator-bound-margin", type=float, default=0.10)
 
@@ -259,6 +265,8 @@ def main():
         raise ValueError("activation guard ratio must be positive and margin non-negative")
     if args.activation_lam_scale <= 0:
         raise ValueError("activation lam scale must be positive")
+    if args.activation_lam_scale_layer3 <= 0:
+        raise ValueError("layer3 activation lam scale must be positive")
     rank, world_size, local_rank, device = distributed_context()
     seed_everything(args.seed, rank)
     is_primary = rank == 0
@@ -284,6 +292,12 @@ def main():
             student,
             calibration,
             {"all": args.activation_lam_scale},
+        )
+    if args.activation_lam_scale_layer3 != 1.0:
+        scale_intervals(
+            student,
+            calibration,
+            {"layer3": args.activation_lam_scale_layer3},
         )
     set_lam_reg_ratio(student, args.lam_reg_ratio)
     operator_targets = operator_bound_targets(student, args.operator_bound_margin)
@@ -379,6 +393,7 @@ def main():
         "causal_tail_layers": causal_names,
         "operator_bound_proxy": "max convolution row Frobenius norm",
         "activation_lam_scale": args.activation_lam_scale,
+        "activation_lam_scale_layer3": args.activation_lam_scale_layer3,
     }
     if is_primary:
         with open(

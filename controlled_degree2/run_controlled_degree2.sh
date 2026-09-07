@@ -14,6 +14,7 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-work_dirs/controlled_direct_degree2}"
 CANARY_ROOT="${CANARY_ROOT:-${DATASET_ROOT}}"
 CANARY_SETS="${CANARY_SETS:-lfw}"
 ACTIVATION_LAM_SCALE="${ACTIVATION_LAM_SCALE:-1.0}"
+ACTIVATION_LAM_SCALE_LAYER3="${ACTIVATION_LAM_SCALE_LAYER3:-1.0}"
 GPUS="${GPUS:-4}"
 STAGE="${1:-all}"
 
@@ -66,6 +67,7 @@ if [[ "${STAGE}" == "train" || "${STAGE}" == "all" ]]; then
     --causal-tail-beta 1.0 \
     --activation-guard-ratio 1.0 \
     --activation-lam-scale "${ACTIVATION_LAM_SCALE}" \
+    --activation-lam-scale-layer3 "${ACTIVATION_LAM_SCALE_LAYER3}" \
     --operator-bound-weight 1e-4 \
     --operator-bound-margin 0.10
 
@@ -97,6 +99,7 @@ if [[ "${STAGE}" == "train" || "${STAGE}" == "all" ]]; then
     --causal-tail-beta 1.0 \
     --activation-guard-ratio 1.0 \
     --activation-lam-scale "${ACTIVATION_LAM_SCALE}" \
+    --activation-lam-scale-layer3 "${ACTIVATION_LAM_SCALE_LAYER3}" \
     --operator-bound-weight 1e-4 \
     --operator-bound-margin 0.10
 fi
