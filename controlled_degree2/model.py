@@ -116,6 +116,8 @@ class DirectQuadratic(nn.Module):
         self.last_penalty = None
         self.last_oor = 0.0
         self.last_max = 0.0
+        self.last_sample_ratio = None
+        self.last_sample_penalty = None
 
     @property
     def channels(self) -> int:
@@ -140,8 +142,16 @@ class DirectQuadratic(nn.Module):
             elif self.penalty == "hinge":
                 excess = F.relu(raw.abs() / lam_reg - 1.0)
                 self.last_penalty = excess.square().sum() / raw.shape[0]
+                # Keep a per-image, safely capped statistic for causal replay.
+                # The forward path is clipped below, so this never participates
+                # in the potentially overflowing polynomial evaluation.
+                safe_excess = excess.detach().clamp_max(32.0)
+                self.last_sample_penalty = safe_excess.square().flatten(1).mean(dim=1)
             else:
                 raise ValueError(f"unknown range penalty {self.penalty!r}")
+            self.last_sample_ratio = (
+                detached_abs / lam_reg.detach()
+            ).flatten(1).amax(dim=1)
             if self.clip:
                 work = torch.maximum(torch.minimum(work, lam_fit), -lam_fit)
         elif self.clip_eval:
@@ -245,6 +255,71 @@ def collect_range_stats(model: nn.Module):
     if not penalties:
         raise RuntimeError("no quadratic range statistics were collected")
     return torch.stack(penalties).mean(), oor, maxima
+
+
+def collect_causal_tail_penalty(
+    model: nn.Module,
+    names: Iterable[str],
+    guard_ratio: float = 1.0,
+    sample_mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Penalize the earliest layer whose per-image input leaves its guard.
+
+    Assigning each image to its first escaping layer makes the gradient causal:
+    layer3.4 is corrected before a later layer3.7 explosion is allowed to
+    dominate the batch loss.  The statistic is training-only and does not
+    alter the deployment graph.
+    """
+    modules = {module.name: module for module in quadratic_modules(model)}
+    ordered = [modules[name] for name in names if name in modules]
+    if not ordered:
+        return next(model.parameters()).new_zeros(())
+    sample_count = None
+    remaining = None
+    total = None
+    for module in ordered:
+        if module.last_sample_ratio is None or module.last_sample_penalty is None:
+            continue
+        if sample_count is None:
+            sample_count = module.last_sample_ratio.shape[0]
+            remaining = torch.ones(sample_count, dtype=torch.bool,
+                                   device=module.last_sample_ratio.device)
+            total = module.last_sample_penalty.new_zeros(())
+        hits = remaining & (module.last_sample_ratio > float(guard_ratio))
+        if sample_mask is not None:
+            hits = hits & sample_mask.to(device=hits.device, dtype=torch.bool)
+        if hits.any():
+            total = total + module.last_sample_penalty[hits].mean()
+            remaining = remaining & ~hits
+    if total is None:
+        return next(model.parameters()).new_zeros(())
+    return total
+
+
+def operator_bound_targets(model: nn.Module, margin: float = 0.10) -> Dict[str, float]:
+    """Record conservative per-convolution row-norm bounds at initialization."""
+    if margin < 0:
+        raise ValueError("operator-bound margin must be non-negative")
+    targets = {}
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            row_norm = module.weight.detach().float().flatten(1).norm(dim=1).amax()
+            targets[name] = float(row_norm.clamp_min(1e-8) * (1.0 + margin))
+    return targets
+
+
+def operator_bound_penalty(model: nn.Module, targets: Mapping[str, float]) -> torch.Tensor:
+    """Differentiable Frobenius row-norm proxy for an operator bound."""
+    terms = []
+    for name, module in model.named_modules():
+        if not isinstance(module, nn.Conv2d) or name not in targets:
+            continue
+        current = module.weight.float().flatten(1).norm(dim=1).amax()
+        target = current.new_tensor(float(targets[name]))
+        terms.append(F.relu(current / target - 1.0).square())
+    if not terms:
+        return next(model.parameters()).new_zeros(())
+    return torch.stack(terms).mean()
 
 
 def parse_lam_scale(spec: str) -> Dict[str, float]:

@@ -80,6 +80,29 @@ def _lowcontrast(images):
     return (images - mean) * scale + mean
 
 
+def _gamma(images):
+    gamma = _uniform(images.shape[0], 0.35, 2.5, images.device).view(-1, 1, 1, 1)
+    unit = ((images + 1.0) * 0.5).clamp(0.0, 1.0)
+    return (unit.pow(gamma) * 2.0 - 1.0).clamp(-1.0, 1.0)
+
+
+def _alignment_shift(images):
+    """Small translated crops approximating detector/alignment jitter."""
+    output = torch.full_like(images, -1.0)
+    height, width = images.shape[-2:]
+    for index in range(images.shape[0]):
+        dy = int(torch.randint(-8, 9, (1,)))
+        dx = int(torch.randint(-8, 9, (1,)))
+        src_y0, src_y1 = max(0, -dy), min(height, height - dy)
+        src_x0, src_x1 = max(0, -dx), min(width, width - dx)
+        dst_y0, dst_x0 = max(0, dy), max(0, dx)
+        output[index, :, dst_y0 : dst_y0 + src_y1 - src_y0,
+               dst_x0 : dst_x0 + src_x1 - src_x0] = images[
+                   index, :, src_y0:src_y1, src_x0:src_x1
+               ]
+    return output
+
+
 def _noise(images):
     sigma = _uniform(images.shape[0], 0.05, 0.25, images.device).view(-1, 1, 1, 1)
     return (images + torch.randn_like(images) * sigma).clamp(-1.0, 1.0)
@@ -118,6 +141,8 @@ DEGRADATIONS = (
     _erase,
     _jpegish,
     _combo,
+    _gamma,
+    _alignment_shift,
 )
 
 

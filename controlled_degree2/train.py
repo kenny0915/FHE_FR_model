@@ -23,9 +23,12 @@ from torch.utils.data import DataLoader, DistributedSampler
 from controlled_degree2 import losses
 from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.model import (
+    collect_causal_tail_penalty,
     collect_range_stats,
     load_controlled_checkpoint,
     load_teacher,
+    operator_bound_penalty,
+    operator_bound_targets,
     quadratic_modules,
     save_checkpoint,
     set_lam_reg_ratio,
@@ -68,6 +71,13 @@ def parse_args():
     parser.add_argument("--aug-crop", type=float, default=0.1)
     parser.add_argument("--aug-stress", type=float, default=0.4)
     parser.add_argument("--aug-pathological", type=float, default=0.05)
+    parser.add_argument("--tail-replay-fraction", type=float, default=0.25)
+    parser.add_argument("--tail-replay-capacity", type=int, default=1024)
+    parser.add_argument("--tail-replay-warmup-steps", type=int, default=100)
+    parser.add_argument("--causal-tail-beta", type=float, default=1.0)
+    parser.add_argument("--activation-guard-ratio", type=float, default=1.0)
+    parser.add_argument("--operator-bound-weight", type=float, default=1e-4)
+    parser.add_argument("--operator-bound-margin", type=float, default=0.10)
 
     parser.add_argument("--canary-root", default=None)
     parser.add_argument("--canary-sets", default="lfw,cplfw")
@@ -113,6 +123,41 @@ def hint_names(model):
     return ["prelu"] + [
         name for name, module in model.named_modules() if type(module).__name__ == "IBasicBlock"
     ]
+
+
+class CausalTailReplay:
+    """Small GPU replay buffer retaining MS1MV3 rows with the worst tail ratio."""
+
+    def __init__(self, capacity, fraction, device):
+        self.capacity = int(capacity)
+        self.fraction = float(fraction)
+        self.device = device
+        self.images = None
+        self.scores = None
+
+    def update(self, images, scores):
+        if self.capacity <= 0 or images.numel() == 0:
+            return
+        images = images.detach().to(self.device).contiguous()
+        scores = scores.detach().to(self.device, dtype=torch.float32).flatten()
+        if images.shape[0] != scores.shape[0]:
+            raise ValueError("tail replay images and scores must have matching rows")
+        if self.images is not None:
+            images = torch.cat((self.images, images), dim=0)
+            scores = torch.cat((self.scores, scores), dim=0)
+        keep = min(self.capacity, scores.numel())
+        values, indices = torch.topk(scores, keep, largest=True, sorted=False)
+        self.images = images.index_select(0, indices).clone()
+        self.scores = values.clone()
+
+    def mix(self, images):
+        count = min(int(round(images.shape[0] * self.fraction)), images.shape[0])
+        if count <= 0 or self.images is None or self.images.shape[0] == 0:
+            return images
+        indices = torch.randint(self.images.shape[0], (count,), device=self.device)
+        mixed = images.clone()
+        mixed[:count] = self.images.index_select(0, indices)
+        return mixed
 
 
 def attach_hints(model, names):
@@ -197,6 +242,14 @@ def main():
             raise ValueError(f"--{name.replace('_', '-')} must be in [0, 1]")
     if args.aug_pathological >= 1.0:
         raise ValueError("--aug-pathological must leave at least one distilled sample")
+    if not 0.0 <= args.tail_replay_fraction <= 1.0:
+        raise ValueError("--tail-replay-fraction must be in [0, 1]")
+    if args.tail_replay_capacity < 0 or args.tail_replay_warmup_steps < 0:
+        raise ValueError("tail replay capacity and warmup must be non-negative")
+    if args.causal_tail_beta < 0 or args.operator_bound_weight < 0:
+        raise ValueError("tail and operator-bound weights must be non-negative")
+    if args.activation_guard_ratio <= 0 or args.operator_bound_margin < 0:
+        raise ValueError("activation guard ratio must be positive and margin non-negative")
     rank, world_size, local_rank, device = distributed_context()
     seed_everything(args.seed, rank)
     is_primary = rank == 0
@@ -218,6 +271,7 @@ def main():
         parameter.requires_grad_(False)
     calibration = init_payload["poly_calib"]
     set_lam_reg_ratio(student, args.lam_reg_ratio)
+    operator_targets = operator_bound_targets(student, args.operator_bound_margin)
     for entry in calibration.values():
         entry["lam_reg"] = (
             np.asarray(entry["lam_fit"], dtype=np.float64) * args.lam_reg_ratio
@@ -265,6 +319,10 @@ def main():
     learning_rate = args.lr_at_512 * args.global_batch / 512.0
 
     names = hint_names(student)
+    causal_names = [
+        name for name in (f"layer3.{index}.prelu" for index in range(14))
+        if any(module.name == name for module in quadratic_modules(student))
+    ]
     student_hints, student_handles = attach_hints(student, names)
     teacher_hints, teacher_handles = attach_hints(teacher, names)
     if world_size > 1:
@@ -303,6 +361,8 @@ def main():
         "total_steps": total_steps,
         "degree": 2,
         "reference_ranges": "exact run10 checkpoint buffers",
+        "causal_tail_layers": causal_names,
+        "operator_bound_proxy": "max convolution row Frobenius norm",
     }
     if is_primary:
         with open(
@@ -320,6 +380,7 @@ def main():
 
     autocast_enabled = device.type == "cuda" and args.precision == "bf16"
     nonfinite_streak = 0
+    replay = CausalTailReplay(args.tail_replay_capacity, args.tail_replay_fraction, device)
     optimizer.zero_grad(set_to_none=True)
     started = time.time()
 
@@ -345,6 +406,8 @@ def main():
                 photo_probability=args.aug_photo,
                 stress_probability=args.aug_stress,
             )
+            if step >= args.tail_replay_warmup_steps:
+                images = replay.mix(images)
             mask = None if bool(distill_mask.all()) else distill_mask
 
             gamma = losses.gamma_at(step, penalty_warmup, args.gamma)
@@ -383,10 +446,19 @@ def main():
                         student_hints, teacher_hints, names, mask
                     )
                     range_penalty, oor, maxima = collect_range_stats(student)
+                    causal_penalty = collect_causal_tail_penalty(
+                        student,
+                        causal_names,
+                        guard_ratio=args.activation_guard_ratio,
+                        sample_mask=distill_mask,
+                    )
+                    bound_penalty = operator_bound_penalty(student, operator_targets)
                     loss = (
                         args.w_embedding * embedding
                         + hint_weight * hint
                         + beta * range_penalty
+                        + args.causal_tail_beta * causal_penalty
+                        + args.operator_bound_weight * bound_penalty
                     )
 
                 finite = torch.tensor(
@@ -423,6 +495,16 @@ def main():
             optimizer.zero_grad(set_to_none=True)
             step += 1
 
+            if replay.capacity > 0 and bool(distill_mask.any()):
+                tail_ratios = [
+                    module.last_sample_ratio
+                    for module in quadratic_modules(student)
+                    if module.name in causal_names and module.last_sample_ratio is not None
+                ]
+                if tail_ratios:
+                    tail_scores = torch.stack(tail_ratios, dim=1).amax(dim=1)
+                    replay.update(images[distill_mask], tail_scores[distill_mask])
+
             if is_primary and step % args.log_every == 0:
                 worst = max(maxima, key=maxima.get)
                 elapsed = max(time.time() - started, 1e-6)
@@ -431,6 +513,7 @@ def main():
                     f"step {step:>6} loss={float(loss):.4f} "
                     f"emb={float(embedding):.4f} hint={float(hint):.4f} "
                     f"pen={float(range_penalty):.3g} oor={np.mean(list(oor.values())):.2e} "
+                    f"tail={float(causal_penalty):.3g} bound={float(bound_penalty):.3g} "
                     f"max/lam={maxima[worst]:.2f}@{worst} "
                     f"poly={sum(a >= 1 for a in alphas.values())}/25 {throughput:.0f} img/s",
                     flush=True,

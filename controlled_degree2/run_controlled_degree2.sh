@@ -58,7 +58,14 @@ if [[ "${STAGE}" == "train" || "${STAGE}" == "all" ]]; then
     --aug-lowres 0.2 \
     --aug-photo 0.2 \
     --aug-stress 0.4 \
-    --aug-pathological 0.05
+    --aug-pathological 0.05 \
+    --tail-replay-fraction 0.25 \
+    --tail-replay-capacity 1024 \
+    --tail-replay-warmup-steps 100 \
+    --causal-tail-beta 1.0 \
+    --activation-guard-ratio 1.0 \
+    --operator-bound-weight 1e-4 \
+    --operator-bound-margin 0.10
 
   # Stage B: the settled run10 three-epoch all-polynomial polish recipe.
   torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
@@ -81,7 +88,14 @@ if [[ "${STAGE}" == "train" || "${STAGE}" == "all" ]]; then
     --aug-lowres 0.2 \
     --aug-photo 0.2 \
     --aug-stress 0.4 \
-    --aug-pathological 0.05
+    --aug-pathological 0.05 \
+    --tail-replay-fraction 0.25 \
+    --tail-replay-capacity 1024 \
+    --tail-replay-warmup-steps 100 \
+    --causal-tail-beta 1.0 \
+    --activation-guard-ratio 1.0 \
+    --operator-bound-weight 1e-4 \
+    --operator-bound-margin 0.10
 fi
 
 if [[ "${STAGE}" != "calibrate" && "${STAGE}" != "convert" && "${STAGE}" != "train" && "${STAGE}" != "all" ]]; then
