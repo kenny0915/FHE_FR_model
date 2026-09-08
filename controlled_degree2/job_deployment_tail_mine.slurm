@@ -18,6 +18,13 @@ mkdir -p "$(dirname "${OUTPUT_MANIFEST}")"
 ml load miniconda3
 conda activate face_recog
 export OMP_NUM_THREADS=8
+dataset_args=(--dataset-type "${DEPLOYMENT_DATASET_TYPE:-ms1mv3}")
+if [[ -n "${DEPLOYMENT_ANNOTATIONS:-}" ]]; then
+  dataset_args+=(
+    --annotations "${DEPLOYMENT_ANNOTATIONS}"
+    --wider-context-scales "${WIDER_CONTEXT_SCALES:-1.0,1.5}"
+  )
+fi
 torchrun --standalone --nproc_per_node=4 \
   -m controlled_degree2.mine_deployment_tails \
   --checkpoint "${CHECKPOINT}" \
@@ -28,4 +35,5 @@ torchrun --standalone --nproc_per_node=4 \
   --topk "${MINE_TOPK:-64}" \
   --progress-batches "${MINE_PROGRESS_BATCHES:-100}" \
   --limit-batches "${MINE_LIMIT_BATCHES:-0}" \
+  "${dataset_args[@]}" \
   --both-orientations

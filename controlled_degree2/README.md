@@ -57,6 +57,12 @@ export OUTPUT_MANIFEST=/path/to/ms1mv3_deployment_tails.json
 sbatch controlled_degree2/job_deployment_tail_mine.slurm
 ```
 
+For domain-broad stress without IJB data, the same miner accepts official
+WIDER FACE bounding boxes.  Set `DEPLOYMENT_DATASET_TYPE=wider`, point
+`DATASET_ROOT` at `WIDER_train/images`, and set `DEPLOYMENT_ANNOTATIONS` to
+`wider_face_train_bbx_gt.txt`.  Deterministic square crops use context scales
+1.0 and 1.5 by default, resize to 112x112, and scan both orientations.
+
 Passing that manifest as `DEPLOYMENT_TAIL_MANIFEST` to
 `run_tail_refine.sh` adds a training-only deployment shadow pass.  The main
 distillation path remains clipped for safe optimization, while a small batch

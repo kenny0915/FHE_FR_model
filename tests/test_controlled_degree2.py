@@ -8,6 +8,10 @@ from torch.nn import functional as F
 from controlled_degree2.calibrate import reference_ranges, weighted_quadratic_abs_fit
 from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.mine_deployment_tails import merge_rank_payloads
+from controlled_degree2.deployment_data import (
+    WiderFaceCropDataset,
+    parse_wider_annotations,
+)
 from controlled_degree2.model import (
     DirectQuadratic,
     collect_causal_tail_penalty,
@@ -338,6 +342,39 @@ def test_deployment_tail_manifest_merge_is_layer_balanced_and_deduplicated():
     assert combined == [(9, 1), (1, 0), (3, 1), (2, 0), (5, 0)]
     assert merged["activations"]["a"]["tail"][0]["ratio"] == pytest.approx(5.0)
     assert merged["activations"]["b"]["nonfinite_input_count"] == 1
+
+
+def test_wider_crop_dataset_is_deterministic_and_filters_invalid(tmp_path):
+    from PIL import Image
+
+    image_root = tmp_path / "images"
+    event = image_root / "0--Test"
+    event.mkdir(parents=True)
+    image = Image.new("RGB", (8, 6), color=(255, 0, 0))
+    image.save(event / "sample.jpg")
+    annotations = tmp_path / "wider.txt"
+    annotations.write_text(
+        "0--Test/sample.jpg\n"
+        "2\n"
+        "1 1 4 3 0 0 0 0 0 0\n"
+        "2 2 2 2 0 0 0 1 0 0\n",
+        encoding="utf-8",
+    )
+
+    records = parse_wider_annotations(annotations, (1.0, 1.5))
+    dataset = WiderFaceCropDataset(
+        image_root, annotations, context_scales=(1.0, 1.5)
+    )
+    canonical, label = dataset.get_oriented(0, 0)
+    flipped, _ = dataset.get_oriented(0, 1)
+
+    assert len(records) == len(dataset) == 2
+    assert canonical.shape == (3, 112, 112)
+    assert canonical.dtype == torch.float32
+    assert float(canonical.min()) >= -1.0
+    assert float(canonical.max()) <= 1.0
+    assert torch.equal(flipped, torch.flip(canonical, dims=(-1,)))
+    assert label.item() == 0
 
 
 def test_deployment_tail_priority_repeats_manifest_prefix_only():

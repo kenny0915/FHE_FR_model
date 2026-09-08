@@ -22,6 +22,10 @@ from controlled_degree2.model import (
     quadratic_modules,
     set_quadratic_schedule,
 )
+from controlled_degree2.deployment_data import (
+    build_deployment_dataset,
+    parse_context_scales,
+)
 
 
 def atomic_json_dump(payload, path):
@@ -136,6 +140,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--dataset-root", required=True)
+    parser.add_argument(
+        "--dataset-type", choices=("ms1mv3", "wider"), default="ms1mv3"
+    )
+    parser.add_argument("--annotations", default=None)
+    parser.add_argument("--wider-context-scales", default="1.0,1.5")
     parser.add_argument("--output", required=True)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--workers", type=int, default=4)
@@ -163,9 +172,16 @@ def main():
     torch.cuda.set_device(local_rank)
     device = torch.device("cuda", local_rank)
 
-    from dataset import DatasetWithIndex, MXFaceDataset
+    from dataset import DatasetWithIndex
 
-    base_dataset = MXFaceDataset(args.dataset_root, local_rank=local_rank)
+    context_scales = parse_context_scales(args.wider_context_scales)
+    base_dataset = build_deployment_dataset(
+        args.dataset_type,
+        args.dataset_root,
+        local_rank=local_rank,
+        annotations=args.annotations,
+        wider_context_scales=context_scales,
+    )
     indexed_dataset = DatasetWithIndex(
         base_dataset, both_orientations=args.both_orientations
     )
@@ -311,9 +327,15 @@ def main():
         merged.update({
             "checkpoint": os.path.abspath(args.checkpoint),
             "checkpoint_degree": int(checkpoint_payload["degree"]),
-            "dataset": "MS1MV3",
+            "dataset": args.dataset_type,
             "dataset_root": os.path.abspath(args.dataset_root),
             "dataset_source_rows": len(base_dataset),
+            "annotations": (
+                os.path.abspath(args.annotations) if args.annotations else None
+            ),
+            "wider_context_scales": (
+                list(context_scales) if args.dataset_type == "wider" else None
+            ),
             "both_orientations": bool(args.both_orientations),
             "world_size": world_size,
             "batches_per_rank": [payload["batches"] for payload in payloads],
