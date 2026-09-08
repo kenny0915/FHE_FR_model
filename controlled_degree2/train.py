@@ -91,6 +91,12 @@ def parse_args():
     )
     parser.add_argument("--operator-bound-weight", type=float, default=1e-4)
     parser.add_argument("--operator-bound-margin", type=float, default=0.10)
+    parser.add_argument("--adversarial-tail-fraction", type=float, default=0.0)
+    parser.add_argument("--adversarial-tail-steps", type=int, default=0)
+    parser.add_argument("--adversarial-tail-epsilon", type=float, default=0.25)
+    parser.add_argument("--adversarial-tail-step-size", type=float, default=0.125)
+    parser.add_argument("--adversarial-tail-beta", type=float, default=1.0)
+    parser.add_argument("--adversarial-tail-warmup-steps", type=int, default=0)
     parser.add_argument(
         "--freeze-through-layer3",
         action=argparse.BooleanOptionalAction,
@@ -204,6 +210,76 @@ def restore_batchnorm_state(model, snapshot):
             module.running_var.copy_(running_var)
         if num_batches_tracked is not None:
             module.num_batches_tracked.copy_(num_batches_tracked)
+
+
+def make_adversarial_tail_batch(
+    model,
+    images,
+    eligible_mask,
+    target_name,
+    *,
+    fraction,
+    steps,
+    epsilon,
+    step_size,
+):
+    """Maximize one polynomial input peak on a small MS1MV3 subset.
+
+    This is a training-only projected-gradient search.  It keeps pixels in
+    the normalized image domain and within ``epsilon`` of an already
+    augmented MS1MV3 image.  BatchNorm buffers are transactional because the
+    inner search must not change the exported model state.
+    """
+    adversarial_mask = torch.zeros(
+        images.shape[0], dtype=torch.bool, device=images.device
+    )
+    count = min(
+        int(round(images.shape[0] * float(fraction))),
+        int(eligible_mask.sum()),
+    )
+    if count <= 0 or steps <= 0 or not target_name:
+        return images, adversarial_mask
+
+    eligible = eligible_mask.nonzero(as_tuple=False).flatten()
+    chosen = eligible.index_select(
+        0, torch.randperm(eligible.numel(), device=images.device)[:count]
+    )
+    base = images.index_select(0, chosen).detach()
+    adversarial = (
+        base + torch.empty_like(base).uniform_(-float(epsilon), float(epsilon))
+    ).clamp(-1.0, 1.0)
+    batchnorm_state = snapshot_batchnorm_state(model)
+    try:
+        for _ in range(int(steps)):
+            adversarial = adversarial.detach().requires_grad_(True)
+            model(adversarial)
+            peak = model.get_submodule(target_name).last_sample_peak
+            if peak is None or not bool(torch.isfinite(peak).all()):
+                break
+            gradient = torch.autograd.grad(
+                peak.mean(), adversarial, only_inputs=True
+            )[0]
+            adversarial = adversarial + float(step_size) * gradient.sign()
+            adversarial = torch.maximum(
+                torch.minimum(adversarial, base + float(epsilon)),
+                base - float(epsilon),
+            ).clamp(-1.0, 1.0)
+    finally:
+        restore_batchnorm_state(model, batchnorm_state)
+
+    output = images.clone()
+    output.index_copy_(0, chosen, adversarial.detach())
+    adversarial_mask[chosen] = True
+    return output, adversarial_mask
+
+
+def targeted_tail_penalty(model, target_name, sample_mask):
+    if not target_name or not bool(sample_mask.any()):
+        return next(model.parameters()).new_zeros(())
+    penalty = model.get_submodule(target_name).last_sample_penalty
+    if penalty is None:
+        return next(model.parameters()).new_zeros(())
+    return penalty[sample_mask].mean()
 
 
 def belongs_to_frozen_module(name, frozen_names):
@@ -362,6 +438,14 @@ def main():
         raise ValueError("tail replay capacity and warmup must be non-negative")
     if args.causal_tail_beta < 0 or args.operator_bound_weight < 0:
         raise ValueError("tail and operator-bound weights must be non-negative")
+    if not 0.0 <= args.adversarial_tail_fraction <= 1.0:
+        raise ValueError("--adversarial-tail-fraction must be in [0, 1]")
+    if args.adversarial_tail_steps < 0 or args.adversarial_tail_warmup_steps < 0:
+        raise ValueError("adversarial tail steps and warmup must be non-negative")
+    if args.adversarial_tail_epsilon < 0 or args.adversarial_tail_step_size < 0:
+        raise ValueError("adversarial tail epsilon and step size must be non-negative")
+    if args.adversarial_tail_beta < 0:
+        raise ValueError("adversarial tail weight must be non-negative")
     if args.activation_guard_ratio <= 0 or args.operator_bound_margin < 0:
         raise ValueError("activation guard ratio must be positive and margin non-negative")
     if args.activation_lam_scale <= 0:
@@ -566,6 +650,28 @@ def main():
                 penalty="hinge",
                 causal_guard_ratio=args.activation_guard_ratio,
             )
+            adversarial_target = None
+            adversarial_mask = torch.zeros_like(distill_mask)
+            if (
+                args.adversarial_tail_fraction > 0
+                and args.adversarial_tail_steps > 0
+                and step >= args.adversarial_tail_warmup_steps
+                and causal_names
+            ):
+                target_index = (
+                    (epoch * microbatches_per_epoch + batch_index) * world_size + rank
+                ) % len(causal_names)
+                adversarial_target = causal_names[target_index]
+                images, adversarial_mask = make_adversarial_tail_batch(
+                    student,
+                    images,
+                    distill_mask,
+                    adversarial_target,
+                    fraction=args.adversarial_tail_fraction,
+                    steps=args.adversarial_tail_steps,
+                    epsilon=args.adversarial_tail_epsilon,
+                    step_size=args.adversarial_tail_step_size,
+                )
 
             final_microbatch = (batch_index + 1) % accumulation == 0
             sync_context = (
@@ -609,12 +715,16 @@ def main():
                         sample_mask=None,
                     )
                     bound_penalty = operator_bound_penalty(student, operator_targets)
+                    adversarial_penalty = targeted_tail_penalty(
+                        student, adversarial_target, adversarial_mask
+                    )
                     loss = (
                         args.w_embedding * embedding
                         + hint_weight * hint
                         + beta * range_penalty
                         + args.causal_tail_beta * causal_penalty
                         + args.operator_bound_weight * bound_penalty
+                        + args.adversarial_tail_beta * adversarial_penalty
                     )
 
                 finite = torch.tensor(
@@ -674,7 +784,8 @@ def main():
                     f"step {step:>6} loss={float(loss):.4f} "
                     f"emb={float(embedding):.4f} hint={float(hint):.4f} "
                     f"pen={float(range_penalty):.3g} oor={np.mean(list(oor.values())):.2e} "
-                    f"tail={float(causal_penalty):.3g} bound={float(bound_penalty):.3g} "
+                            f"tail={float(causal_penalty):.3g} bound={float(bound_penalty):.3g} "
+                            f"adv={float(adversarial_penalty):.3g}@{adversarial_target or '-'} "
                     f"max/lam={maxima.get(worst, 0.0):.2f}@{worst} "
                     f"poly={sum(a >= 1 for a in alphas.values())}/25 {throughput:.0f} img/s",
                     flush=True,

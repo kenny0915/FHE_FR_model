@@ -1,4 +1,5 @@
 import copy
+from collections import OrderedDict
 
 import pytest
 import torch
@@ -19,6 +20,7 @@ from controlled_degree2.train import (
     freeze_through_layer3,
     freeze_through_layer4,
     keep_frozen_modules_eval,
+    make_adversarial_tail_batch,
     restore_batchnorm_state,
     snapshot_batchnorm_state,
 )
@@ -95,6 +97,37 @@ def test_causal_tail_uses_per_sample_max_without_spatial_dilution():
     penalty = collect_causal_tail_penalty(activation, ["act"], guard_ratio=1.0)
 
     assert penalty.item() == pytest.approx(1.0)
+
+
+def test_adversarial_tail_search_increases_target_peak_without_parameter_grads():
+    activation = DirectQuadratic(1, lam_fit=2.0, lam_reg=1.0, slope=0.25, name="act")
+    model = torch.nn.Sequential(OrderedDict((("act", activation),))).train()
+    set_quadratic_schedule(model, causal_guard_ratio=1.0)
+    images = torch.full((4, 1, 4, 4), 0.1)
+    eligible = torch.tensor([True, True, True, False])
+    model(images[:1])
+    before = float(activation.last_sample_peak.max())
+
+    output, mask = make_adversarial_tail_batch(
+        model,
+        images,
+        eligible,
+        "act",
+        fraction=0.5,
+        steps=2,
+        epsilon=0.4,
+        step_size=0.2,
+    )
+    model(output[mask])
+    after = float(activation.last_sample_peak.max())
+
+    assert mask.sum().item() == 2
+    assert not mask[-1]
+    assert float(output.min()) >= -1.0
+    assert float(output.max()) <= 1.0
+    assert float((output - images).abs().max()) <= 0.4 + 1e-6
+    assert after > before
+    assert all(parameter.grad is None for parameter in model.parameters())
 
 
 def test_eval_is_unclipped_but_optional_diagnostic_clip_is_bounded():

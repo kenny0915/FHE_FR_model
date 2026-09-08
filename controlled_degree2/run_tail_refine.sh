@@ -43,6 +43,12 @@ torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --activation-lam-scale-layer3 "${ACTIVATION_LAM_SCALE_LAYER3:-1.25}" \
   --operator-bound-weight "${OPERATOR_BOUND_WEIGHT:-1e-3}" \
   --operator-bound-margin "${OPERATOR_BOUND_MARGIN:-0.05}" \
+  --adversarial-tail-fraction "${ADVERSARIAL_TAIL_FRACTION:-0}" \
+  --adversarial-tail-steps "${ADVERSARIAL_TAIL_STEPS:-0}" \
+  --adversarial-tail-epsilon "${ADVERSARIAL_TAIL_EPSILON:-0.25}" \
+  --adversarial-tail-step-size "${ADVERSARIAL_TAIL_STEP_SIZE:-0.125}" \
+  --adversarial-tail-beta "${ADVERSARIAL_TAIL_BETA:-1}" \
+  --adversarial-tail-warmup-steps "${ADVERSARIAL_TAIL_WARMUP_STEPS:-0}" \
   --log-every "${LOG_EVERY:-50}" \
   --limit-batches "${LIMIT_BATCHES:-0}" \
   "${FREEZE_ARGS[@]}"

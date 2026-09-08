@@ -118,6 +118,7 @@ class DirectQuadratic(nn.Module):
         self.last_oor = 0.0
         self.last_max = 0.0
         self.last_sample_ratio = None
+        self.last_sample_peak = None
         self.last_sample_penalty = None
 
     @property
@@ -163,9 +164,11 @@ class DirectQuadratic(nn.Module):
                 self.last_sample_penalty = safe_excess.square().flatten(1).amax(dim=1)
             else:
                 raise ValueError(f"unknown range penalty {self.penalty!r}")
-            self.last_sample_ratio = (
-                detached_abs / lam_reg.detach()
-            ).flatten(1).amax(dim=1)
+            sample_ratio = (raw.abs() / lam_reg).flatten(1).amax(dim=1)
+            # The detached score ranks replay samples.  The differentiable
+            # twin is used only by the training-time adversarial tail search.
+            self.last_sample_peak = sample_ratio
+            self.last_sample_ratio = sample_ratio.detach()
             if self.clip:
                 work = torch.maximum(torch.minimum(work, lam_fit), -lam_fit)
         elif self.clip_eval:
