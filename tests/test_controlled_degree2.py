@@ -11,6 +11,11 @@ from controlled_degree2.model import (
     prelu_to_quadratic_coefficients,
     scale_intervals,
 )
+from controlled_degree2.train import (
+    belongs_to_frozen_module,
+    freeze_through_layer3,
+    keep_frozen_modules_eval,
+)
 
 
 def test_uniform_degree2_fit_has_expected_closed_form():
@@ -127,6 +132,25 @@ def test_registered_controlled_backbone_has_25_direct_quadratics():
 
     assert len(activations) == 25
     assert all(module.coeffs.shape[1] == 3 for module in activations)
+
+
+def test_freeze_through_layer3_locks_parameters_and_batchnorm_state():
+    from backbones import get_model
+
+    model = get_model("r50_controlled_d2", dropout=0, fp16=False)
+    model.train()
+    frozen = freeze_through_layer3(model)
+
+    assert belongs_to_frozen_module("layer3.13.prelu", frozen)
+    assert not belongs_to_frozen_module("layer4.0.prelu", frozen)
+    assert all(not parameter.requires_grad for parameter in model.layer3.parameters())
+    assert any(parameter.requires_grad for parameter in model.layer4.parameters())
+    assert not model.layer3.training
+
+    model.train()
+    keep_frozen_modules_eval(model, frozen)
+    assert not model.layer3.training
+    assert model.layer4.training
 
 
 def test_range_coverage_keeps_realistic_domain_and_masks_pathological_rows():

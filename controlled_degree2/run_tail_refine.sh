@@ -12,6 +12,10 @@ set -euo pipefail
 python -c 'import numpy as np, torch; assert int(np.__version__.split(".")[0]) < 2; torch.from_numpy(np.zeros(1, dtype=np.float32))'
 
 GPUS="${GPUS:-4}"
+FREEZE_ARGS=()
+if [[ "${FREEZE_THROUGH_LAYER3:-0}" == "1" ]]; then
+  FREEZE_ARGS+=(--freeze-through-layer3)
+fi
 torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --student-init "${STUDENT_INIT}" \
   --teacher "${TEACHER_CKPT}" \
@@ -35,4 +39,5 @@ torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --activation-lam-scale 1.0 \
   --activation-lam-scale-layer3 "${ACTIVATION_LAM_SCALE_LAYER3:-1.25}" \
   --operator-bound-weight "${OPERATOR_BOUND_WEIGHT:-1e-3}" \
-  --operator-bound-margin "${OPERATOR_BOUND_MARGIN:-0.05}"
+  --operator-bound-margin "${OPERATOR_BOUND_MARGIN:-0.05}" \
+  "${FREEZE_ARGS[@]}"

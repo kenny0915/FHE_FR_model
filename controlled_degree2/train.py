@@ -91,6 +91,15 @@ def parse_args():
     )
     parser.add_argument("--operator-bound-weight", type=float, default=1e-4)
     parser.add_argument("--operator-bound-margin", type=float, default=0.10)
+    parser.add_argument(
+        "--freeze-through-layer3",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "freeze stem and layers 1-3, including BatchNorm running statistics; "
+            "only layer4 and the embedding head are optimized"
+        ),
+    )
 
     parser.add_argument("--canary-root", default=None)
     parser.add_argument("--canary-sets", default="lfw,cplfw")
@@ -121,6 +130,29 @@ def distributed_context():
         torch.cuda.set_device(local_rank)
         device = torch.device("cuda", local_rank)
     return rank, world_size, local_rank, device
+
+
+FROZEN_THROUGH_LAYER3 = ("conv1", "bn1", "prelu", "layer1", "layer2", "layer3")
+
+
+def freeze_through_layer3(model):
+    """Freeze the numerically verified prefix, including BN running state."""
+    frozen = []
+    for name in FROZEN_THROUGH_LAYER3:
+        module = model.get_submodule(name)
+        module.requires_grad_(False)
+        module.eval()
+        frozen.append(name)
+    return tuple(frozen)
+
+
+def keep_frozen_modules_eval(model, names):
+    for name in names:
+        model.get_submodule(name).eval()
+
+
+def belongs_to_frozen_module(name, frozen_names):
+    return any(name == prefix or name.startswith(prefix + ".") for prefix in frozen_names)
 
 
 def seed_everything(seed, rank):
@@ -300,6 +332,7 @@ def main():
             {"layer3": args.activation_lam_scale_layer3},
         )
     set_lam_reg_ratio(student, args.lam_reg_ratio)
+    frozen_names = freeze_through_layer3(student) if args.freeze_through_layer3 else ()
     operator_targets = operator_bound_targets(student, args.operator_bound_margin)
     for entry in calibration.values():
         entry["lam_reg"] = (
@@ -347,7 +380,10 @@ def main():
     lr_warmup = round(steps_per_epoch * args.lr_warmup_epochs)
     learning_rate = args.lr_at_512 * args.global_batch / 512.0
 
-    names = hint_names(student)
+    names = [
+        name for name in hint_names(student)
+        if not belongs_to_frozen_module(name, frozen_names)
+    ]
     causal_names = [
         name for name in (f"layer3.{index}.prelu" for index in range(14))
         if any(module.name == name for module in quadratic_modules(student))
@@ -394,6 +430,7 @@ def main():
         "operator_bound_proxy": "max convolution row Frobenius norm",
         "activation_lam_scale": args.activation_lam_scale,
         "activation_lam_scale_layer3": args.activation_lam_scale_layer3,
+        "frozen_modules": frozen_names,
     }
     if is_primary:
         with open(
@@ -418,6 +455,7 @@ def main():
     for epoch in range(start_epoch, args.epochs):
         sampler.set_epoch(epoch)
         distributed_student.train()
+        keep_frozen_modules_eval(student, frozen_names)
         consumed = 0
         for batch_index, (images, _labels) in enumerate(loader):
             if batch_index >= microbatches_per_epoch:
