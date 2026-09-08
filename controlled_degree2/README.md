@@ -72,6 +72,9 @@ non-finite gradient, and finite gradients are normed in FP64 before clipping.
 Set `FREEZE_BATCHNORM_STATS=1` when refining an already converged checkpoint so
 the ordinary training path, shadow path, and deployment all use its fixed
 running statistics while BatchNorm affine tensors remain trainable.
+When exact deployment replay replaces the broad causal-max objective, set
+`CAUSAL_TAIL_BETA=0`; the zero-weight term is removed from autograd entirely
+so a dormant deep recurrence cannot create `0 * Inf` gradients.
 These controls do not add an operator, clamp, branch, or parameter to the
 exported inference graph.
 

@@ -955,14 +955,22 @@ def main():
                     else:
                         range_penalty = student_embedding.new_zeros(())
                         oor, maxima = {}, {}
-                    causal_penalty = collect_causal_tail_penalty(
-                        student,
-                        causal_names,
-                        guard_ratio=args.activation_guard_ratio,
-                        # Pathological rows are excluded from teacher
-                        # distillation, not from the MS1MV3-independent tail
-                        # safety objective they were generated to exercise.
-                        sample_mask=None,
+                    # A zero weight must remove the graph, rather than form
+                    # ``0 * Inf`` during backward through a deep quadratic
+                    # recurrence.  Exact unclipped deployment replay can then
+                    # replace this broad clipped-path causal objective while
+                    # ordinary range/stress coverage remains active.
+                    causal_penalty = (
+                        collect_causal_tail_penalty(
+                            student,
+                            causal_names,
+                            guard_ratio=args.activation_guard_ratio,
+                            # Pathological rows are excluded from teacher
+                            # distillation, not from MS1MV3-independent safety.
+                            sample_mask=None,
+                        )
+                        if args.causal_tail_beta > 0
+                        else student_embedding.new_zeros(())
                     )
                     bound_penalty = operator_bound_penalty(student, operator_targets)
                     adversarial_penalty = targeted_tail_penalty(
