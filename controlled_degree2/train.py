@@ -225,6 +225,20 @@ def hint_names(model):
     ]
 
 
+def causal_tail_names(model, frozen_names=()):
+    """Return deployment-order polynomial guards that can receive gradients.
+
+    Training clips every quadratic input for numerical safety.  Consequently,
+    starting the causal scan at layer3 hides an earlier layer1/layer2 escape
+    that would remain unclipped in deployment and seed a later recurrence.
+    """
+    return [
+        module.name
+        for module in quadratic_modules(model)
+        if not belongs_to_frozen_module(module.name, frozen_names)
+    ]
+
+
 class CausalTailReplay:
     """Small GPU replay buffer retaining MS1MV3 rows with the worst tail ratio."""
 
@@ -446,10 +460,7 @@ def main():
         name for name in hint_names(student)
         if not belongs_to_frozen_module(name, frozen_names)
     ]
-    causal_names = [
-        name for name in (f"layer3.{index}.prelu" for index in range(14))
-        if any(module.name == name for module in quadratic_modules(student))
-    ]
+    causal_names = causal_tail_names(student, frozen_names)
     student_hints, student_handles = attach_hints(student, names)
     teacher_hints, teacher_handles = attach_hints(teacher, names)
     if world_size > 1:
@@ -548,7 +559,12 @@ def main():
             )
             alphas = alpha_schedule(student, step, swap_steps, ramp_steps)
             set_quadratic_schedule(
-                student, alpha=alphas, gamma=gamma, clip=True, penalty="hinge"
+                student,
+                alpha=alphas,
+                gamma=gamma,
+                clip=True,
+                penalty="hinge",
+                causal_guard_ratio=args.activation_guard_ratio,
             )
 
             final_microbatch = (batch_index + 1) % accumulation == 0
@@ -587,7 +603,10 @@ def main():
                         student,
                         causal_names,
                         guard_ratio=args.activation_guard_ratio,
-                        sample_mask=distill_mask,
+                        # Pathological rows are excluded from teacher
+                        # distillation, not from the MS1MV3-independent tail
+                        # safety objective they were generated to exercise.
+                        sample_mask=None,
                     )
                     bound_penalty = operator_bound_penalty(student, operator_targets)
                     loss = (

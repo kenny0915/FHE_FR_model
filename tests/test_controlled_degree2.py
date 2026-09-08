@@ -8,11 +8,14 @@ from controlled_degree2.calibrate import reference_ranges, weighted_quadratic_ab
 from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.model import (
     DirectQuadratic,
+    collect_causal_tail_penalty,
     prelu_to_quadratic_coefficients,
     scale_intervals,
+    set_quadratic_schedule,
 )
 from controlled_degree2.train import (
     belongs_to_frozen_module,
+    causal_tail_names,
     freeze_through_layer3,
     freeze_through_layer4,
     keep_frozen_modules_eval,
@@ -49,6 +52,49 @@ def test_training_alpha_zero_is_exact_prelu_and_collects_hinge():
     assert torch.equal(actual, expected)
     assert activation.last_oor == pytest.approx(1.0)
     assert activation.last_penalty.item() > 0
+
+
+def test_causal_tail_penalty_is_bounded_and_differentiable_past_cap():
+    activation = DirectQuadratic(1, lam_fit=2.0, lam_reg=1.0, slope=0.25, name="act")
+    set_quadratic_schedule(activation, causal_guard_ratio=0.5)
+    activation.train()
+    inputs = torch.tensor([[[[100.0]]]], requires_grad=True)
+
+    activation(inputs)
+    penalty = collect_causal_tail_penalty(activation, ["act"], guard_ratio=0.5)
+    penalty.backward()
+
+    assert penalty.item() == pytest.approx(32.0 ** 2)
+    assert torch.isfinite(inputs.grad).all()
+    assert inputs.grad.abs().item() > 0
+
+
+def test_causal_guard_threshold_matches_escape_assignment_threshold():
+    activation = DirectQuadratic(1, lam_fit=2.0, lam_reg=1.0, slope=0.25, name="act")
+    set_quadratic_schedule(activation, causal_guard_ratio=0.5)
+    activation.train()
+    inputs = torch.tensor([[[[0.75]]]], requires_grad=True)
+
+    activation(inputs)
+    penalty = collect_causal_tail_penalty(activation, ["act"], guard_ratio=0.5)
+    penalty.backward()
+
+    assert penalty.item() == pytest.approx((0.75 - 0.5) ** 2)
+    assert inputs.grad.item() > 0
+
+
+def test_causal_tail_uses_per_sample_max_without_spatial_dilution():
+    activation = DirectQuadratic(1, lam_fit=2.0, lam_reg=1.0, slope=0.25, name="act")
+    set_quadratic_schedule(activation, causal_guard_ratio=1.0)
+    activation.train()
+    inputs = torch.zeros(1, 1, 16, 16, requires_grad=True)
+    with torch.no_grad():
+        inputs[0, 0, 3, 7] = 2.0
+
+    activation(inputs)
+    penalty = collect_causal_tail_penalty(activation, ["act"], guard_ratio=1.0)
+
+    assert penalty.item() == pytest.approx(1.0)
 
 
 def test_eval_is_unclipped_but_optional_diagnostic_clip_is_bounded():
@@ -135,6 +181,23 @@ def test_registered_controlled_backbone_has_25_direct_quadratics():
 
     assert len(activations) == 25
     assert all(module.coeffs.shape[1] == 3 for module in activations)
+
+
+def test_causal_scan_covers_all_trainable_polynomials_in_deployment_order():
+    from backbones import get_model
+
+    model = get_model("r50_controlled_d2", dropout=0, fp16=False)
+    all_names = causal_tail_names(model)
+    after_layer3_freeze = causal_tail_names(model, freeze_through_layer3(model))
+
+    assert len(all_names) == 25
+    assert all_names[0] == "prelu"
+    assert all_names[-1] == "layer4.2.prelu"
+    assert after_layer3_freeze == [
+        "layer4.0.prelu",
+        "layer4.1.prelu",
+        "layer4.2.prelu",
+    ]
 
 
 def test_freeze_through_layer3_locks_parameters_and_batchnorm_state():

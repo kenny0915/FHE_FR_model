@@ -43,4 +43,6 @@ torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --activation-lam-scale-layer3 "${ACTIVATION_LAM_SCALE_LAYER3:-1.25}" \
   --operator-bound-weight "${OPERATOR_BOUND_WEIGHT:-1e-3}" \
   --operator-bound-margin "${OPERATOR_BOUND_MARGIN:-0.05}" \
+  --log-every "${LOG_EVERY:-50}" \
+  --limit-batches "${LIMIT_BATCHES:-0}" \
   "${FREEZE_ARGS[@]}"

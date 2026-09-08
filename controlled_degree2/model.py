@@ -113,6 +113,7 @@ class DirectQuadratic(nn.Module):
         self.clip_eval = False
         self.penalty = "hinge"
         self.gamma = 10.0
+        self.causal_guard_ratio = 1.0
         self.last_penalty = None
         self.last_oor = 0.0
         self.last_max = 0.0
@@ -142,11 +143,24 @@ class DirectQuadratic(nn.Module):
             elif self.penalty == "hinge":
                 excess = F.relu(raw.abs() / lam_reg - 1.0)
                 self.last_penalty = excess.square().sum() / raw.shape[0]
-                # Keep a per-image, safely capped statistic for causal replay.
-                # The forward path is clipped below, so this never participates
-                # in the potentially overflowing polynomial evaluation.
-                safe_excess = excess.detach().clamp_max(32.0)
-                self.last_sample_penalty = safe_excess.square().flatten(1).mean(dim=1)
+                # Keep the causal loss bounded in the forward pass while
+                # retaining a useful gradient for very large escapes.  A
+                # plain ``detach`` here silently turns causal-tail training
+                # into replay-only ranking; a plain clamp has zero gradient
+                # above the cap.  The straight-through cap provides a finite
+                # value and a unit derivative beyond the cap.
+                guard_excess = F.relu(
+                    raw.abs() / lam_reg - float(self.causal_guard_ratio)
+                )
+                capped_excess = guard_excess.clamp_max(32.0)
+                safe_excess = guard_excess + (capped_excess - guard_excess).detach()
+                # A degree-2 recurrence can be seeded by one channel/pixel.
+                # Spatial averaging diluted exactly those rare maxima by up
+                # to C*H*W and made the causal objective numerically inert.
+                # The ordinary range penalty above still controls the full
+                # distribution; this term deliberately controls each row's
+                # worst escape.
+                self.last_sample_penalty = safe_excess.square().flatten(1).amax(dim=1)
             else:
                 raise ValueError(f"unknown range penalty {self.penalty!r}")
             self.last_sample_ratio = (
@@ -223,6 +237,7 @@ def set_quadratic_schedule(
     clip: Optional[bool] = None,
     clip_eval: Optional[bool] = None,
     penalty: Optional[str] = None,
+    causal_guard_ratio: Optional[float] = None,
 ) -> None:
     for module in quadratic_modules(model):
         if alpha is not None:
@@ -235,6 +250,8 @@ def set_quadratic_schedule(
             module.clip_eval = bool(clip_eval)
         if penalty is not None:
             module.penalty = str(penalty)
+        if causal_guard_ratio is not None:
+            module.causal_guard_ratio = float(causal_guard_ratio)
 
 
 def set_lam_reg_ratio(model: nn.Module, ratio: float) -> None:
