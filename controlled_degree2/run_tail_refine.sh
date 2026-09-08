@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# MS1MV3-only refinement from a completed controlled-degree2 checkpoint.
+# This deliberately has no IJB-C inputs: replay is mined online from the
+# training batches and the stress transforms are synthetic/non-IJB.
+: "${STUDENT_INIT:?Set STUDENT_INIT to a controlled degree-2 checkpoint}"
+: "${TEACHER_CKPT:?Set TEACHER_CKPT to the teacher checkpoint}"
+: "${DATASET_ROOT:?Set DATASET_ROOT to MS1MV3}"
+: "${OUTPUT_ROOT:?Set OUTPUT_ROOT for this refinement}"
+
+python -c 'import numpy as np, torch; assert int(np.__version__.split(".")[0]) < 2; torch.from_numpy(np.zeros(1, dtype=np.float32))'
+
+GPUS="${GPUS:-4}"
+torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
+  --student-init "${STUDENT_INIT}" \
+  --teacher "${TEACHER_CKPT}" \
+  --dataset-root "${DATASET_ROOT}" \
+  --canary-root "${CANARY_ROOT:-${DATASET_ROOT}}" \
+  --canary-sets "${CANARY_SETS:-lfw}" \
+  --output-dir "${OUTPUT_ROOT}" \
+  --epochs "${EPOCHS:-3}" --batch-size 128 --global-batch 2048 \
+  --swap-epochs 0 --penalty-warmup-epochs 0.1 \
+  --lam-reg-ratio 0.6 --beta 1.0 --hint-start 1.0 --hint-end 0.3 \
+  --aug-crop 0.1 --aug-lowres 0.25 --aug-photo 0.25 \
+  --aug-stress "${AUG_STRESS:-0.6}" --aug-pathological "${AUG_PATHOLOGICAL:-0.1}" \
+  --tail-replay-fraction "${TAIL_REPLAY_FRACTION:-0.5}" \
+  --tail-replay-capacity "${TAIL_REPLAY_CAPACITY:-4096}" \
+  --tail-replay-warmup-steps 100 --causal-tail-beta "${CAUSAL_TAIL_BETA:-2.0}" \
+  --activation-guard-ratio "${ACTIVATION_GUARD_RATIO:-0.5}" \
+  --activation-lam-scale 1.0 \
+  --activation-lam-scale-layer3 "${ACTIVATION_LAM_SCALE_LAYER3:-1.25}" \
+  --operator-bound-weight "${OPERATOR_BOUND_WEIGHT:-1e-3}" \
+  --operator-bound-margin "${OPERATOR_BOUND_MARGIN:-0.05}"
