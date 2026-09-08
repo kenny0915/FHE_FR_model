@@ -36,6 +36,11 @@ from controlled_degree2.model import (
     set_lam_reg_ratio,
     set_quadratic_schedule,
 )
+from utils.utils_optimizer import (
+    clip_grad_norm_stable,
+    nonfinite_gradient_diagnostics,
+    nonfinite_gradient_tensor_count,
+)
 
 
 def parse_args():
@@ -99,11 +104,15 @@ def parse_args():
     parser.add_argument("--adversarial-tail-beta", type=float, default=1.0)
     parser.add_argument("--adversarial-tail-warmup-steps", type=int, default=0)
     parser.add_argument("--deployment-tail-manifest", default=None)
+    parser.add_argument(
+        "--deployment-tail-manifest-key", default="combined_orientations"
+    )
     parser.add_argument("--deployment-tail-batch-size", type=int, default=0)
     parser.add_argument("--deployment-tail-workers", type=int, default=0)
     parser.add_argument("--deployment-tail-beta", type=float, default=0.0)
     parser.add_argument("--deployment-tail-guard-ratio", type=float, default=0.8)
     parser.add_argument("--deployment-tail-assignment-ratio", type=float, default=1.0)
+    parser.add_argument("--deployment-tail-gradient-clip", type=float, default=0.0)
     parser.add_argument("--deployment-tail-priority-count", type=int, default=0)
     parser.add_argument("--deployment-tail-priority-repeats", type=int, default=1)
     parser.add_argument(
@@ -292,7 +301,7 @@ def targeted_tail_penalty(model, target_name, sample_mask):
 
 
 @contextlib.contextmanager
-def deployment_tail_mode(model, guard_ratio):
+def deployment_tail_mode(model, guard_ratio, gradient_clip=0.0):
     """Mirror the unclipped eval graph while retaining tail statistics.
 
     BatchNorm uses its frozen deployment statistics, polynomial modules remain
@@ -308,16 +317,23 @@ def deployment_tail_mode(model, guard_ratio):
             module.eval()
         if isinstance(module, DirectQuadratic):
             quadratic_states.append(
-                (module, module.clip, module.causal_guard_ratio)
+                (
+                    module,
+                    module.clip,
+                    module.causal_guard_ratio,
+                    module.tail_gradient_clip,
+                )
             )
             module.clip = False
             module.causal_guard_ratio = float(guard_ratio)
+            module.tail_gradient_clip = float(gradient_clip)
     try:
         yield
     finally:
-        for module, clip, previous_guard in quadratic_states:
+        for module, clip, previous_guard, previous_gradient_clip in quadratic_states:
             module.clip = clip
             module.causal_guard_ratio = previous_guard
+            module.tail_gradient_clip = previous_gradient_clip
         for module, training in batchnorm_states:
             module.train(training)
 
@@ -328,12 +344,13 @@ def deployment_tail_penalty(
     names,
     guard_ratio,
     assignment_ratio=None,
+    gradient_clip=0.0,
 ):
     """Run an unclipped MS1MV3 shadow path and penalize its first escape."""
     assignment_ratio = (
         float(guard_ratio) if assignment_ratio is None else float(assignment_ratio)
     )
-    with deployment_tail_mode(model, guard_ratio):
+    with deployment_tail_mode(model, guard_ratio, gradient_clip):
         embeddings = model(images.float())
         penalty = collect_causal_tail_penalty(
             model,
@@ -551,6 +568,8 @@ def main():
         raise ValueError(
             "deployment-tail assignment ratio must be at least its guard ratio"
         )
+    if args.deployment_tail_gradient_clip < 0:
+        raise ValueError("deployment-tail gradient clip must be non-negative")
     if args.deployment_tail_priority_count < 0:
         raise ValueError("deployment-tail priority count must be non-negative")
     if args.deployment_tail_priority_repeats < 1:
@@ -652,7 +671,7 @@ def main():
     if args.deployment_tail_manifest:
         deployment_rows = load_fixed_tail_replay_orientations(
             args.deployment_tail_manifest,
-            key="combined_orientations",
+            key=args.deployment_tail_manifest_key,
         )
         bad_rows = [
             (source_index, orientation)
@@ -776,7 +795,8 @@ def main():
             len(weighted_deployment_rows) if deployment_rows else 0
         ),
         "deployment_tail_source": (
-            "MS1MV3 deterministic original/flip manifest"
+            "MS1MV3 deterministic original/flip manifest:"
+            f"{args.deployment_tail_manifest_key}"
             if deployment_rows else None
         ),
         "frozen_modules": frozen_names,
@@ -801,11 +821,13 @@ def main():
                 f"{args.deployment_tail_batch_size}/GPU, guard="
                 f"{args.deployment_tail_guard_ratio:.3g}, beta="
                 f"{args.deployment_tail_beta:.3g}, assignment="
-                f"{args.deployment_tail_assignment_ratio:.3g}"
+                f"{args.deployment_tail_assignment_ratio:.3g}, grad-clip="
+                f"{args.deployment_tail_gradient_clip:.3g}"
             )
 
     autocast_enabled = device.type == "cuda" and args.precision == "bf16"
     nonfinite_streak = 0
+    nonfinite_gradient_streak = 0
     replay = CausalTailReplay(args.tail_replay_capacity, args.tail_replay_fraction, device)
     optimizer.zero_grad(set_to_none=True)
     started = time.time()
@@ -964,6 +986,7 @@ def main():
                             causal_names,
                             args.deployment_tail_guard_ratio,
                             args.deployment_tail_assignment_ratio,
+                            args.deployment_tail_gradient_clip,
                         )
                     loss = loss + args.deployment_tail_beta * deployment_penalty
 
@@ -998,12 +1021,40 @@ def main():
             if not final_microbatch:
                 continue
 
-            torch.nn.utils.clip_grad_norm_(trainable, args.grad_clip)
+            nonfinite_gradients = nonfinite_gradient_tensor_count(
+                (("student", student),), device=device
+            )
+            if world_size > 1:
+                dist.all_reduce(nonfinite_gradients, op=dist.ReduceOp.SUM)
+            if int(nonfinite_gradients):
+                count, diagnostics = nonfinite_gradient_diagnostics(
+                    (("student", student),)
+                )
+                optimizer.zero_grad(set_to_none=True)
+                nonfinite_gradient_streak += 1
+                if is_primary:
+                    print(
+                        "non-finite gradients before step "
+                        f"{step}: rank-local={count}, world="
+                        f"{int(nonfinite_gradients)} details={diagnostics}; "
+                        f"skipped ({nonfinite_gradient_streak}/"
+                        f"{args.max_nonfinite_streak})",
+                        flush=True,
+                    )
+                if nonfinite_gradient_streak >= args.max_nonfinite_streak:
+                    raise FloatingPointError(
+                        "too many consecutive non-finite gradient updates"
+                    )
+                continue
+            gradient_norm = clip_grad_norm_stable(
+                trainable, args.grad_clip, error_if_nonfinite=True
+            )
             lr_scale = losses.lr_factor(step, lr_warmup, total_steps)
             for group in optimizer.param_groups:
                 group["lr"] = learning_rate * lr_scale
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+            nonfinite_gradient_streak = 0
             step += 1
 
             if (
@@ -1027,6 +1078,7 @@ def main():
                             f"adv={float(adversarial_penalty):.3g}@{adversarial_target or '-'} "
                     f"deploy={float(deployment_penalty):.3g}/"
                     f"{deployment_nonfinite}nf/{deployment_peak:.2g}x "
+                    f"grad={float(gradient_norm):.3g} "
                     f"max/lam={maxima.get(worst, 0.0):.2f}@{worst} "
                     f"poly={sum(a >= 1 for a in alphas.values())}/25 {throughput:.0f} img/s",
                     flush=True,

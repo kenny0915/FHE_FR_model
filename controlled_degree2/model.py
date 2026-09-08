@@ -114,6 +114,10 @@ class DirectQuadratic(nn.Module):
         self.penalty = "hinge"
         self.gamma = 10.0
         self.causal_guard_ratio = 1.0
+        # Training-only backward guard used by the unclipped deployment-tail
+        # shadow pass.  It is deliberately disabled for ordinary training and
+        # has no effect on the exported inference graph.
+        self.tail_gradient_clip = 0.0
         self.last_penalty = None
         self.last_oor = 0.0
         self.last_max = 0.0
@@ -131,6 +135,18 @@ class DirectQuadratic(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_dtype = x.dtype
         raw = x.float()
+        if self.training and self.tail_gradient_clip > 0.0 and raw.requires_grad:
+            gradient_clip = float(self.tail_gradient_clip)
+
+            def clamp_tail_gradient(gradient):
+                return torch.nan_to_num(
+                    gradient,
+                    nan=0.0,
+                    posinf=gradient_clip,
+                    neginf=-gradient_clip,
+                ).clamp(-gradient_clip, gradient_clip)
+
+            raw.register_hook(clamp_tail_gradient)
         work = raw
         lam_fit = self.lam_fit.reshape(self._view(work))
 

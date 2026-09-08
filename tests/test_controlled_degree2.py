@@ -170,8 +170,41 @@ def test_deployment_shadow_is_unclipped_uses_eval_bn_and_restores_flags():
     assert model.bn.training
     assert activation.clip
     assert activation.causal_guard_ratio == pytest.approx(1.0)
+    assert activation.tail_gradient_clip == pytest.approx(0.0)
     assert torch.equal(model.bn.num_batches_tracked, before_batches)
     assert model.bn.weight.grad is not None
+
+
+def test_deployment_shadow_clips_backward_signal_at_polynomial_inputs():
+    activation = DirectQuadratic(
+        1, lam_fit=1.0, lam_reg=1.0, slope=0.25, name="act"
+    )
+    model = torch.nn.Sequential(OrderedDict((
+        ("amplify", torch.nn.Conv2d(1, 1, 1, bias=False)),
+        ("act", activation),
+        ("pool", torch.nn.AdaptiveAvgPool2d(1)),
+        ("flatten", torch.nn.Flatten()),
+    ))).train()
+    model.amplify.weight.data.fill_(2.0)
+    inputs = torch.ones(2, 1, 2, 2, requires_grad=True)
+
+    penalty, nonfinite, peak = deployment_tail_penalty(
+        model,
+        inputs,
+        ["act"],
+        guard_ratio=0.8,
+        assignment_ratio=1.0,
+        gradient_clip=0.01,
+    )
+    penalty.backward()
+
+    assert penalty.item() > 0
+    assert nonfinite == 0
+    assert peak > 1.0
+    assert torch.isfinite(inputs.grad).all()
+    assert inputs.grad.abs().max().item() <= 0.0200001
+    assert torch.isfinite(model.amplify.weight.grad).all()
+    assert activation.tail_gradient_clip == pytest.approx(0.0)
 
 
 def test_deployment_shadow_assigns_true_escape_before_applying_margin():

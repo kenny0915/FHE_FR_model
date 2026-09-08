@@ -64,7 +64,12 @@ of deterministic MS1MV3 original/flip extrema is forwarded with deployment
 BatchNorm statistics and no activation clipping.  Its loss is taken only at
 each row's earliest finite interval escape, so downstream degree-2 recurrence
 may overflow diagnostically without contaminating BatchNorm state or the
-gradient.  This does not add an operator, clamp, branch, or parameter to the
+gradient.  For exact-failure refinement, set
+`DEPLOYMENT_TAIL_MANIFEST_KEY=output_nonfinite`; an optional positive
+`DEPLOYMENT_TAIL_GRADIENT_CLIP` bounds the shadow loss's backward signal at
+each polynomial input.  Every optimizer update is rejected if any rank has a
+non-finite gradient, and finite gradients are normed in FP64 before clipping.
+These controls do not add an operator, clamp, branch, or parameter to the
 exported inference graph.
 
 Calibration requires the run10 checkpoint only as a read-only source of its

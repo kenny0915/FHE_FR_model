@@ -23,11 +23,13 @@ DEPLOYMENT_TAIL_ARGS=()
 if [[ -n "${DEPLOYMENT_TAIL_MANIFEST:-}" ]]; then
   DEPLOYMENT_TAIL_ARGS+=(
     --deployment-tail-manifest "${DEPLOYMENT_TAIL_MANIFEST}"
+    --deployment-tail-manifest-key "${DEPLOYMENT_TAIL_MANIFEST_KEY:-combined_orientations}"
     --deployment-tail-batch-size "${DEPLOYMENT_TAIL_BATCH_SIZE:-8}"
     --deployment-tail-workers "${DEPLOYMENT_TAIL_WORKERS:-2}"
     --deployment-tail-beta "${DEPLOYMENT_TAIL_BETA:-0.25}"
     --deployment-tail-guard-ratio "${DEPLOYMENT_TAIL_GUARD_RATIO:-0.8}"
     --deployment-tail-assignment-ratio "${DEPLOYMENT_TAIL_ASSIGNMENT_RATIO:-1.0}"
+    --deployment-tail-gradient-clip "${DEPLOYMENT_TAIL_GRADIENT_CLIP:-0}"
     --deployment-tail-priority-count "${DEPLOYMENT_TAIL_PRIORITY_COUNT:-0}"
     --deployment-tail-priority-repeats "${DEPLOYMENT_TAIL_PRIORITY_REPEATS:-1}"
   )
