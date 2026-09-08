@@ -354,6 +354,9 @@ def test_wider_crop_dataset_is_deterministic_and_filters_invalid(tmp_path):
     image.save(event / "sample.jpg")
     annotations = tmp_path / "wider.txt"
     annotations.write_text(
+        "0--Test/zero.jpg\n"
+        "0\n"
+        "0 0 0 0 0 0 0 0 0 0\n"
         "0--Test/sample.jpg\n"
         "2\n"
         "1 1 4 3 0 0 0 0 0 0\n"

@@ -48,6 +48,19 @@ def parse_wider_annotations(path, context_scales=(1.0, 1.5)):
                 count = int(next(lines).strip())
             except StopIteration as error:
                 raise ValueError("truncated WIDER annotation count") from error
+            if count == 0:
+                # The official WIDER train file stores one all-zero dummy box
+                # after each zero-face count.  It is not part of the next
+                # record and must be consumed to keep the stream aligned.
+                try:
+                    dummy = [int(value) for value in next(lines).split()]
+                except StopIteration as error:
+                    raise ValueError("truncated WIDER zero-face record") from error
+                if not dummy or any(dummy):
+                    raise ValueError(
+                        f"expected all-zero WIDER dummy box, got {dummy}"
+                    )
+                continue
             for _ in range(count):
                 try:
                     fields = [int(value) for value in next(lines).split()]
