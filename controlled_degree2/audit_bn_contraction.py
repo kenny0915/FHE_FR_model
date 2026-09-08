@@ -1,4 +1,4 @@
-"""Audit local BN-affine contractions on exact MS1MV3 deployment failures."""
+"""Audit local BN-affine contractions on exact non-IJB deployment failures."""
 
 from __future__ import annotations
 
@@ -10,6 +10,11 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from controlled_degree2.audit_tail_damping import matches_scope
+from controlled_degree2.deployment_data import (
+    build_deployment_dataset,
+    parse_context_scales,
+    parse_stress_variants,
+)
 from controlled_degree2.mine_deployment_tails import atomic_json_dump
 from controlled_degree2.model import (
     load_controlled_checkpoint,
@@ -24,6 +29,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--dataset-root", required=True)
+    parser.add_argument(
+        "--dataset-type", choices=("ms1mv3", "wider", "ytf"), default="ms1mv3"
+    )
+    parser.add_argument("--annotations", default=None)
+    parser.add_argument("--wider-context-scales", default="1.0,1.5")
+    parser.add_argument("--stress-variants", default="base")
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--manifest-key", default="output_nonfinite")
     parser.add_argument("--output", required=True)
@@ -36,7 +47,7 @@ def main():
     if any(not 0.0 < candidate <= 1.0 for candidate in args.candidate):
         raise ValueError("candidate contraction factors must be in (0, 1]")
 
-    from dataset import DatasetWithIndex, MXFaceDataset
+    from dataset import DatasetWithIndex
 
     device = torch.device("cuda", 0)
     torch.cuda.set_device(device)
@@ -57,10 +68,32 @@ def main():
     }
 
     rows = load_fixed_tail_replay_orientations(args.manifest, key=args.manifest_key)
-    dataset = MXFaceDataset(args.dataset_root, local_rank=0)
+    stress_variants = parse_stress_variants(args.stress_variants)
+    dataset = build_deployment_dataset(
+        args.dataset_type,
+        args.dataset_root,
+        local_rank=0,
+        annotations=args.annotations,
+        wider_context_scales=parse_context_scales(args.wider_context_scales),
+        wider_stress_variants=stress_variants,
+        aligned_stress_variants=stress_variants,
+    )
+    with open(args.manifest, encoding="utf-8") as handle:
+        manifest_payload = json.load(handle)
+    manifest_dataset = manifest_payload.get("dataset")
+    if manifest_dataset and manifest_dataset.lower() != args.dataset_type:
+        raise ValueError(
+            f"manifest dataset {manifest_dataset!r} does not match {args.dataset_type!r}"
+        )
+    manifest_digest = manifest_payload.get("dataset_index_digest")
+    if (
+        manifest_digest
+        and manifest_digest != getattr(dataset, "index_digest", None)
+    ):
+        raise ValueError("dataset ordering differs from the mining manifest")
     bad = [row for row in rows if row[0] >= len(dataset)]
     if bad:
-        raise ValueError(f"manifest indices exceed MS1MV3: {bad[:5]}")
+        raise ValueError(f"manifest indices exceed {args.dataset_type}: {bad[:5]}")
     oriented = DatasetWithIndex(dataset, both_orientations=True)
     subset = Subset(oriented, [2 * index + orientation for index, orientation in rows])
     loader = DataLoader(
@@ -146,10 +179,10 @@ def main():
             handle.remove()
 
     atomic_json_dump({
-        "format": "controlled-degree2-ms1mv3-bn-contraction-audit-v1",
+        "format": "controlled-degree2-bn-contraction-audit-v2",
         "checkpoint": os.path.abspath(args.checkpoint),
         "checkpoint_degree": int(payload["degree"]),
-        "dataset": "MS1MV3",
+        "dataset": args.dataset_type,
         "dataset_root": os.path.abspath(args.dataset_root),
         "manifest": os.path.abspath(args.manifest),
         "manifest_key": args.manifest_key,

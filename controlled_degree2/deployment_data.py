@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass
@@ -21,6 +22,9 @@ class WiderFaceRecord:
     height: int
     context_scale: float
     stress_variant: str
+
+
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
 def parse_context_scales(spec) -> tuple[float, ...]:
@@ -63,10 +67,10 @@ def parse_stress_variants(spec) -> tuple[str, ...]:
     else:
         values = tuple(str(value) for value in spec)
     if not values:
-        raise ValueError("at least one WIDER stress variant is required")
+        raise ValueError("at least one deployment stress variant is required")
     unknown = sorted(set(values) - set(WIDER_STRESS_VARIANTS))
     if unknown:
-        raise ValueError(f"unknown WIDER stress variants: {unknown}")
+        raise ValueError(f"unknown deployment stress variants: {unknown}")
     return values
 
 
@@ -179,7 +183,7 @@ class WiderFaceCropDataset(Dataset):
                 (self.image_size, self.image_size), Image.Resampling.BILINEAR
             )
             tensor = pil_to_tensor(image).float() / 127.5 - 1.0
-            tensor = apply_wider_stress(tensor, record.stress_variant)
+            tensor = apply_image_stress(tensor, record.stress_variant)
         return tensor, torch.tensor(0, dtype=torch.long)
 
     def __getitem__(self, index):
@@ -192,7 +196,7 @@ class WiderFaceCropDataset(Dataset):
         return image, label
 
 
-def apply_wider_stress(image, variant):
+def apply_image_stress(image, variant):
     """Apply one fixed stress transform in normalized RGB tensor space."""
     if variant == "base":
         return image
@@ -227,7 +231,7 @@ def apply_wider_stress(image, variant):
         elif variant == "shift_down":
             output[:, shift:, :] = image[:, :-shift, :]
         else:
-            raise ValueError(f"unknown WIDER stress variant {variant!r}")
+            raise ValueError(f"unknown deployment stress variant {variant!r}")
         return output
     if variant == "jpeg4":
         small = torch.nn.functional.avg_pool2d(image[None], 4)
@@ -238,7 +242,87 @@ def apply_wider_stress(image, variant):
         output = image.clone()
         output[:, 36:76, 28:84] = -1.0
         return output
-    raise ValueError(f"unknown WIDER stress variant {variant!r}")
+    raise ValueError(f"unknown deployment stress variant {variant!r}")
+
+
+# Backward-compatible public name for existing WIDER callers/tests.
+apply_wider_stress = apply_image_stress
+
+
+class AlignedImageDataset(Dataset):
+    """Deterministic recursive loader for already-aligned non-IJB face frames.
+
+    YouTube Faces' aligned archive is arranged in nested identity/video
+    directories. Identity labels are intentionally discarded: these images
+    are used only as unlabeled numerical deployment-tail probes and replay.
+    """
+
+    def __init__(
+        self,
+        image_root,
+        stress_variants=("base",),
+        image_size=112,
+        image_suffixes=IMAGE_SUFFIXES,
+    ):
+        self.image_root = os.path.abspath(image_root)
+        self.image_size = int(image_size)
+        if self.image_size <= 0:
+            raise ValueError("image size must be positive")
+        self.stress_variants = parse_stress_variants(stress_variants)
+        suffixes = tuple(str(value).lower() for value in image_suffixes)
+        if not suffixes:
+            raise ValueError("at least one aligned-image suffix is required")
+        relative_paths = []
+        for directory, directory_names, file_names in os.walk(self.image_root):
+            directory_names.sort()
+            for file_name in sorted(file_names):
+                if file_name.lower().endswith(suffixes):
+                    relative_paths.append(os.path.relpath(
+                        os.path.join(directory, file_name), self.image_root
+                    ))
+        self.relative_paths = tuple(relative_paths)
+        if not self.relative_paths:
+            raise ValueError(
+                f"no aligned face images found recursively under {self.image_root}"
+            )
+
+    def __len__(self):
+        return len(self.relative_paths) * len(self.stress_variants)
+
+    @property
+    def index_digest(self):
+        """Fingerprint the exact source-index ordering used by manifests."""
+        digest = hashlib.sha256()
+        for relative_path in self.relative_paths:
+            digest.update(relative_path.encode("utf-8", errors="surrogateescape"))
+            digest.update(b"\0")
+        for variant in self.stress_variants:
+            digest.update(variant.encode("ascii"))
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    def _read(self, index):
+        path_index, variant_index = divmod(index, len(self.stress_variants))
+        relative_path = self.relative_paths[path_index]
+        variant = self.stress_variants[variant_index]
+        path = os.path.join(self.image_root, relative_path)
+        with Image.open(path) as source:
+            image = source.convert("RGB")
+            if image.size != (self.image_size, self.image_size):
+                image = image.resize(
+                    (self.image_size, self.image_size), Image.Resampling.BILINEAR
+                )
+            tensor = pil_to_tensor(image).float() / 127.5 - 1.0
+        return apply_image_stress(tensor, variant), torch.tensor(0, dtype=torch.long)
+
+    def __getitem__(self, index):
+        return self._read(index)
+
+    def get_oriented(self, index, orientation):
+        image, label = self._read(index)
+        if int(orientation):
+            image = torch.flip(image, dims=(-1,))
+        return image, label
 
 
 def build_deployment_dataset(
@@ -249,6 +333,7 @@ def build_deployment_dataset(
     annotations=None,
     wider_context_scales=(1.0, 1.5),
     wider_stress_variants=("base",),
+    aligned_stress_variants=("base",),
 ):
     if dataset_type == "ms1mv3":
         from dataset import MXFaceDataset
@@ -262,5 +347,10 @@ def build_deployment_dataset(
             annotations,
             context_scales=wider_context_scales,
             stress_variants=wider_stress_variants,
+        )
+    if dataset_type == "ytf":
+        return AlignedImageDataset(
+            root,
+            stress_variants=aligned_stress_variants,
         )
     raise ValueError(f"unknown deployment dataset type {dataset_type!r}")

@@ -107,6 +107,17 @@ def parse_args():
     parser.add_argument(
         "--deployment-tail-manifest-key", default="combined_orientations"
     )
+    parser.add_argument(
+        "--deployment-tail-dataset-type",
+        choices=("ms1mv3", "wider", "ytf"),
+        default="ms1mv3",
+    )
+    parser.add_argument("--deployment-tail-dataset-root", default=None)
+    parser.add_argument("--deployment-tail-annotations", default=None)
+    parser.add_argument(
+        "--deployment-tail-wider-context-scales", default="1.0,1.5"
+    )
+    parser.add_argument("--deployment-tail-stress-variants", default="base")
     parser.add_argument("--deployment-tail-batch-size", type=int, default=0)
     parser.add_argument("--deployment-tail-workers", type=int, default=0)
     parser.add_argument("--deployment-tail-beta", type=float, default=0.0)
@@ -687,6 +698,11 @@ def main():
         student.to(memory_format=torch.channels_last)
         teacher.to(memory_format=torch.channels_last)
 
+    from controlled_degree2.deployment_data import (
+        build_deployment_dataset,
+        parse_context_scales,
+        parse_stress_variants,
+    )
     from dataset import DatasetWithIndex, MXFaceDataset
     from utils.utils_tail_recovery import load_fixed_tail_replay_orientations
 
@@ -714,21 +730,73 @@ def main():
     deployment_iterator = None
     deployment_epoch = 0
     deployment_rows = ()
+    deployment_dataset = None
     if args.deployment_tail_manifest:
         deployment_rows = load_fixed_tail_replay_orientations(
             args.deployment_tail_manifest,
             key=args.deployment_tail_manifest_key,
         )
+        deployment_root = args.deployment_tail_dataset_root
+        if args.deployment_tail_dataset_type == "ms1mv3":
+            if deployment_root and os.path.abspath(deployment_root) != os.path.abspath(
+                args.dataset_root
+            ):
+                deployment_dataset = build_deployment_dataset(
+                    "ms1mv3", deployment_root, local_rank=local_rank
+                )
+            else:
+                deployment_root = args.dataset_root
+                deployment_dataset = dataset
+        else:
+            if not deployment_root:
+                raise ValueError(
+                    "non-MS1MV3 deployment replay requires "
+                    "--deployment-tail-dataset-root"
+                )
+            deployment_stress = parse_stress_variants(
+                args.deployment_tail_stress_variants
+            )
+            deployment_dataset = build_deployment_dataset(
+                args.deployment_tail_dataset_type,
+                deployment_root,
+                local_rank=local_rank,
+                annotations=args.deployment_tail_annotations,
+                wider_context_scales=parse_context_scales(
+                    args.deployment_tail_wider_context_scales
+                ),
+                wider_stress_variants=deployment_stress,
+                aligned_stress_variants=deployment_stress,
+            )
+        with open(args.deployment_tail_manifest, encoding="utf-8") as handle:
+            deployment_manifest = json.load(handle)
+        manifest_dataset = deployment_manifest.get("dataset")
+        if (
+            manifest_dataset
+            and manifest_dataset.lower() != args.deployment_tail_dataset_type
+        ):
+            raise ValueError(
+                "deployment-tail manifest dataset mismatch: "
+                f"manifest={manifest_dataset!r}, requested="
+                f"{args.deployment_tail_dataset_type!r}"
+            )
+        manifest_digest = deployment_manifest.get("dataset_index_digest")
+        dataset_digest = getattr(deployment_dataset, "index_digest", None)
+        if manifest_digest and dataset_digest != manifest_digest:
+            raise ValueError(
+                "deployment-tail dataset ordering differs from the mining manifest"
+            )
         bad_rows = [
             (source_index, orientation)
             for source_index, orientation in deployment_rows
-            if source_index >= len(dataset)
+            if source_index >= len(deployment_dataset)
         ]
         if bad_rows:
             raise ValueError(
                 f"deployment-tail manifest indices exceed dataset: {bad_rows[:5]}"
             )
-        oriented_dataset = DatasetWithIndex(dataset, both_orientations=True)
+        oriented_dataset = DatasetWithIndex(
+            deployment_dataset, both_orientations=True
+        )
         weighted_deployment_rows = prioritized_deployment_rows(
             deployment_rows,
             args.deployment_tail_priority_count,
@@ -841,8 +909,8 @@ def main():
             len(weighted_deployment_rows) if deployment_rows else 0
         ),
         "deployment_tail_source": (
-            "MS1MV3 deterministic original/flip manifest:"
-            f"{args.deployment_tail_manifest_key}"
+            f"{args.deployment_tail_dataset_type} deterministic "
+            f"original/flip manifest:{args.deployment_tail_manifest_key}"
             if deployment_rows else None
         ),
         "frozen_modules": frozen_names,
@@ -864,7 +932,8 @@ def main():
         )
         if deployment_rows:
             print(
-                f"deployment shadow replay: {len(deployment_rows)} MS1MV3 rows, "
+                f"deployment shadow replay: {len(deployment_rows)} "
+                f"{args.deployment_tail_dataset_type} rows, "
                 f"{len(weighted_deployment_rows)} weighted rows, "
                 f"{args.deployment_tail_batch_size}/GPU, guard="
                 f"{args.deployment_tail_guard_ratio:.3g}, beta="

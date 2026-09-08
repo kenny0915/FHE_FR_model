@@ -9,6 +9,7 @@ from controlled_degree2.calibrate import reference_ranges, weighted_quadratic_ab
 from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.mine_deployment_tails import merge_rank_payloads
 from controlled_degree2.deployment_data import (
+    AlignedImageDataset,
     WiderFaceCropDataset,
     apply_wider_stress,
     parse_wider_annotations,
@@ -400,6 +401,41 @@ def test_wider_stress_variants_are_bounded_and_deterministic():
         assert torch.isfinite(first).all()
         assert float(first.min()) >= -1.0
         assert float(first.max()) <= 1.0
+
+
+def test_aligned_image_dataset_has_stable_recursive_frame_indices(tmp_path):
+    from PIL import Image
+
+    root = tmp_path / "aligned_images_DB"
+    (root / "person_b" / "video_2").mkdir(parents=True)
+    (root / "person_a" / "video_1").mkdir(parents=True)
+    Image.new("RGB", (96, 100), color=(255, 0, 0)).save(
+        root / "person_b" / "video_2" / "frame_2.jpg"
+    )
+    Image.new("RGB", (112, 112), color=(0, 255, 0)).save(
+        root / "person_a" / "video_1" / "frame_1.PNG"
+    )
+    (root / "person_a" / "metadata.txt").write_text("ignored", encoding="utf-8")
+
+    first = AlignedImageDataset(root, stress_variants=("base", "dark"))
+    second = AlignedImageDataset(root, stress_variants=("base", "dark"))
+
+    assert first.relative_paths == (
+        "person_a/video_1/frame_1.PNG",
+        "person_b/video_2/frame_2.jpg",
+    )
+    assert len(first) == 4
+    assert first.index_digest == second.index_digest
+    assert first.index_digest != AlignedImageDataset(
+        root, stress_variants=("dark", "base")
+    ).index_digest
+    base, label = first.get_oriented(0, 0)
+    dark, _ = first.get_oriented(1, 0)
+    flipped, _ = first.get_oriented(0, 1)
+    assert base.shape == (3, 112, 112)
+    assert dark.shape == base.shape
+    assert torch.equal(flipped, torch.flip(base, dims=(-1,)))
+    assert label.item() == 0
 
 
 def test_deployment_tail_priority_repeats_manifest_prefix_only():

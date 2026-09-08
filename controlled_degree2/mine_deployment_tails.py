@@ -1,9 +1,9 @@
-"""Mine rare MS1MV3 tails through the real unclipped degree-2 graph.
+"""Mine rare non-IJB tails through the real unclipped degree-2 graph.
 
 This is a read-only, evaluation-mode scanner.  It never reads IJB data and
-does not modify the checkpoint.  The output records deterministic MS1MV3
-source/orientation rows with the largest per-layer input-to-interval ratios so
-that training can replay them through an unclipped deployment shadow path.
+does not modify the checkpoint. The output records deterministic source and
+orientation rows with the largest per-layer input-to-interval ratios so that
+training can replay them through an unclipped deployment shadow path.
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ def merge_rank_payloads(payloads, activation_names, topk):
                 combined.append({"source_index": key[0], "orientation": key[1]})
 
     return {
-        "format": "controlled-degree2-ms1mv3-deployment-tails-v1",
+        "format": "controlled-degree2-deployment-tails-v2",
         "selection": "unclipped eval graph, normalized by per-channel lam_reg",
         "activation_names": list(activation_names),
         "topk": int(topk),
@@ -142,11 +142,12 @@ def parse_args():
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--dataset-root", required=True)
     parser.add_argument(
-        "--dataset-type", choices=("ms1mv3", "wider"), default="ms1mv3"
+        "--dataset-type", choices=("ms1mv3", "wider", "ytf"), default="ms1mv3"
     )
     parser.add_argument("--annotations", default=None)
     parser.add_argument("--wider-context-scales", default="1.0,1.5")
     parser.add_argument("--wider-stress-variants", default="base")
+    parser.add_argument("--aligned-stress-variants", default="base")
     parser.add_argument("--output", required=True)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--workers", type=int, default=4)
@@ -178,6 +179,7 @@ def main():
 
     context_scales = parse_context_scales(args.wider_context_scales)
     stress_variants = parse_stress_variants(args.wider_stress_variants)
+    aligned_stress_variants = parse_stress_variants(args.aligned_stress_variants)
     base_dataset = build_deployment_dataset(
         args.dataset_type,
         args.dataset_root,
@@ -185,6 +187,7 @@ def main():
         annotations=args.annotations,
         wider_context_scales=context_scales,
         wider_stress_variants=stress_variants,
+        aligned_stress_variants=aligned_stress_variants,
     )
     indexed_dataset = DatasetWithIndex(
         base_dataset, both_orientations=args.both_orientations
@@ -343,6 +346,11 @@ def main():
             "wider_stress_variants": (
                 list(stress_variants) if args.dataset_type == "wider" else None
             ),
+            "aligned_stress_variants": (
+                list(aligned_stress_variants)
+                if args.dataset_type == "ytf" else None
+            ),
+            "dataset_index_digest": getattr(base_dataset, "index_digest", None),
             "both_orientations": bool(args.both_orientations),
             "world_size": world_size,
             "batches_per_rank": [payload["batches"] for payload in payloads],
