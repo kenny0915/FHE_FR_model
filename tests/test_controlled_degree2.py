@@ -23,6 +23,7 @@ from controlled_degree2.train import (
     freeze_through_layer4,
     keep_frozen_modules_eval,
     make_adversarial_tail_batch,
+    prioritized_deployment_rows,
     restore_batchnorm_state,
     snapshot_batchnorm_state,
 )
@@ -206,6 +207,19 @@ def test_deployment_tail_manifest_merge_is_layer_balanced_and_deduplicated():
     assert combined == [(9, 1), (1, 0), (3, 1), (2, 0), (5, 0)]
     assert merged["activations"]["a"]["tail"][0]["ratio"] == pytest.approx(5.0)
     assert merged["activations"]["b"]["nonfinite_input_count"] == 1
+
+
+def test_deployment_tail_priority_repeats_manifest_prefix_only():
+    rows = ((9, 1), (7, 0), (5, 1), (3, 0))
+
+    weighted = prioritized_deployment_rows(rows, priority_count=2, priority_repeats=3)
+
+    assert weighted == (
+        (9, 1), (7, 0),
+        (9, 1), (7, 0),
+        (9, 1), (7, 0),
+        (5, 1), (3, 0),
+    )
 
 
 def test_eval_is_unclipped_but_optional_diagnostic_clip_is_bounded():

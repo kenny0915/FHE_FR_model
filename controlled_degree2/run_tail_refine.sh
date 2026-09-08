@@ -27,6 +27,8 @@ if [[ -n "${DEPLOYMENT_TAIL_MANIFEST:-}" ]]; then
     --deployment-tail-workers "${DEPLOYMENT_TAIL_WORKERS:-2}"
     --deployment-tail-beta "${DEPLOYMENT_TAIL_BETA:-0.25}"
     --deployment-tail-guard-ratio "${DEPLOYMENT_TAIL_GUARD_RATIO:-0.8}"
+    --deployment-tail-priority-count "${DEPLOYMENT_TAIL_PRIORITY_COUNT:-0}"
+    --deployment-tail-priority-repeats "${DEPLOYMENT_TAIL_PRIORITY_REPEATS:-1}"
   )
 fi
 torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \

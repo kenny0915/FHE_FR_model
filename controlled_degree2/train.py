@@ -103,6 +103,8 @@ def parse_args():
     parser.add_argument("--deployment-tail-workers", type=int, default=0)
     parser.add_argument("--deployment-tail-beta", type=float, default=0.0)
     parser.add_argument("--deployment-tail-guard-ratio", type=float, default=0.8)
+    parser.add_argument("--deployment-tail-priority-count", type=int, default=0)
+    parser.add_argument("--deployment-tail-priority-repeats", type=int, default=1)
     parser.add_argument(
         "--freeze-through-layer3",
         action=argparse.BooleanOptionalAction,
@@ -356,6 +358,16 @@ def deployment_tail_penalty(
     return penalty, nonfinite_rows, peak_ratio
 
 
+def prioritized_deployment_rows(rows, priority_count, priority_repeats):
+    """Repeat the manifest prefix while retaining every layer-balanced row."""
+    rows = tuple(rows)
+    count = min(int(priority_count), len(rows))
+    repeats = int(priority_repeats)
+    if count <= 0 or repeats <= 1:
+        return rows
+    return rows[:count] * repeats + rows[count:]
+
+
 def belongs_to_frozen_module(name, frozen_names):
     return any(name == prefix or name.startswith(prefix + ".") for prefix in frozen_names)
 
@@ -526,6 +538,10 @@ def main():
         raise ValueError("deployment-tail weight must be non-negative")
     if args.deployment_tail_guard_ratio <= 0:
         raise ValueError("deployment-tail guard ratio must be positive")
+    if args.deployment_tail_priority_count < 0:
+        raise ValueError("deployment-tail priority count must be non-negative")
+    if args.deployment_tail_priority_repeats < 1:
+        raise ValueError("deployment-tail priority repeats must be positive")
     deployment_tail_fields = (
         bool(args.deployment_tail_manifest),
         args.deployment_tail_batch_size > 0,
@@ -635,9 +651,17 @@ def main():
                 f"deployment-tail manifest indices exceed dataset: {bad_rows[:5]}"
             )
         oriented_dataset = DatasetWithIndex(dataset, both_orientations=True)
+        weighted_deployment_rows = prioritized_deployment_rows(
+            deployment_rows,
+            args.deployment_tail_priority_count,
+            args.deployment_tail_priority_repeats,
+        )
         replay_subset = Subset(
             oriented_dataset,
-            [2 * source_index + orientation for source_index, orientation in deployment_rows],
+            [
+                2 * source_index + orientation
+                for source_index, orientation in weighted_deployment_rows
+            ],
         )
         deployment_sampler = DistributedSampler(
             replay_subset,
@@ -735,6 +759,9 @@ def main():
         "activation_lam_scale": args.activation_lam_scale,
         "activation_lam_scale_layer3": args.activation_lam_scale_layer3,
         "deployment_tail_rows": len(deployment_rows),
+        "deployment_tail_weighted_rows": (
+            len(weighted_deployment_rows) if deployment_rows else 0
+        ),
         "deployment_tail_source": (
             "MS1MV3 deterministic original/flip manifest"
             if deployment_rows else None
@@ -757,6 +784,7 @@ def main():
         if deployment_rows:
             print(
                 f"deployment shadow replay: {len(deployment_rows)} MS1MV3 rows, "
+                f"{len(weighted_deployment_rows)} weighted rows, "
                 f"{args.deployment_tail_batch_size}/GPU, guard="
                 f"{args.deployment_tail_guard_ratio:.3g}, beta="
                 f"{args.deployment_tail_beta:.3g}"
