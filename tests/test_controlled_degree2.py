@@ -14,6 +14,7 @@ from controlled_degree2.model import (
 from controlled_degree2.train import (
     belongs_to_frozen_module,
     freeze_through_layer3,
+    freeze_through_layer4,
     keep_frozen_modules_eval,
 )
 
@@ -151,6 +152,18 @@ def test_freeze_through_layer3_locks_parameters_and_batchnorm_state():
     keep_frozen_modules_eval(model, frozen)
     assert not model.layer3.training
     assert model.layer4.training
+
+
+def test_freeze_through_layer4_leaves_only_embedding_head_trainable():
+    from backbones import get_model
+
+    model = get_model("r50_controlled_d2", dropout=0, fp16=False)
+    frozen = freeze_through_layer4(model)
+
+    assert belongs_to_frozen_module("layer4.2.prelu", frozen)
+    assert all(not parameter.requires_grad for parameter in model.layer4.parameters())
+    assert any(parameter.requires_grad for parameter in model.fc.parameters())
+    assert not model.layer4.training
 
 
 def test_range_coverage_keeps_realistic_domain_and_masks_pathological_rows():

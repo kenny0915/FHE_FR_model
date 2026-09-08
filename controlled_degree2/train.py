@@ -100,6 +100,15 @@ def parse_args():
             "only layer4 and the embedding head are optimized"
         ),
     )
+    parser.add_argument(
+        "--freeze-through-layer4",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "freeze every polynomial-bearing module through layer4, including "
+            "BatchNorm running statistics; only the embedding head is optimized"
+        ),
+    )
 
     parser.add_argument("--canary-root", default=None)
     parser.add_argument("--canary-sets", default="lfw,cplfw")
@@ -133,6 +142,7 @@ def distributed_context():
 
 
 FROZEN_THROUGH_LAYER3 = ("conv1", "bn1", "prelu", "layer1", "layer2", "layer3")
+FROZEN_THROUGH_LAYER4 = FROZEN_THROUGH_LAYER3 + ("layer4",)
 
 
 def freeze_through_layer3(model):
@@ -143,6 +153,15 @@ def freeze_through_layer3(model):
         module.requires_grad_(False)
         module.eval()
         frozen.append(name)
+    return tuple(frozen)
+
+
+def freeze_through_layer4(model):
+    """Freeze all polynomial-bearing modules while leaving the head trainable."""
+    frozen = list(freeze_through_layer3(model))
+    model.layer4.requires_grad_(False)
+    model.layer4.eval()
+    frozen.append("layer4")
     return tuple(frozen)
 
 
@@ -299,6 +318,8 @@ def main():
         raise ValueError("activation lam scale must be positive")
     if args.activation_lam_scale_layer3 <= 0:
         raise ValueError("layer3 activation lam scale must be positive")
+    if args.freeze_through_layer3 and args.freeze_through_layer4:
+        raise ValueError("select only one frozen-prefix boundary")
     rank, world_size, local_rank, device = distributed_context()
     seed_everything(args.seed, rank)
     is_primary = rank == 0
@@ -332,7 +353,12 @@ def main():
             {"layer3": args.activation_lam_scale_layer3},
         )
     set_lam_reg_ratio(student, args.lam_reg_ratio)
-    frozen_names = freeze_through_layer3(student) if args.freeze_through_layer3 else ()
+    if args.freeze_through_layer4:
+        frozen_names = freeze_through_layer4(student)
+    elif args.freeze_through_layer3:
+        frozen_names = freeze_through_layer3(student)
+    else:
+        frozen_names = ()
     operator_targets = operator_bound_targets(student, args.operator_bound_margin)
     for entry in calibration.values():
         entry["lam_reg"] = (
@@ -511,10 +537,15 @@ def main():
                     embedding = losses.embedding_loss(
                         student_embedding, teacher_embedding, mask
                     )
-                    hint = losses.hint_loss(
-                        student_hints, teacher_hints, names, mask
+                    hint = (
+                        losses.hint_loss(student_hints, teacher_hints, names, mask)
+                        if names else student_embedding.new_zeros(())
                     )
-                    range_penalty, oor, maxima = collect_range_stats(student)
+                    if names:
+                        range_penalty, oor, maxima = collect_range_stats(student)
+                    else:
+                        range_penalty = student_embedding.new_zeros(())
+                        oor, maxima = {}, {}
                     causal_penalty = collect_causal_tail_penalty(
                         student,
                         causal_names,
@@ -539,10 +570,10 @@ def main():
                     optimizer.zero_grad(set_to_none=True)
                     nonfinite_streak += 1
                     if is_primary:
-                        worst = max(maxima, key=maxima.get)
+                        worst = max(maxima, key=maxima.get) if maxima else "frozen-poly"
                         print(
                             f"non-finite loss before step {step}; worst {worst}="
-                            f"{maxima[worst]:.3g}; skipped ({nonfinite_streak}/"
+                            f"{maxima.get(worst, 0.0):.3g}; skipped ({nonfinite_streak}/"
                             f"{args.max_nonfinite_streak})",
                             flush=True,
                         )
@@ -575,7 +606,7 @@ def main():
                     replay.update(images[distill_mask], tail_scores[distill_mask])
 
             if is_primary and step % args.log_every == 0:
-                worst = max(maxima, key=maxima.get)
+                worst = max(maxima, key=maxima.get) if maxima else "frozen-poly"
                 elapsed = max(time.time() - started, 1e-6)
                 throughput = step * args.global_batch / elapsed
                 print(
@@ -583,7 +614,7 @@ def main():
                     f"emb={float(embedding):.4f} hint={float(hint):.4f} "
                     f"pen={float(range_penalty):.3g} oor={np.mean(list(oor.values())):.2e} "
                     f"tail={float(causal_penalty):.3g} bound={float(bound_penalty):.3g} "
-                    f"max/lam={maxima[worst]:.2f}@{worst} "
+                    f"max/lam={maxima.get(worst, 0.0):.2f}@{worst} "
                     f"poly={sum(a >= 1 for a in alphas.values())}/25 {throughput:.0f} img/s",
                     flush=True,
                 )

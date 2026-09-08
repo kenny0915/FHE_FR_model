@@ -16,6 +16,9 @@ FREEZE_ARGS=()
 if [[ "${FREEZE_THROUGH_LAYER3:-0}" == "1" ]]; then
   FREEZE_ARGS+=(--freeze-through-layer3)
 fi
+if [[ "${FREEZE_THROUGH_LAYER4:-0}" == "1" ]]; then
+  FREEZE_ARGS+=(--freeze-through-layer4)
+fi
 torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --student-init "${STUDENT_INIT}" \
   --teacher "${TEACHER_CKPT}" \
