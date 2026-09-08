@@ -103,6 +103,7 @@ def parse_args():
     parser.add_argument("--deployment-tail-workers", type=int, default=0)
     parser.add_argument("--deployment-tail-beta", type=float, default=0.0)
     parser.add_argument("--deployment-tail-guard-ratio", type=float, default=0.8)
+    parser.add_argument("--deployment-tail-assignment-ratio", type=float, default=1.0)
     parser.add_argument("--deployment-tail-priority-count", type=int, default=0)
     parser.add_argument("--deployment-tail-priority-repeats", type=int, default=1)
     parser.add_argument(
@@ -326,14 +327,22 @@ def deployment_tail_penalty(
     images,
     names,
     guard_ratio,
+    assignment_ratio=None,
 ):
     """Run an unclipped MS1MV3 shadow path and penalize its first escape."""
+    assignment_ratio = (
+        float(guard_ratio) if assignment_ratio is None else float(assignment_ratio)
+    )
     with deployment_tail_mode(model, guard_ratio):
         embeddings = model(images.float())
         penalty = collect_causal_tail_penalty(
             model,
             names,
-            guard_ratio=guard_ratio,
+            # Assignment uses the true escape boundary.  The selected layer's
+            # differentiable penalty may use a lower target to create margin;
+            # using that lower target for assignment would stop at a benign
+            # upstream 0.8--1.0x row and hide the actual recurrence seed.
+            guard_ratio=assignment_ratio,
             sample_mask=None,
             reduction="sample_mean",
         )
@@ -538,6 +547,10 @@ def main():
         raise ValueError("deployment-tail weight must be non-negative")
     if args.deployment_tail_guard_ratio <= 0:
         raise ValueError("deployment-tail guard ratio must be positive")
+    if args.deployment_tail_assignment_ratio < args.deployment_tail_guard_ratio:
+        raise ValueError(
+            "deployment-tail assignment ratio must be at least its guard ratio"
+        )
     if args.deployment_tail_priority_count < 0:
         raise ValueError("deployment-tail priority count must be non-negative")
     if args.deployment_tail_priority_repeats < 1:
@@ -787,7 +800,8 @@ def main():
                 f"{len(weighted_deployment_rows)} weighted rows, "
                 f"{args.deployment_tail_batch_size}/GPU, guard="
                 f"{args.deployment_tail_guard_ratio:.3g}, beta="
-                f"{args.deployment_tail_beta:.3g}"
+                f"{args.deployment_tail_beta:.3g}, assignment="
+                f"{args.deployment_tail_assignment_ratio:.3g}"
             )
 
     autocast_enabled = device.type == "cuda" and args.precision == "bf16"
@@ -949,6 +963,7 @@ def main():
                             deployment_images,
                             causal_names,
                             args.deployment_tail_guard_ratio,
+                            args.deployment_tail_assignment_ratio,
                         )
                     loss = loss + args.deployment_tail_beta * deployment_penalty
 

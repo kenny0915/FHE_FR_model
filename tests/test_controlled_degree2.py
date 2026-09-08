@@ -173,6 +173,40 @@ def test_deployment_shadow_is_unclipped_uses_eval_bn_and_restores_flags():
     assert model.bn.weight.grad is not None
 
 
+def test_deployment_shadow_assigns_true_escape_before_applying_margin():
+    first = DirectQuadratic(1, lam_fit=1.0, lam_reg=1.0, name="first")
+    second = DirectQuadratic(1, lam_fit=1.0, lam_reg=1.0, name="second")
+
+    class Double(torch.nn.Module):
+        def forward(self, values):
+            return values * 2.0
+
+    model = torch.nn.Sequential(OrderedDict((
+        ("first", first),
+        ("amplify", Double()),
+        ("second", second),
+        ("pool", torch.nn.AdaptiveAvgPool2d(1)),
+        ("flatten", torch.nn.Flatten()),
+    ))).train()
+    inputs = torch.full((2, 1, 2, 2), 0.9, requires_grad=True)
+
+    penalty, nonfinite, peak = deployment_tail_penalty(
+        model,
+        inputs,
+        ["first", "second"],
+        guard_ratio=0.8,
+        assignment_ratio=1.0,
+    )
+    penalty.backward()
+
+    # The first row is above the 0.8 margin but not outside the true interval;
+    # assignment must therefore reach the second activation's >1.0x input.
+    assert penalty.item() > 0.5
+    assert nonfinite == 0
+    assert peak > 1.0
+    assert inputs.grad.abs().sum().item() > 0
+
+
 def test_deployment_tail_manifest_merge_is_layer_balanced_and_deduplicated():
     def payload(rank, rows_a, rows_b, nonfinite=()):
         return {
