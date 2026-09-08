@@ -113,6 +113,15 @@ def parse_args():
     parser.add_argument("--deployment-tail-guard-ratio", type=float, default=0.8)
     parser.add_argument("--deployment-tail-assignment-ratio", type=float, default=1.0)
     parser.add_argument("--deployment-tail-gradient-clip", type=float, default=0.0)
+    parser.add_argument(
+        "--deployment-tail-local-bn",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "detach shadow inputs at BatchNorm boundaries so tail gradients "
+            "update only the activation's local BN affine controller"
+        ),
+    )
     parser.add_argument("--deployment-tail-priority-count", type=int, default=0)
     parser.add_argument("--deployment-tail-priority-repeats", type=int, default=1)
     parser.add_argument(
@@ -317,7 +326,12 @@ def targeted_tail_penalty(model, target_name, sample_mask):
 
 
 @contextlib.contextmanager
-def deployment_tail_mode(model, guard_ratio, gradient_clip=0.0):
+def deployment_tail_mode(
+    model,
+    guard_ratio,
+    gradient_clip=0.0,
+    local_batchnorm=False,
+):
     """Mirror the unclipped eval graph while retaining tail statistics.
 
     BatchNorm uses its frozen deployment statistics, polynomial modules remain
@@ -327,10 +341,18 @@ def deployment_tail_mode(model, guard_ratio, gradient_clip=0.0):
     """
     batchnorm_states = []
     quadratic_states = []
+    detach_handles = []
     for module in model.modules():
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
             batchnorm_states.append((module, module.training))
             module.eval()
+            if local_batchnorm:
+                detach_handles.append(module.register_forward_pre_hook(
+                    lambda _module, inputs: tuple(
+                        value.detach() if torch.is_tensor(value) else value
+                        for value in inputs
+                    )
+                ))
         if isinstance(module, DirectQuadratic):
             quadratic_states.append(
                 (
@@ -346,6 +368,8 @@ def deployment_tail_mode(model, guard_ratio, gradient_clip=0.0):
     try:
         yield
     finally:
+        for handle in detach_handles:
+            handle.remove()
         for module, clip, previous_guard, previous_gradient_clip in quadratic_states:
             module.clip = clip
             module.causal_guard_ratio = previous_guard
@@ -361,12 +385,18 @@ def deployment_tail_penalty(
     guard_ratio,
     assignment_ratio=None,
     gradient_clip=0.0,
+    local_batchnorm=False,
 ):
     """Run an unclipped MS1MV3 shadow path and penalize its first escape."""
     assignment_ratio = (
         float(guard_ratio) if assignment_ratio is None else float(assignment_ratio)
     )
-    with deployment_tail_mode(model, guard_ratio, gradient_clip):
+    with deployment_tail_mode(
+        model,
+        guard_ratio,
+        gradient_clip,
+        local_batchnorm,
+    ):
         embeddings = model(images.float())
         penalty = collect_causal_tail_penalty(
             model,
@@ -817,6 +847,7 @@ def main():
         ),
         "frozen_modules": frozen_names,
         "batchnorm_running_stats_frozen": bool(args.freeze_batchnorm_stats),
+        "deployment_tail_local_batchnorm": bool(args.deployment_tail_local_bn),
     }
     if is_primary:
         with open(
@@ -839,7 +870,8 @@ def main():
                 f"{args.deployment_tail_guard_ratio:.3g}, beta="
                 f"{args.deployment_tail_beta:.3g}, assignment="
                 f"{args.deployment_tail_assignment_ratio:.3g}, grad-clip="
-                f"{args.deployment_tail_gradient_clip:.3g}"
+                f"{args.deployment_tail_gradient_clip:.3g}, local-bn="
+                f"{int(args.deployment_tail_local_bn)}"
             )
 
     autocast_enabled = device.type == "cuda" and args.precision == "bf16"
@@ -1014,6 +1046,7 @@ def main():
                             args.deployment_tail_guard_ratio,
                             args.deployment_tail_assignment_ratio,
                             args.deployment_tail_gradient_clip,
+                            args.deployment_tail_local_bn,
                         )
                     loss = loss + args.deployment_tail_beta * deployment_penalty
 

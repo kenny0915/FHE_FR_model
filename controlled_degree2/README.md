@@ -71,6 +71,11 @@ each polynomial input using a relative `|gradient * activation|` limit.  This
 automatically tightens after an escape target moves to a very large downstream
 activation.  Every optimizer update is rejected if any rank has a
 non-finite gradient, and finite gradients are normed in FP64 before clipping.
+`DEPLOYMENT_TAIL_LOCAL_BN=1` additionally detaches the shadow graph at every
+BatchNorm input.  The earliest-escape loss can then update only that
+activation's immediately preceding BatchNorm affine controller instead of
+backpropagating through a deep residual recurrence; ordinary distillation
+still trains the full network.
 Set `FREEZE_BATCHNORM_STATS=1` when refining an already converged checkpoint so
 the ordinary training path, shadow path, and deployment all use its fixed
 running statistics while BatchNorm affine tensors remain trainable.

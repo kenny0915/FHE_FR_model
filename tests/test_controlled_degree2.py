@@ -234,6 +234,40 @@ def test_deployment_shadow_bounds_relative_input_gradient():
     assert bool((relative_gradient <= 0.0100001).all())
 
 
+def test_deployment_shadow_local_bn_blocks_upstream_tail_gradient():
+    activation = DirectQuadratic(
+        1, lam_fit=1.0, lam_reg=1.0, slope=0.25, name="act"
+    )
+    model = torch.nn.Sequential(OrderedDict((
+        ("conv", torch.nn.Conv2d(1, 1, 1, bias=False)),
+        ("bn", torch.nn.BatchNorm2d(1)),
+        ("act", activation),
+        ("pool", torch.nn.AdaptiveAvgPool2d(1)),
+        ("flatten", torch.nn.Flatten()),
+    ))).train()
+    model.conv.weight.data.fill_(2.0)
+    model.bn.running_mean.zero_()
+    model.bn.running_var.fill_(1.0)
+    inputs = torch.ones(2, 1, 2, 2, requires_grad=True)
+
+    penalty, _, _ = deployment_tail_penalty(
+        model,
+        inputs,
+        ["act"],
+        guard_ratio=0.8,
+        assignment_ratio=1.0,
+        gradient_clip=0.01,
+        local_batchnorm=True,
+    )
+    penalty.backward()
+
+    assert model.bn.weight.grad is not None
+    assert torch.isfinite(model.bn.weight.grad).all()
+    assert model.conv.weight.grad is None
+    assert inputs.grad is None
+    assert model.bn.training
+
+
 def test_deployment_shadow_assigns_true_escape_before_applying_margin():
     first = DirectQuadratic(1, lam_fit=1.0, lam_reg=1.0, name="first")
     second = DirectQuadratic(1, lam_fit=1.0, lam_reg=1.0, name="second")

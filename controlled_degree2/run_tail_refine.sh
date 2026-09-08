@@ -36,6 +36,9 @@ if [[ -n "${DEPLOYMENT_TAIL_MANIFEST:-}" ]]; then
     --deployment-tail-priority-count "${DEPLOYMENT_TAIL_PRIORITY_COUNT:-0}"
     --deployment-tail-priority-repeats "${DEPLOYMENT_TAIL_PRIORITY_REPEATS:-1}"
   )
+  if [[ "${DEPLOYMENT_TAIL_LOCAL_BN:-0}" == "1" ]]; then
+    DEPLOYMENT_TAIL_ARGS+=(--deployment-tail-local-bn)
+  fi
 fi
 torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --student-init "${STUDENT_INIT}" \
