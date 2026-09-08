@@ -475,6 +475,52 @@ def damp_quadratic_terms(
     return touched
 
 
+def preactivation_batchnorm_name(activation_name: str) -> str:
+    """Return the BatchNorm affine that directly produces an activation input."""
+    if activation_name == "prelu":
+        return "bn1"
+    prefix, separator, leaf = activation_name.rpartition(".")
+    if not separator or leaf != "prelu":
+        raise ValueError(f"unsupported activation name {activation_name!r}")
+    return f"{prefix}.bn2"
+
+
+@torch.no_grad()
+def contract_preactivation_affines(
+    model: nn.Module,
+    scales: Mapping[str, float],
+) -> Dict[str, dict]:
+    """Contract selected polynomial inputs through their existing BN affine.
+
+    Multiplying both gamma and beta by ``s`` makes eval-mode BatchNorm output
+    exactly ``s*y`` while leaving running statistics and the degree-2
+    activation unchanged.  The scale is therefore an FHE-friendly linear
+    weight folded into an operator already present in the backbone.
+    """
+    touched = {}
+    for module in quadratic_modules(model):
+        scale = _matching_scale(module.name, scales)
+        if scale is None or scale == 1.0:
+            continue
+        if not 0.0 < scale <= 1.0 or not np.isfinite(scale):
+            raise ValueError(
+                "preactivation contraction factors must be finite and in (0, 1]"
+            )
+        batchnorm_name = preactivation_batchnorm_name(module.name)
+        batchnorm = model.get_submodule(batchnorm_name)
+        if not isinstance(batchnorm, nn.modules.batchnorm._BatchNorm):
+            raise TypeError(f"{batchnorm_name} is not a BatchNorm module")
+        if batchnorm.weight is None or batchnorm.bias is None:
+            raise ValueError(f"{batchnorm_name} has no affine parameters")
+        batchnorm.weight.mul_(scale)
+        batchnorm.bias.mul_(scale)
+        touched[module.name] = {
+            "batchnorm": batchnorm_name,
+            "factor": float(scale),
+        }
+    return touched
+
+
 def load_calibration(path: str) -> dict:
     with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)

@@ -11,8 +11,10 @@ from controlled_degree2.mine_deployment_tails import merge_rank_payloads
 from controlled_degree2.model import (
     DirectQuadratic,
     collect_causal_tail_penalty,
+    contract_preactivation_affines,
     damp_quadratic_terms,
     prelu_to_quadratic_coefficients,
+    preactivation_batchnorm_name,
     scale_intervals,
     set_quadratic_schedule,
 )
@@ -412,6 +414,31 @@ def test_quadratic_tail_damping_changes_only_c2_and_records_fit_update():
         torch.tensor([[0.3, 0.36], [0.5, 0.18]]),
     )
     assert calibration["layer1.0.prelu"]["quadratic_tail_scale"] == pytest.approx(0.9)
+
+
+def test_preactivation_contraction_scales_only_producer_bn_affine():
+    from backbones import get_model
+
+    model = get_model("r50_controlled_d2", dropout=0, fp16=False)
+    batchnorm = model.layer1[1].bn2
+    before_weight = batchnorm.weight.detach().clone()
+    before_bias = batchnorm.bias.detach().clone()
+    before_mean = batchnorm.running_mean.detach().clone()
+    before_coeffs = model.layer1[1].prelu.coeffs.detach().clone()
+
+    touched = contract_preactivation_affines(
+        model, {"layer1.1.prelu": 0.9}
+    )
+
+    assert preactivation_batchnorm_name("prelu") == "bn1"
+    assert preactivation_batchnorm_name("layer1.1.prelu") == "layer1.1.bn2"
+    assert touched == {
+        "layer1.1.prelu": {"batchnorm": "layer1.1.bn2", "factor": 0.9}
+    }
+    assert torch.allclose(batchnorm.weight, before_weight * 0.9)
+    assert torch.allclose(batchnorm.bias, before_bias * 0.9)
+    assert torch.equal(batchnorm.running_mean, before_mean)
+    assert torch.equal(model.layer1[1].prelu.coeffs, before_coeffs)
 
 
 def test_histogram_weighted_fit_returns_a_finite_direct_quadratic():
