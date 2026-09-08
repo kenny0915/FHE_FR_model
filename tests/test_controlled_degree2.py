@@ -16,6 +16,8 @@ from controlled_degree2.train import (
     freeze_through_layer3,
     freeze_through_layer4,
     keep_frozen_modules_eval,
+    restore_batchnorm_state,
+    snapshot_batchnorm_state,
 )
 
 
@@ -164,6 +166,28 @@ def test_freeze_through_layer4_leaves_only_embedding_head_trainable():
     assert all(not parameter.requires_grad for parameter in model.layer4.parameters())
     assert any(parameter.requires_grad for parameter in model.fc.parameters())
     assert not model.layer4.training
+
+
+def test_batchnorm_state_can_be_rolled_back_after_rejected_forward():
+    model = torch.nn.Sequential(
+        torch.nn.BatchNorm2d(2),
+        torch.nn.Flatten(),
+        torch.nn.Linear(8, 2),
+        torch.nn.BatchNorm1d(2),
+    ).train()
+    before = snapshot_batchnorm_state(model)
+
+    model(torch.full((4, 2, 2, 2), float("nan")))
+    assert not torch.isfinite(model[0].running_mean).all()
+    assert not torch.isfinite(model[3].running_var).all()
+
+    restore_batchnorm_state(model, before)
+    for name, expected in before.items():
+        module = model.get_submodule(name)
+        running_mean, running_var, num_batches_tracked = expected
+        assert torch.equal(module.running_mean, running_mean)
+        assert torch.equal(module.running_var, running_var)
+        assert torch.equal(module.num_batches_tracked, num_batches_tracked)
 
 
 def test_range_coverage_keeps_realistic_domain_and_masks_pathological_rows():

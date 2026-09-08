@@ -170,6 +170,42 @@ def keep_frozen_modules_eval(model, names):
         model.get_submodule(name).eval()
 
 
+@torch.no_grad()
+def snapshot_batchnorm_state(model):
+    """Capture mutable BatchNorm buffers before a potentially rejected batch.
+
+    BatchNorm updates its running statistics during the forward pass.  Merely
+    skipping ``optimizer.step()`` therefore does not reject a non-finite batch:
+    NaN/Inf activations can permanently poison a checkpoint's running state.
+    The tensors are small compared with activations, so cloning them once per
+    microbatch is a cheap transaction boundary.
+    """
+    snapshot = {}
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            snapshot[name] = (
+                None if module.running_mean is None else module.running_mean.clone(),
+                None if module.running_var is None else module.running_var.clone(),
+                None
+                if module.num_batches_tracked is None
+                else module.num_batches_tracked.clone(),
+            )
+    return snapshot
+
+
+@torch.no_grad()
+def restore_batchnorm_state(model, snapshot):
+    """Roll back BatchNorm buffers captured by :func:`snapshot_batchnorm_state`."""
+    for name, (running_mean, running_var, num_batches_tracked) in snapshot.items():
+        module = model.get_submodule(name) if name else model
+        if running_mean is not None:
+            module.running_mean.copy_(running_mean)
+        if running_var is not None:
+            module.running_var.copy_(running_var)
+        if num_batches_tracked is not None:
+            module.num_batches_tracked.copy_(num_batches_tracked)
+
+
 def belongs_to_frozen_module(name, frozen_names):
     return any(name == prefix or name.startswith(prefix + ".") for prefix in frozen_names)
 
@@ -522,6 +558,7 @@ def main():
                 else distributed_student.no_sync()
             )
             with sync_context:
+                batchnorm_state = snapshot_batchnorm_state(student)
                 with torch.no_grad(), torch.autocast(
                     device_type=device.type,
                     dtype=torch.bfloat16,
@@ -567,6 +604,11 @@ def main():
                 if world_size > 1:
                     dist.all_reduce(finite, op=dist.ReduceOp.MIN)
                 if not bool(finite):
+                    # Forward-time BatchNorm updates are state mutations too.
+                    # Roll them back on every rank when any rank rejects the
+                    # batch, otherwise a skipped tail sample can silently make
+                    # the next exported checkpoint non-deployable.
+                    restore_batchnorm_state(student, batchnorm_state)
                     optimizer.zero_grad(set_to_none=True)
                     nonfinite_streak += 1
                     if is_primary:
