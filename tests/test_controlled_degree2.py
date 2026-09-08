@@ -22,6 +22,7 @@ from controlled_degree2.train import (
     deployment_tail_penalty,
     freeze_through_layer3,
     freeze_through_layer4,
+    keep_batchnorm_eval,
     keep_frozen_modules_eval,
     make_adversarial_tail_batch,
     prioritized_deployment_rows,
@@ -454,6 +455,25 @@ def test_freeze_through_layer4_leaves_only_embedding_head_trainable():
     assert all(not parameter.requires_grad for parameter in model.layer4.parameters())
     assert any(parameter.requires_grad for parameter in model.fc.parameters())
     assert not model.layer4.training
+
+
+def test_keep_batchnorm_eval_preserves_trainable_affine_parameters():
+    model = torch.nn.Sequential(
+        torch.nn.Conv2d(2, 2, 1),
+        torch.nn.BatchNorm2d(2),
+        torch.nn.Sequential(torch.nn.BatchNorm1d(2)),
+    ).train()
+
+    keep_batchnorm_eval(model)
+
+    batchnorms = [
+        module
+        for module in model.modules()
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+    ]
+    assert batchnorms
+    assert all(not module.training for module in batchnorms)
+    assert all(module.weight.requires_grad for module in batchnorms)
 
 
 def test_batchnorm_state_can_be_rolled_back_after_rejected_forward():

@@ -13,6 +13,9 @@ python -c 'import numpy as np, torch; assert int(np.__version__.split(".")[0]) <
 
 GPUS="${GPUS:-4}"
 FREEZE_ARGS=()
+if [[ "${FREEZE_BATCHNORM_STATS:-0}" == "1" ]]; then
+  FREEZE_ARGS+=(--freeze-batchnorm-stats)
+fi
 if [[ "${FREEZE_THROUGH_LAYER3:-0}" == "1" ]]; then
   FREEZE_ARGS+=(--freeze-through-layer3)
 fi

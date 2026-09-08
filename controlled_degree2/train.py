@@ -116,6 +116,15 @@ def parse_args():
     parser.add_argument("--deployment-tail-priority-count", type=int, default=0)
     parser.add_argument("--deployment-tail-priority-repeats", type=int, default=1)
     parser.add_argument(
+        "--freeze-batchnorm-stats",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "keep pretrained BatchNorm running statistics fixed while affine "
+            "parameters remain trainable"
+        ),
+    )
+    parser.add_argument(
         "--freeze-through-layer3",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -192,6 +201,13 @@ def freeze_through_layer4(model):
 def keep_frozen_modules_eval(model, names):
     for name in names:
         model.get_submodule(name).eval()
+
+
+def keep_batchnorm_eval(model):
+    """Use checkpoint BatchNorm statistics without freezing affine tensors."""
+    for module in model.modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.eval()
 
 
 @torch.no_grad()
@@ -800,6 +816,7 @@ def main():
             if deployment_rows else None
         ),
         "frozen_modules": frozen_names,
+        "batchnorm_running_stats_frozen": bool(args.freeze_batchnorm_stats),
     }
     if is_primary:
         with open(
@@ -836,6 +853,8 @@ def main():
         sampler.set_epoch(epoch)
         distributed_student.train()
         keep_frozen_modules_eval(student, frozen_names)
+        if args.freeze_batchnorm_stats:
+            keep_batchnorm_eval(student)
         consumed = 0
         for batch_index, (images, _labels) in enumerate(loader):
             if batch_index >= microbatches_per_epoch:

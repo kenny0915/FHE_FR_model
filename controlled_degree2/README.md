@@ -69,6 +69,9 @@ gradient.  For exact-failure refinement, set
 `DEPLOYMENT_TAIL_GRADIENT_CLIP` bounds the shadow loss's backward signal at
 each polynomial input.  Every optimizer update is rejected if any rank has a
 non-finite gradient, and finite gradients are normed in FP64 before clipping.
+Set `FREEZE_BATCHNORM_STATS=1` when refining an already converged checkpoint so
+the ordinary training path, shadow path, and deployment all use its fixed
+running statistics while BatchNorm affine tensors remain trainable.
 These controls do not add an operator, clamp, branch, or parameter to the
 exported inference graph.
 
