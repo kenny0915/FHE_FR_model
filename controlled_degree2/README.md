@@ -112,6 +112,10 @@ python eval_ijbc.py \
   --fail-on-nonfinite
 ```
 
+For a standalone finite-gated LFW/CPLFW check before the expensive IJB run,
+submit `job_canary.slurm` with `CHECKPOINT`, `CANARY_ROOT`, and
+`CANARY_OUTPUT` set.
+
 Use exactly the same IJB protocol, image lists, flip fusion and FAR points as
 the run10 report.  Record at minimum: non-finite image count, first escaping
 activation if any, IJB-B/C TAR at FAR 1e-4 and 1e-5, and LFW/CPLFW canaries.
