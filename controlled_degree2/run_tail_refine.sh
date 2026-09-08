@@ -20,9 +20,13 @@ torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --canary-sets "${CANARY_SETS:-lfw}" \
   --output-dir "${OUTPUT_ROOT}" \
   --epochs "${EPOCHS:-3}" --batch-size 128 --global-batch 2048 \
+  --lr-at-512 "${LR_AT_512:-5e-4}" \
   --swap-epochs 0 --penalty-warmup-epochs 0.1 \
-  --lam-reg-ratio 0.6 --beta 1.0 --hint-start 1.0 --hint-end 0.3 \
-  --aug-crop 0.1 --aug-lowres 0.25 --aug-photo 0.25 \
+  --w-embedding "${W_EMBEDDING:-1.0}" \
+  --lam-reg-ratio "${LAM_REG_RATIO:-0.6}" --beta "${RANGE_BETA:-1.0}" \
+  --hint-start "${HINT_START:-1.0}" --hint-end "${HINT_END:-0.3}" \
+  --aug-crop "${AUG_CROP:-0.1}" --aug-lowres "${AUG_LOWRES:-0.25}" \
+  --aug-photo "${AUG_PHOTO:-0.25}" \
   --aug-stress "${AUG_STRESS:-0.6}" --aug-pathological "${AUG_PATHOLOGICAL:-0.1}" \
   --tail-replay-fraction "${TAIL_REPLAY_FRACTION:-0.5}" \
   --tail-replay-capacity "${TAIL_REPLAY_CAPACITY:-4096}" \
