@@ -7,6 +7,7 @@ from torch.nn import functional as F
 
 from controlled_degree2.calibrate import reference_ranges, weighted_quadratic_abs_fit
 from controlled_degree2.augment import prepare_range_batch
+from controlled_degree2.mine_deployment_tails import merge_rank_payloads
 from controlled_degree2.model import (
     DirectQuadratic,
     collect_causal_tail_penalty,
@@ -17,6 +18,7 @@ from controlled_degree2.model import (
 from controlled_degree2.train import (
     belongs_to_frozen_module,
     causal_tail_names,
+    deployment_tail_penalty,
     freeze_through_layer3,
     freeze_through_layer4,
     keep_frozen_modules_eval,
@@ -69,6 +71,16 @@ def test_causal_tail_penalty_is_bounded_and_differentiable_past_cap():
     assert penalty.item() == pytest.approx(32.0 ** 2)
     assert torch.isfinite(inputs.grad).all()
     assert inputs.grad.abs().item() > 0
+
+
+def test_causal_tail_penalty_remains_finite_after_downstream_overflow():
+    activation = DirectQuadratic(1, lam_fit=2.0, lam_reg=1.0, name="act")
+    activation.train()
+    activation(torch.tensor([[[[float("inf")]]]]))
+
+    penalty = collect_causal_tail_penalty(activation, ["act"])
+
+    assert penalty.item() == pytest.approx(32.0 ** 2)
 
 
 def test_causal_guard_threshold_matches_escape_assignment_threshold():
@@ -128,6 +140,72 @@ def test_adversarial_tail_search_increases_target_peak_without_parameter_grads()
     assert float((output - images).abs().max()) <= 0.4 + 1e-6
     assert after > before
     assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_deployment_shadow_is_unclipped_uses_eval_bn_and_restores_flags():
+    activation = DirectQuadratic(
+        1, lam_fit=1.0, lam_reg=1.0, slope=0.25, name="act"
+    )
+    model = torch.nn.Sequential(OrderedDict((
+        ("bn", torch.nn.BatchNorm2d(1)),
+        ("act", activation),
+        ("pool", torch.nn.AdaptiveAvgPool2d(1)),
+        ("flatten", torch.nn.Flatten()),
+    ))).train()
+    model.bn.running_mean.fill_(0.0)
+    model.bn.running_var.fill_(1.0)
+    before_batches = model.bn.num_batches_tracked.clone()
+    inputs = torch.full((2, 1, 4, 4), 3.0)
+
+    penalty, nonfinite, peak = deployment_tail_penalty(
+        model, inputs, ["act"], guard_ratio=0.8
+    )
+    penalty.backward()
+
+    assert penalty.item() > 0
+    assert nonfinite == 0
+    assert peak > 1.0
+    assert model.bn.training
+    assert activation.clip
+    assert activation.causal_guard_ratio == pytest.approx(1.0)
+    assert torch.equal(model.bn.num_batches_tracked, before_batches)
+    assert model.bn.weight.grad is not None
+
+
+def test_deployment_tail_manifest_merge_is_layer_balanced_and_deduplicated():
+    def payload(rank, rows_a, rows_b, nonfinite=()):
+        return {
+            "rank": rank,
+            "output_nonfinite": [
+                {"source_index": index, "orientation": orientation}
+                for index, orientation in nonfinite
+            ],
+            "activations": {
+                "a": {"nonfinite_input_count": 0, "tail": rows_a},
+                "b": {"nonfinite_input_count": rank, "tail": rows_b},
+            },
+        }
+
+    row = lambda index, orientation, ratio: {
+        "source_index": index,
+        "orientation": orientation,
+        "ratio": ratio,
+        "absmax": ratio * 2,
+    }
+    merged = merge_rank_payloads([
+        payload(0, [row(1, 0, 4.0), row(2, 0, 3.0)],
+                [row(3, 1, 8.0), row(1, 0, 2.0)], nonfinite=((9, 1),)),
+        payload(1, [row(1, 0, 5.0), row(4, 1, 1.0)],
+                [row(5, 0, 7.0)], nonfinite=((9, 1),)),
+    ], ("a", "b"), topk=2)
+
+    combined = [
+        (row["source_index"], row["orientation"])
+        for row in merged["combined_orientations"]
+    ]
+    assert combined == [(9, 1), (1, 0), (3, 1), (2, 0), (5, 0)]
+    assert merged["activations"]["a"]["tail"][0]["ratio"] == pytest.approx(5.0)
+    assert merged["activations"]["b"]["nonfinite_input_count"] == 1
 
 
 def test_eval_is_unclipped_but_optional_diagnostic_clip_is_bounded():

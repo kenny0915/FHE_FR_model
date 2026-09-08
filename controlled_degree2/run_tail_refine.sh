@@ -19,6 +19,16 @@ fi
 if [[ "${FREEZE_THROUGH_LAYER4:-0}" == "1" ]]; then
   FREEZE_ARGS+=(--freeze-through-layer4)
 fi
+DEPLOYMENT_TAIL_ARGS=()
+if [[ -n "${DEPLOYMENT_TAIL_MANIFEST:-}" ]]; then
+  DEPLOYMENT_TAIL_ARGS+=(
+    --deployment-tail-manifest "${DEPLOYMENT_TAIL_MANIFEST}"
+    --deployment-tail-batch-size "${DEPLOYMENT_TAIL_BATCH_SIZE:-8}"
+    --deployment-tail-workers "${DEPLOYMENT_TAIL_WORKERS:-2}"
+    --deployment-tail-beta "${DEPLOYMENT_TAIL_BETA:-0.25}"
+    --deployment-tail-guard-ratio "${DEPLOYMENT_TAIL_GUARD_RATIO:-0.8}"
+  )
+fi
 torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --student-init "${STUDENT_INIT}" \
   --teacher "${TEACHER_CKPT}" \
@@ -51,4 +61,5 @@ torchrun --standalone --nproc_per_node="${GPUS}" -m controlled_degree2.train \
   --adversarial-tail-warmup-steps "${ADVERSARIAL_TAIL_WARMUP_STEPS:-0}" \
   --log-every "${LOG_EVERY:-50}" \
   --limit-batches "${LIMIT_BATCHES:-0}" \
+  "${DEPLOYMENT_TAIL_ARGS[@]}" \
   "${FREEZE_ARGS[@]}"

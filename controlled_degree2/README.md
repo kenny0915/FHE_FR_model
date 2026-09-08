@@ -47,6 +47,26 @@ Or submit `controlled_degree2/job.slurm` after exporting the same variables.
 The four-GPU trainer accumulates four microbatches per GPU, preserving run10's
 effective global batch of 2048 and linearly scaled learning rate 0.002.
 
+For rare-tail refinement without using IJB calibration, first scan MS1MV3
+through the real unclipped evaluation graph:
+
+```bash
+export CHECKPOINT=/path/to/student_best.pt
+export DATASET_ROOT=/path/to/ms1m-retinaface-t1
+export OUTPUT_MANIFEST=/path/to/ms1mv3_deployment_tails.json
+sbatch controlled_degree2/job_deployment_tail_mine.slurm
+```
+
+Passing that manifest as `DEPLOYMENT_TAIL_MANIFEST` to
+`run_tail_refine.sh` adds a training-only deployment shadow pass.  The main
+distillation path remains clipped for safe optimization, while a small batch
+of deterministic MS1MV3 original/flip extrema is forwarded with deployment
+BatchNorm statistics and no activation clipping.  Its loss is taken only at
+each row's earliest finite interval escape, so downstream degree-2 recurrence
+may overflow diagnostically without contaminating BatchNorm state or the
+gradient.  This does not add an operator, clamp, branch, or parameter to the
+exported inference graph.
+
 Calibration requires the run10 checkpoint only as a read-only source of its
 actual deployed range buffers and recorded widening factors.  It deliberately
 ignores the degree-4 coefficients, fits a quadratic on the corresponding

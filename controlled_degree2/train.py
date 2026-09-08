@@ -18,11 +18,12 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, Subset
 
 from controlled_degree2 import losses
 from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.model import (
+    DirectQuadratic,
     collect_causal_tail_penalty,
     collect_range_stats,
     load_controlled_checkpoint,
@@ -97,6 +98,11 @@ def parse_args():
     parser.add_argument("--adversarial-tail-step-size", type=float, default=0.125)
     parser.add_argument("--adversarial-tail-beta", type=float, default=1.0)
     parser.add_argument("--adversarial-tail-warmup-steps", type=int, default=0)
+    parser.add_argument("--deployment-tail-manifest", default=None)
+    parser.add_argument("--deployment-tail-batch-size", type=int, default=0)
+    parser.add_argument("--deployment-tail-workers", type=int, default=0)
+    parser.add_argument("--deployment-tail-beta", type=float, default=0.0)
+    parser.add_argument("--deployment-tail-guard-ratio", type=float, default=0.8)
     parser.add_argument(
         "--freeze-through-layer3",
         action=argparse.BooleanOptionalAction,
@@ -282,6 +288,74 @@ def targeted_tail_penalty(model, target_name, sample_mask):
     return penalty[sample_mask].mean()
 
 
+@contextlib.contextmanager
+def deployment_tail_mode(model, guard_ratio):
+    """Mirror the unclipped eval graph while retaining tail statistics.
+
+    BatchNorm uses its frozen deployment statistics, polynomial modules remain
+    in training mode only so they expose differentiable per-sample tail
+    penalties, and activation clipping is disabled.  All flags are restored
+    even if a deliberately hard shadow forward overflows downstream.
+    """
+    batchnorm_states = []
+    quadratic_states = []
+    for module in model.modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            batchnorm_states.append((module, module.training))
+            module.eval()
+        if isinstance(module, DirectQuadratic):
+            quadratic_states.append(
+                (module, module.clip, module.causal_guard_ratio)
+            )
+            module.clip = False
+            module.causal_guard_ratio = float(guard_ratio)
+    try:
+        yield
+    finally:
+        for module, clip, previous_guard in quadratic_states:
+            module.clip = clip
+            module.causal_guard_ratio = previous_guard
+        for module, training in batchnorm_states:
+            module.train(training)
+
+
+def deployment_tail_penalty(
+    model,
+    images,
+    names,
+    guard_ratio,
+):
+    """Run an unclipped MS1MV3 shadow path and penalize its first escape."""
+    with deployment_tail_mode(model, guard_ratio):
+        embeddings = model(images.float())
+        penalty = collect_causal_tail_penalty(
+            model,
+            names,
+            guard_ratio=guard_ratio,
+            sample_mask=None,
+            reduction="sample_mean",
+        )
+        nonfinite_rows = int(
+            (~torch.isfinite(embeddings).flatten(1).all(dim=1)).sum()
+        )
+        ratios = [
+            module.last_sample_ratio
+            for module in quadratic_modules(model)
+            if module.name in names and module.last_sample_ratio is not None
+        ]
+        peak_ratio = 0.0
+        if ratios:
+            peak_ratio = float(
+                torch.nan_to_num(
+                    torch.stack(ratios, dim=1),
+                    nan=float("inf"),
+                    posinf=float("inf"),
+                    neginf=float("inf"),
+                ).amax()
+            )
+    return penalty, nonfinite_rows, peak_ratio
+
+
 def belongs_to_frozen_module(name, frozen_names):
     return any(name == prefix or name.startswith(prefix + ".") for prefix in frozen_names)
 
@@ -446,6 +520,22 @@ def main():
         raise ValueError("adversarial tail epsilon and step size must be non-negative")
     if args.adversarial_tail_beta < 0:
         raise ValueError("adversarial tail weight must be non-negative")
+    if args.deployment_tail_batch_size < 0 or args.deployment_tail_workers < 0:
+        raise ValueError("deployment-tail batch size/workers must be non-negative")
+    if args.deployment_tail_beta < 0:
+        raise ValueError("deployment-tail weight must be non-negative")
+    if args.deployment_tail_guard_ratio <= 0:
+        raise ValueError("deployment-tail guard ratio must be positive")
+    deployment_tail_fields = (
+        bool(args.deployment_tail_manifest),
+        args.deployment_tail_batch_size > 0,
+        args.deployment_tail_beta > 0,
+    )
+    if any(deployment_tail_fields) and not all(deployment_tail_fields):
+        raise ValueError(
+            "deployment-tail manifest, positive batch size, and positive beta "
+            "must be enabled together"
+        )
     if args.activation_guard_ratio <= 0 or args.operator_bound_margin < 0:
         raise ValueError("activation guard ratio must be positive and margin non-negative")
     if args.activation_lam_scale <= 0:
@@ -503,7 +593,8 @@ def main():
         student.to(memory_format=torch.channels_last)
         teacher.to(memory_format=torch.channels_last)
 
-    from dataset import MXFaceDataset
+    from dataset import DatasetWithIndex, MXFaceDataset
+    from utils.utils_tail_recovery import load_fixed_tail_replay_orientations
 
     dataset = MXFaceDataset(args.dataset_root, local_rank=local_rank)
     sampler = DistributedSampler(
@@ -524,6 +615,62 @@ def main():
         persistent_workers=args.num_workers > 0,
         prefetch_factor=4 if args.num_workers > 0 else None,
     )
+    deployment_loader = None
+    deployment_sampler = None
+    deployment_iterator = None
+    deployment_epoch = 0
+    deployment_rows = ()
+    if args.deployment_tail_manifest:
+        deployment_rows = load_fixed_tail_replay_orientations(
+            args.deployment_tail_manifest,
+            key="combined_orientations",
+        )
+        bad_rows = [
+            (source_index, orientation)
+            for source_index, orientation in deployment_rows
+            if source_index >= len(dataset)
+        ]
+        if bad_rows:
+            raise ValueError(
+                f"deployment-tail manifest indices exceed dataset: {bad_rows[:5]}"
+            )
+        oriented_dataset = DatasetWithIndex(dataset, both_orientations=True)
+        replay_subset = Subset(
+            oriented_dataset,
+            [2 * source_index + orientation for source_index, orientation in deployment_rows],
+        )
+        deployment_sampler = DistributedSampler(
+            replay_subset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=args.seed + 7919,
+            drop_last=False,
+        )
+        deployment_loader = DataLoader(
+            replay_subset,
+            batch_size=args.deployment_tail_batch_size,
+            sampler=deployment_sampler,
+            num_workers=args.deployment_tail_workers,
+            pin_memory=True,
+            drop_last=False,
+            persistent_workers=args.deployment_tail_workers > 0,
+            prefetch_factor=2 if args.deployment_tail_workers > 0 else None,
+        )
+        deployment_sampler.set_epoch(deployment_epoch)
+        deployment_iterator = iter(deployment_loader)
+
+    def next_deployment_batch():
+        nonlocal deployment_iterator, deployment_epoch
+        if deployment_loader is None:
+            return None
+        try:
+            return next(deployment_iterator)
+        except StopIteration:
+            deployment_epoch += 1
+            deployment_sampler.set_epoch(deployment_epoch)
+            deployment_iterator = iter(deployment_loader)
+            return next(deployment_iterator)
     microbatches_per_epoch = len(loader)
     if args.limit_batches:
         microbatches_per_epoch = min(microbatches_per_epoch, args.limit_batches)
@@ -587,6 +734,11 @@ def main():
         "operator_bound_proxy": "max convolution row Frobenius norm",
         "activation_lam_scale": args.activation_lam_scale,
         "activation_lam_scale_layer3": args.activation_lam_scale_layer3,
+        "deployment_tail_rows": len(deployment_rows),
+        "deployment_tail_source": (
+            "MS1MV3 deterministic original/flip manifest"
+            if deployment_rows else None
+        ),
         "frozen_modules": frozen_names,
     }
     if is_primary:
@@ -602,6 +754,13 @@ def main():
             f"{steps_per_epoch} optimizer steps/epoch; progressive swap completes near "
             f"step {swap_steps + ramp_steps}; {len(names)} hint points"
         )
+        if deployment_rows:
+            print(
+                f"deployment shadow replay: {len(deployment_rows)} MS1MV3 rows, "
+                f"{args.deployment_tail_batch_size}/GPU, guard="
+                f"{args.deployment_tail_guard_ratio:.3g}, beta="
+                f"{args.deployment_tail_beta:.3g}"
+            )
 
     autocast_enabled = device.type == "cuda" and args.precision == "bf16"
     nonfinite_streak = 0
@@ -635,6 +794,14 @@ def main():
             if step >= args.tail_replay_warmup_steps:
                 images = replay.mix(images)
             mask = None if bool(distill_mask.all()) else distill_mask
+            deployment_batch = next_deployment_batch()
+            deployment_images = None
+            if deployment_batch is not None:
+                deployment_images = deployment_batch[0].to(device, non_blocking=True)
+                if args.channels_last:
+                    deployment_images = deployment_images.contiguous(
+                        memory_format=torch.channels_last
+                    )
 
             gamma = losses.gamma_at(step, penalty_warmup, args.gamma)
             beta = losses.beta_at(step, penalty_warmup, args.beta)
@@ -718,6 +885,15 @@ def main():
                     adversarial_penalty = targeted_tail_penalty(
                         student, adversarial_target, adversarial_mask
                     )
+                    main_tail_scores = None
+                    tail_ratios = [
+                        module.last_sample_ratio
+                        for module in quadratic_modules(student)
+                        if module.name in causal_names
+                        and module.last_sample_ratio is not None
+                    ]
+                    if tail_ratios:
+                        main_tail_scores = torch.stack(tail_ratios, dim=1).amax(dim=1)
                     loss = (
                         args.w_embedding * embedding
                         + hint_weight * hint
@@ -726,6 +902,27 @@ def main():
                         + args.operator_bound_weight * bound_penalty
                         + args.adversarial_tail_beta * adversarial_penalty
                     )
+
+                deployment_penalty = student_embedding.new_zeros(())
+                deployment_nonfinite = 0
+                deployment_peak = 0.0
+                if deployment_images is not None:
+                    # The shadow path is float32 and uses deployment BatchNorm
+                    # state with activation clipping disabled.  Its output is
+                    # diagnostic only; gradients come from the earliest finite
+                    # escape, before any downstream recurrence can overflow.
+                    with torch.autocast(device_type=device.type, enabled=False):
+                        (
+                            deployment_penalty,
+                            deployment_nonfinite,
+                            deployment_peak,
+                        ) = deployment_tail_penalty(
+                            student,
+                            deployment_images,
+                            causal_names,
+                            args.deployment_tail_guard_ratio,
+                        )
+                    loss = loss + args.deployment_tail_beta * deployment_penalty
 
                 finite = torch.tensor(
                     int(torch.isfinite(loss)), dtype=torch.int32, device=device
@@ -766,15 +963,14 @@ def main():
             optimizer.zero_grad(set_to_none=True)
             step += 1
 
-            if replay.capacity > 0 and bool(distill_mask.any()):
-                tail_ratios = [
-                    module.last_sample_ratio
-                    for module in quadratic_modules(student)
-                    if module.name in causal_names and module.last_sample_ratio is not None
-                ]
-                if tail_ratios:
-                    tail_scores = torch.stack(tail_ratios, dim=1).amax(dim=1)
-                    replay.update(images[distill_mask], tail_scores[distill_mask])
+            if (
+                replay.capacity > 0
+                and bool(distill_mask.any())
+                and main_tail_scores is not None
+            ):
+                replay.update(
+                    images[distill_mask], main_tail_scores[distill_mask]
+                )
 
             if is_primary and step % args.log_every == 0:
                 worst = max(maxima, key=maxima.get) if maxima else "frozen-poly"
@@ -786,6 +982,8 @@ def main():
                     f"pen={float(range_penalty):.3g} oor={np.mean(list(oor.values())):.2e} "
                             f"tail={float(causal_penalty):.3g} bound={float(bound_penalty):.3g} "
                             f"adv={float(adversarial_penalty):.3g}@{adversarial_target or '-'} "
+                    f"deploy={float(deployment_penalty):.3g}/"
+                    f"{deployment_nonfinite}nf/{deployment_peak:.2g}x "
                     f"max/lam={maxima.get(worst, 0.0):.2f}@{worst} "
                     f"poly={sum(a >= 1 for a in alphas.values())}/25 {throughput:.0f} img/s",
                     flush=True,

@@ -153,8 +153,18 @@ class DirectQuadratic(nn.Module):
                 guard_excess = F.relu(
                     raw.abs() / lam_reg - float(self.causal_guard_ratio)
                 )
-                capped_excess = guard_excess.clamp_max(32.0)
-                safe_excess = guard_excess + (capped_excess - guard_excess).detach()
+                # A deployment-path shadow forward is intentionally unclipped
+                # and can reach Inf after an earlier quadratic escape.  Keep
+                # diagnostic values finite in that case.  Finite values retain
+                # the straight-through gradient beyond the cap; Inf/NaN has no
+                # useful local derivative and is mapped to the cap.
+                finite_excess = torch.nan_to_num(
+                    guard_excess, nan=32.0, posinf=32.0, neginf=0.0
+                )
+                capped_excess = finite_excess.clamp_max(32.0)
+                safe_excess = finite_excess + (
+                    capped_excess - finite_excess
+                ).detach()
                 # A degree-2 recurrence can be seeded by one channel/pixel.
                 # Spatial averaging diluted exactly those rare maxima by up
                 # to C*H*W and made the causal objective numerically inert.
@@ -282,6 +292,7 @@ def collect_causal_tail_penalty(
     names: Iterable[str],
     guard_ratio: float = 1.0,
     sample_mask: Optional[torch.Tensor] = None,
+    reduction: str = "layer_mean",
 ) -> torch.Tensor:
     """Penalize the earliest layer whose per-image input leaves its guard.
 
@@ -290,6 +301,8 @@ def collect_causal_tail_penalty(
     dominate the batch loss.  The statistic is training-only and does not
     alter the deployment graph.
     """
+    if reduction not in ("layer_mean", "sample_mean"):
+        raise ValueError(f"unknown causal-tail reduction {reduction!r}")
     modules = {module.name: module for module in quadratic_modules(model)}
     ordered = [modules[name] for name in names if name in modules]
     if not ordered:
@@ -297,6 +310,7 @@ def collect_causal_tail_penalty(
     sample_count = None
     remaining = None
     total = None
+    selected_count = 0
     for module in ordered:
         if module.last_sample_ratio is None or module.last_sample_penalty is None:
             continue
@@ -309,10 +323,16 @@ def collect_causal_tail_penalty(
         if sample_mask is not None:
             hits = hits & sample_mask.to(device=hits.device, dtype=torch.bool)
         if hits.any():
-            total = total + module.last_sample_penalty[hits].mean()
+            selected = module.last_sample_penalty[hits]
+            total = total + (
+                selected.mean() if reduction == "layer_mean" else selected.sum()
+            )
+            selected_count += int(hits.sum())
             remaining = remaining & ~hits
     if total is None:
         return next(model.parameters()).new_zeros(())
+    if reduction == "sample_mean" and selected_count:
+        total = total / selected_count
     return total
 
 
