@@ -10,6 +10,7 @@ from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.mine_deployment_tails import merge_rank_payloads
 from controlled_degree2.deployment_data import (
     WiderFaceCropDataset,
+    apply_wider_stress,
     parse_wider_annotations,
 )
 from controlled_degree2.model import (
@@ -364,20 +365,41 @@ def test_wider_crop_dataset_is_deterministic_and_filters_invalid(tmp_path):
         encoding="utf-8",
     )
 
-    records = parse_wider_annotations(annotations, (1.0, 1.5))
+    records = parse_wider_annotations(
+        annotations, (1.0, 1.5), ("base", "shift_left")
+    )
     dataset = WiderFaceCropDataset(
         image_root, annotations, context_scales=(1.0, 1.5)
     )
     canonical, label = dataset.get_oriented(0, 0)
     flipped, _ = dataset.get_oriented(0, 1)
 
-    assert len(records) == len(dataset) == 2
+    assert len(records) == 4
+    assert len(dataset) == 2
     assert canonical.shape == (3, 112, 112)
     assert canonical.dtype == torch.float32
     assert float(canonical.min()) >= -1.0
     assert float(canonical.max()) <= 1.0
     assert torch.equal(flipped, torch.flip(canonical, dims=(-1,)))
     assert label.item() == 0
+
+
+def test_wider_stress_variants_are_bounded_and_deterministic():
+    image = torch.linspace(-1.0, 1.0, 3 * 112 * 112).reshape(3, 112, 112)
+    variants = (
+        "lowres14", "dark", "bright", "contrast", "lowcontrast",
+        "gamma035", "gamma25", "shift_left", "shift_right", "shift_up",
+        "shift_down", "jpeg4", "occlude",
+    )
+
+    for variant in variants:
+        first = apply_wider_stress(image, variant)
+        second = apply_wider_stress(image, variant)
+        assert first.shape == image.shape
+        assert torch.equal(first, second)
+        assert torch.isfinite(first).all()
+        assert float(first.min()) >= -1.0
+        assert float(first.max()) <= 1.0
 
 
 def test_deployment_tail_priority_repeats_manifest_prefix_only():

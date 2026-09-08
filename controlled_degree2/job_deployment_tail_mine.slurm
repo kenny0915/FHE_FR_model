@@ -23,6 +23,7 @@ if [[ -n "${DEPLOYMENT_ANNOTATIONS:-}" ]]; then
   dataset_args+=(
     --annotations "${DEPLOYMENT_ANNOTATIONS}"
     --wider-context-scales "${WIDER_CONTEXT_SCALES:-1.0,1.5}"
+    --wider-stress-variants "${WIDER_STRESS_VARIANTS:-base}"
   )
 fi
 torchrun --standalone --nproc_per_node=4 \

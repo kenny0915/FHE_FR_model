@@ -62,6 +62,9 @@ WIDER FACE bounding boxes.  Set `DEPLOYMENT_DATASET_TYPE=wider`, point
 `DATASET_ROOT` at `WIDER_train/images`, and set `DEPLOYMENT_ANNOTATIONS` to
 `wider_face_train_bbx_gt.txt`.  Deterministic square crops use context scales
 1.0 and 1.5 by default, resize to 112x112, and scan both orientations.
+`WIDER_STRESS_VARIANTS` accepts a `+`-separated deterministic suite such as
+`lowres14+shift_left+shift_right+shift_up+shift_down+occlude`; source indices
+then identify the exact crop/context/variant without any IJB-derived samples.
 
 Passing that manifest as `DEPLOYMENT_TAIL_MANIFEST` to
 `run_tail_refine.sh` adds a training-only deployment shadow pass.  The main

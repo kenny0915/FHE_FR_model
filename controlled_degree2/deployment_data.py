@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 import torch
@@ -19,11 +20,16 @@ class WiderFaceRecord:
     width: int
     height: int
     context_scale: float
+    stress_variant: str
 
 
 def parse_context_scales(spec) -> tuple[float, ...]:
     if isinstance(spec, str):
-        values = tuple(float(value) for value in spec.split(",") if value.strip())
+        values = tuple(
+            float(value)
+            for value in re.split(r"[,+;\s]+", spec)
+            if value.strip()
+        )
     else:
         values = tuple(float(value) for value in spec)
     if not values or any(value <= 0.0 for value in values):
@@ -31,9 +37,47 @@ def parse_context_scales(spec) -> tuple[float, ...]:
     return values
 
 
-def parse_wider_annotations(path, context_scales=(1.0, 1.5)):
+WIDER_STRESS_VARIANTS = (
+    "base",
+    "lowres14",
+    "dark",
+    "bright",
+    "contrast",
+    "lowcontrast",
+    "gamma035",
+    "gamma25",
+    "shift_left",
+    "shift_right",
+    "shift_up",
+    "shift_down",
+    "jpeg4",
+    "occlude",
+)
+
+
+def parse_stress_variants(spec) -> tuple[str, ...]:
+    if isinstance(spec, str):
+        values = tuple(
+            value for value in re.split(r"[,+;\s]+", spec) if value
+        )
+    else:
+        values = tuple(str(value) for value in spec)
+    if not values:
+        raise ValueError("at least one WIDER stress variant is required")
+    unknown = sorted(set(values) - set(WIDER_STRESS_VARIANTS))
+    if unknown:
+        raise ValueError(f"unknown WIDER stress variants: {unknown}")
+    return values
+
+
+def parse_wider_annotations(
+    path,
+    context_scales=(1.0, 1.5),
+    stress_variants=("base",),
+):
     """Parse valid WIDER train boxes in official deterministic file order."""
     scales = parse_context_scales(context_scales)
+    variants = parse_stress_variants(stress_variants)
     records = []
     with open(path, encoding="utf-8") as handle:
         lines = iter(handle)
@@ -73,8 +117,17 @@ def parse_wider_annotations(path, context_scales=(1.0, 1.5)):
                 if invalid or width <= 0 or height <= 0:
                     continue
                 records.extend(
-                    WiderFaceRecord(relative_path, x, y, width, height, scale)
+                    WiderFaceRecord(
+                        relative_path,
+                        x,
+                        y,
+                        width,
+                        height,
+                        scale,
+                        variant,
+                    )
                     for scale in scales
+                    for variant in variants
                 )
     if not records:
         raise ValueError(f"no valid WIDER faces parsed from {path}")
@@ -89,11 +142,14 @@ class WiderFaceCropDataset(Dataset):
         image_root,
         annotations,
         context_scales=(1.0, 1.5),
+        stress_variants=("base",),
         image_size=112,
     ):
         self.image_root = os.path.abspath(image_root)
         self.annotations = os.path.abspath(annotations)
-        self.records = parse_wider_annotations(annotations, context_scales)
+        self.records = parse_wider_annotations(
+            annotations, context_scales, stress_variants
+        )
         self.image_size = int(image_size)
         if self.image_size <= 0:
             raise ValueError("image size must be positive")
@@ -123,6 +179,7 @@ class WiderFaceCropDataset(Dataset):
                 (self.image_size, self.image_size), Image.Resampling.BILINEAR
             )
             tensor = pil_to_tensor(image).float() / 127.5 - 1.0
+            tensor = apply_wider_stress(tensor, record.stress_variant)
         return tensor, torch.tensor(0, dtype=torch.long)
 
     def __getitem__(self, index):
@@ -135,6 +192,55 @@ class WiderFaceCropDataset(Dataset):
         return image, label
 
 
+def apply_wider_stress(image, variant):
+    """Apply one fixed stress transform in normalized RGB tensor space."""
+    if variant == "base":
+        return image
+    if variant == "lowres14":
+        small = torch.nn.functional.interpolate(
+            image[None], size=(14, 14), mode="bilinear", align_corners=False
+        )
+        return torch.nn.functional.interpolate(
+            small, size=image.shape[-2:], mode="bilinear", align_corners=False
+        )[0]
+    if variant in ("dark", "bright"):
+        factor = 0.15 if variant == "dark" else 2.5
+        unit = ((image + 1.0) * 0.5 * factor).clamp(0.0, 1.0)
+        return unit * 2.0 - 1.0
+    if variant in ("contrast", "lowcontrast"):
+        factor = 4.0 if variant == "contrast" else 0.15
+        mean = image.mean()
+        return ((image - mean) * factor + mean).clamp(-1.0, 1.0)
+    if variant in ("gamma035", "gamma25"):
+        exponent = 0.35 if variant == "gamma035" else 2.5
+        unit = ((image + 1.0) * 0.5).clamp(0.0, 1.0)
+        return unit.pow(exponent) * 2.0 - 1.0
+    if variant.startswith("shift_"):
+        output = torch.full_like(image, -1.0)
+        shift = 8
+        if variant == "shift_left":
+            output[:, :, :-shift] = image[:, :, shift:]
+        elif variant == "shift_right":
+            output[:, :, shift:] = image[:, :, :-shift]
+        elif variant == "shift_up":
+            output[:, :-shift, :] = image[:, shift:, :]
+        elif variant == "shift_down":
+            output[:, shift:, :] = image[:, :-shift, :]
+        else:
+            raise ValueError(f"unknown WIDER stress variant {variant!r}")
+        return output
+    if variant == "jpeg4":
+        small = torch.nn.functional.avg_pool2d(image[None], 4)
+        return torch.nn.functional.interpolate(
+            small, size=image.shape[-2:], mode="nearest"
+        )[0]
+    if variant == "occlude":
+        output = image.clone()
+        output[:, 36:76, 28:84] = -1.0
+        return output
+    raise ValueError(f"unknown WIDER stress variant {variant!r}")
+
+
 def build_deployment_dataset(
     dataset_type,
     root,
@@ -142,6 +248,7 @@ def build_deployment_dataset(
     local_rank=0,
     annotations=None,
     wider_context_scales=(1.0, 1.5),
+    wider_stress_variants=("base",),
 ):
     if dataset_type == "ms1mv3":
         from dataset import MXFaceDataset
@@ -154,5 +261,6 @@ def build_deployment_dataset(
             root,
             annotations,
             context_scales=wider_context_scales,
+            stress_variants=wider_stress_variants,
         )
     raise ValueError(f"unknown deployment dataset type {dataset_type!r}")

@@ -25,6 +25,7 @@ from controlled_degree2.model import (
 from controlled_degree2.deployment_data import (
     build_deployment_dataset,
     parse_context_scales,
+    parse_stress_variants,
 )
 
 
@@ -145,6 +146,7 @@ def parse_args():
     )
     parser.add_argument("--annotations", default=None)
     parser.add_argument("--wider-context-scales", default="1.0,1.5")
+    parser.add_argument("--wider-stress-variants", default="base")
     parser.add_argument("--output", required=True)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--workers", type=int, default=4)
@@ -175,12 +177,14 @@ def main():
     from dataset import DatasetWithIndex
 
     context_scales = parse_context_scales(args.wider_context_scales)
+    stress_variants = parse_stress_variants(args.wider_stress_variants)
     base_dataset = build_deployment_dataset(
         args.dataset_type,
         args.dataset_root,
         local_rank=local_rank,
         annotations=args.annotations,
         wider_context_scales=context_scales,
+        wider_stress_variants=stress_variants,
     )
     indexed_dataset = DatasetWithIndex(
         base_dataset, both_orientations=args.both_orientations
@@ -335,6 +339,9 @@ def main():
             ),
             "wider_context_scales": (
                 list(context_scales) if args.dataset_type == "wider" else None
+            ),
+            "wider_stress_variants": (
+                list(stress_variants) if args.dataset_type == "wider" else None
             ),
             "both_orientations": bool(args.both_orientations),
             "world_size": world_size,
