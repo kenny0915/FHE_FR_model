@@ -67,7 +67,9 @@ may overflow diagnostically without contaminating BatchNorm state or the
 gradient.  For exact-failure refinement, set
 `DEPLOYMENT_TAIL_MANIFEST_KEY=output_nonfinite`; an optional positive
 `DEPLOYMENT_TAIL_GRADIENT_CLIP` bounds the shadow loss's backward signal at
-each polynomial input.  Every optimizer update is rejected if any rank has a
+each polynomial input using a relative `|gradient * activation|` limit.  This
+automatically tightens after an escape target moves to a very large downstream
+activation.  Every optimizer update is rejected if any rank has a
 non-finite gradient, and finite gradients are normed in FP64 before clipping.
 Set `FREEZE_BATCHNORM_STATS=1` when refining an already converged checkpoint so
 the ordinary training path, shadow path, and deployment all use its fixed

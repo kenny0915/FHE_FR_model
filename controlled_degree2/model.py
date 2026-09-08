@@ -137,14 +137,25 @@ class DirectQuadratic(nn.Module):
         raw = x.float()
         if self.training and self.tail_gradient_clip > 0.0 and raw.requires_grad:
             gradient_clip = float(self.tail_gradient_clip)
+            # Bound local log-sensitivity |dL/dx * x|.  A fixed absolute
+            # gradient cap is insufficient after a target moves downstream:
+            # multiplying even a small gradient by an enormous activation in
+            # the preceding convolution can still overflow its weight
+            # gradient.  The relative cap tightens automatically in exactly
+            # that regime, while matching the absolute cap for |x| <= 1.
+            gradient_limit = gradient_clip / raw.detach().abs().clamp_min(1.0)
 
             def clamp_tail_gradient(gradient):
-                return torch.nan_to_num(
+                finite_gradient = torch.nan_to_num(
                     gradient,
                     nan=0.0,
-                    posinf=gradient_clip,
-                    neginf=-gradient_clip,
-                ).clamp(-gradient_clip, gradient_clip)
+                    posinf=torch.finfo(gradient.dtype).max,
+                    neginf=torch.finfo(gradient.dtype).min,
+                )
+                return torch.maximum(
+                    torch.minimum(finite_gradient, gradient_limit),
+                    -gradient_limit,
+                )
 
             raw.register_hook(clamp_tail_gradient)
         work = raw

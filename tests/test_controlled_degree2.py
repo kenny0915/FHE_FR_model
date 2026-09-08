@@ -208,6 +208,32 @@ def test_deployment_shadow_clips_backward_signal_at_polynomial_inputs():
     assert activation.tail_gradient_clip == pytest.approx(0.0)
 
 
+def test_deployment_shadow_bounds_relative_input_gradient():
+    activation = DirectQuadratic(
+        1, lam_fit=1.0, lam_reg=1.0, slope=0.25, name="act"
+    )
+    model = torch.nn.Sequential(OrderedDict((
+        ("act", activation),
+        ("pool", torch.nn.AdaptiveAvgPool2d(1)),
+        ("flatten", torch.nn.Flatten()),
+    ))).train()
+    inputs = torch.tensor([1.1, 1.0e6]).reshape(2, 1, 1, 1).requires_grad_()
+
+    penalty, _, _ = deployment_tail_penalty(
+        model,
+        inputs,
+        ["act"],
+        guard_ratio=0.8,
+        assignment_ratio=1.0,
+        gradient_clip=0.01,
+    )
+    penalty.backward()
+
+    relative_gradient = inputs.grad.abs() * inputs.detach().abs()
+    assert torch.isfinite(inputs.grad).all()
+    assert bool((relative_gradient <= 0.0100001).all())
+
+
 def test_deployment_shadow_assigns_true_escape_before_applying_margin():
     first = DirectQuadratic(1, lam_fit=1.0, lam_reg=1.0, name="first")
     second = DirectQuadratic(1, lam_fit=1.0, lam_reg=1.0, name="second")
