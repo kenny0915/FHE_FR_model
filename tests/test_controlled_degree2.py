@@ -11,6 +11,7 @@ from controlled_degree2.mine_deployment_tails import merge_rank_payloads
 from controlled_degree2.model import (
     DirectQuadratic,
     collect_causal_tail_penalty,
+    damp_quadratic_terms,
     prelu_to_quadratic_coefficients,
     scale_intervals,
     set_quadratic_schedule,
@@ -285,6 +286,38 @@ def test_interval_scaling_preserves_rescaled_polynomial_shape():
         activation.eval()(inputs), 1.5 * original(inputs / 1.5), rtol=1e-6, atol=1e-6
     )
     assert calibration["act"]["lam_fit"] == pytest.approx([3.0, 6.0])
+
+
+def test_quadratic_tail_damping_changes_only_c2_and_records_fit_update():
+    activation = DirectQuadratic(
+        2, lam_fit=[2.0, 4.0], lam_reg=[1.2, 2.4], slope=[0.1, 0.3]
+    )
+    activation.name = "layer1.0.prelu"
+    before_coeffs = activation.coeffs.detach().clone()
+    before_fit = activation.lam_fit.detach().clone()
+    before_reg = activation.lam_reg.detach().clone()
+    calibration = {
+        "layer1.0.prelu": {
+            "lam_fit": [2.0, 4.0],
+            "lam_reg": [1.2, 2.4],
+            "even_coeffs": [[0.3, 0.4], [0.5, 0.2]],
+        }
+    }
+
+    touched = damp_quadratic_terms(
+        activation, calibration, {"layer1": 0.9}
+    )
+
+    assert touched == {"layer1.0.prelu": 0.9}
+    assert torch.equal(activation.coeffs[:, :2], before_coeffs[:, :2])
+    assert torch.allclose(activation.coeffs[:, 2], before_coeffs[:, 2] * 0.9)
+    assert torch.equal(activation.lam_fit, before_fit)
+    assert torch.equal(activation.lam_reg, before_reg)
+    assert torch.allclose(
+        torch.tensor(calibration["layer1.0.prelu"]["even_coeffs"]),
+        torch.tensor([[0.3, 0.36], [0.5, 0.18]]),
+    )
+    assert calibration["layer1.0.prelu"]["quadratic_tail_scale"] == pytest.approx(0.9)
 
 
 def test_histogram_weighted_fit_returns_a_finite_direct_quadratic():

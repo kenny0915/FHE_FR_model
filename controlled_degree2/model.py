@@ -412,6 +412,42 @@ def scale_intervals(
     return touched
 
 
+@torch.no_grad()
+def damp_quadratic_terms(
+    model: nn.Module,
+    calibration: Optional[MutableMapping[str, MutableMapping]],
+    scales: Mapping[str, float],
+) -> Dict[str, float]:
+    """Scale only ``c2`` for selected degree-2 activations.
+
+    Unlike interval widening, this leaves ``c0``, ``c1`` and the calibrated
+    bounds untouched.  A factor below one monotonically reduces the quadratic
+    contribution that drives out-of-range recurrence while retaining exactly
+    the same degree-2 inference graph and multiplicative depth.
+    """
+    touched = {}
+    for module in quadratic_modules(model):
+        scale = _matching_scale(module.name, scales)
+        if scale is None or scale == 1.0:
+            continue
+        if not 0.0 < scale <= 1.0 or not np.isfinite(scale):
+            raise ValueError(
+                "quadratic damping factors must be finite and in (0, 1]"
+            )
+        module.coeffs[:, 2].mul_(scale)
+        if calibration is not None and module.name in calibration:
+            entry = calibration[module.name]
+            if "even_coeffs" in entry:
+                even = np.asarray(entry["even_coeffs"], dtype=np.float64)
+                even[:, 1] *= scale
+                entry["even_coeffs"] = even.tolist()
+            entry["quadratic_tail_scale"] = float(
+                entry.get("quadratic_tail_scale", 1.0) * scale
+            )
+        touched[module.name] = float(scale)
+    return touched
+
+
 def load_calibration(path: str) -> dict:
     with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)
