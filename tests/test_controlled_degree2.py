@@ -388,9 +388,10 @@ def test_wider_crop_dataset_is_deterministic_and_filters_invalid(tmp_path):
 def test_wider_stress_variants_are_bounded_and_deterministic():
     image = torch.linspace(-1.0, 1.0, 3 * 112 * 112).reshape(3, 112, 112)
     variants = (
-        "lowres14", "dark", "bright", "contrast", "lowcontrast",
+        "lowres14", "lowres7", "dark", "bright", "contrast", "lowcontrast",
         "gamma035", "gamma25", "shift_left", "shift_right", "shift_up",
-        "shift_down", "jpeg4", "occlude",
+        "shift_down", "shift16_left", "shift16_right", "shift16_up",
+        "shift16_down", "zoomout75", "jpeg4", "occlude",
     )
 
     for variant in variants:

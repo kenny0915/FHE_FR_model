@@ -44,6 +44,7 @@ def parse_context_scales(spec) -> tuple[float, ...]:
 WIDER_STRESS_VARIANTS = (
     "base",
     "lowres14",
+    "lowres7",
     "dark",
     "bright",
     "contrast",
@@ -54,6 +55,11 @@ WIDER_STRESS_VARIANTS = (
     "shift_right",
     "shift_up",
     "shift_down",
+    "shift16_left",
+    "shift16_right",
+    "shift16_up",
+    "shift16_down",
+    "zoomout75",
     "jpeg4",
     "occlude",
 )
@@ -200,9 +206,10 @@ def apply_image_stress(image, variant):
     """Apply one fixed stress transform in normalized RGB tensor space."""
     if variant == "base":
         return image
-    if variant == "lowres14":
+    if variant in ("lowres14", "lowres7"):
+        side = 14 if variant == "lowres14" else 7
         small = torch.nn.functional.interpolate(
-            image[None], size=(14, 14), mode="bilinear", align_corners=False
+            image[None], size=(side, side), mode="bilinear", align_corners=False
         )
         return torch.nn.functional.interpolate(
             small, size=image.shape[-2:], mode="bilinear", align_corners=False
@@ -219,19 +226,35 @@ def apply_image_stress(image, variant):
         exponent = 0.35 if variant == "gamma035" else 2.5
         unit = ((image + 1.0) * 0.5).clamp(0.0, 1.0)
         return unit.pow(exponent) * 2.0 - 1.0
-    if variant.startswith("shift_"):
+    if variant.startswith("shift_") or variant.startswith("shift16_"):
         output = torch.full_like(image, -1.0)
-        shift = 8
-        if variant == "shift_left":
+        shift = 16 if variant.startswith("shift16_") else 8
+        direction = variant.split("_", 1)[1]
+        if direction == "left":
             output[:, :, :-shift] = image[:, :, shift:]
-        elif variant == "shift_right":
+        elif direction == "right":
             output[:, :, shift:] = image[:, :, :-shift]
-        elif variant == "shift_up":
+        elif direction == "up":
             output[:, :-shift, :] = image[:, shift:, :]
-        elif variant == "shift_down":
+        elif direction == "down":
             output[:, shift:, :] = image[:, :-shift, :]
         else:
             raise ValueError(f"unknown deployment stress variant {variant!r}")
+        return output
+    if variant == "zoomout75":
+        height, width = image.shape[-2:]
+        resized_height = max(1, round(height * 0.75))
+        resized_width = max(1, round(width * 0.75))
+        resized = torch.nn.functional.interpolate(
+            image[None],
+            size=(resized_height, resized_width),
+            mode="bilinear",
+            align_corners=False,
+        )[0]
+        output = torch.full_like(image, -1.0)
+        top = (height - resized_height) // 2
+        left = (width - resized_width) // 2
+        output[:, top:top + resized_height, left:left + resized_width] = resized
         return output
     if variant == "jpeg4":
         small = torch.nn.functional.avg_pool2d(image[None], 4)
