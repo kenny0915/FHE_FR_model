@@ -21,13 +21,19 @@ cd /work/u8798807/FHE_FR_model
 manifest_key=${MANIFEST_KEY:-combined_orientations}
 stress_variants=${STRESS_VARIANTS:-base}
 wider_context_scales=${WIDER_CONTEXT_SCALES:-1.0,1.5}
-scope=${SCOPE:-layer1.1.prelu}
+scope_spec=${SCOPES:-${SCOPE:-layer1.1.prelu}}
 candidate_spec=${CANDIDATES:-1+0.98+0.97+0.96+0.95+0.94+0.92}
 
 IFS=+ read -r -a candidates <<< "${candidate_spec}"
 candidate_args=()
 for candidate in "${candidates[@]}"; do
     candidate_args+=(--candidate "${candidate}")
+done
+
+IFS=+ read -r -a scopes <<< "${scope_spec}"
+scope_args=()
+for scope in "${scopes[@]}"; do
+    scope_args+=(--scope "${scope}")
 done
 
 optional_args=()
@@ -48,9 +54,9 @@ python -m controlled_degree2.audit_bn_contraction \
     --manifest-key "${manifest_key}" \
     --stress-variants "${stress_variants}" \
     --wider-context-scales "${wider_context_scales}" \
-    --scope "${scope}" \
     --output "${OUTPUT}" \
     --batch-size 256 \
     --workers 4 \
+    "${scope_args[@]}" \
     "${candidate_args[@]}" \
     "${optional_args[@]}"
