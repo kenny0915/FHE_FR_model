@@ -8,6 +8,7 @@ from torch.nn import functional as F
 from controlled_degree2.calibrate import reference_ranges, weighted_quadratic_abs_fit
 from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.mine_deployment_tails import merge_rank_payloads
+from controlled_degree2.audit_embedding_fidelity import evenly_spaced_source_indices
 from controlled_degree2.deployment_data import (
     AlignedImageDataset,
     WiderFaceCropDataset,
@@ -437,6 +438,13 @@ def test_aligned_image_dataset_has_stable_recursive_frame_indices(tmp_path):
     assert dark.shape == base.shape
     assert torch.equal(flipped, torch.flip(base, dims=(-1,)))
     assert label.item() == 0
+
+
+def test_evenly_spaced_source_indices_are_unique_stratum_centers():
+    assert evenly_spaced_source_indices(10, 4) == (1, 3, 6, 8)
+    assert evenly_spaced_source_indices(3, 10) == (0, 1, 2)
+    with pytest.raises(ValueError):
+        evenly_spaced_source_indices(0, 1)
 
 
 def test_deployment_tail_priority_repeats_manifest_prefix_only():
