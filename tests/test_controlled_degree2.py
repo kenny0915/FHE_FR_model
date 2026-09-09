@@ -9,6 +9,7 @@ from controlled_degree2.calibrate import reference_ranges, weighted_quadratic_ab
 from controlled_degree2.augment import prepare_range_batch
 from controlled_degree2.mine_deployment_tails import merge_rank_payloads
 from controlled_degree2.audit_embedding_fidelity import evenly_spaced_source_indices
+from controlled_degree2.contract_channelwise_checkpoint import select_tail_channels
 from controlled_degree2.deployment_data import (
     AlignedImageDataset,
     WiderFaceCropDataset,
@@ -445,6 +446,16 @@ def test_evenly_spaced_source_indices_are_unique_stratum_centers():
     assert evenly_spaced_source_indices(3, 10) == (0, 1, 2)
     with pytest.raises(ValueError):
         evenly_spaced_source_indices(0, 1)
+
+
+def test_tail_channel_selection_respects_audit_order_and_threshold():
+    entry = {"channels": [
+        {"channel": 7, "max_ratio": 3.0},
+        {"channel": 2, "max_ratio": 1.5},
+        {"channel": 9, "max_ratio": 0.9},
+    ]}
+    assert select_tail_channels(entry, topk=1, min_ratio=1.0) == (7,)
+    assert select_tail_channels(entry, topk=8, min_ratio=1.0) == (7, 2)
 
 
 def test_deployment_tail_priority_repeats_manifest_prefix_only():
