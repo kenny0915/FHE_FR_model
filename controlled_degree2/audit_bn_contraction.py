@@ -40,10 +40,11 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--scope", action="append", required=True)
     parser.add_argument("--candidate", action="append", type=float, required=True)
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--workers", type=int, default=0)
     args = parser.parse_args()
-    if args.workers < 0:
-        raise ValueError("workers must be non-negative")
+    if args.batch_size <= 0 or args.workers < 0:
+        raise ValueError("batch size must be positive and workers non-negative")
     if any(not 0.0 < candidate <= 1.0 for candidate in args.candidate):
         raise ValueError("candidate contraction factors must be in (0, 1]")
 
@@ -98,16 +99,12 @@ def main():
     subset = Subset(oriented, [2 * index + orientation for index, orientation in rows])
     loader = DataLoader(
         subset,
-        batch_size=len(subset),
+        batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.workers,
         pin_memory=True,
+        persistent_workers=args.workers > 0,
     )
-    images, _labels, indices, orientations = next(iter(loader))
-    images = images.to(device, non_blocking=True).contiguous(
-        memory_format=torch.channels_last
-    )
-    keys = list(zip(indices.tolist(), orientations.tolist()))
 
     current_max = None
     first_escape = None
@@ -145,32 +142,42 @@ def main():
                     weight, bias = baseline[name]
                     batchnorm.weight.copy_(weight * candidate)
                     batchnorm.bias.copy_(bias * candidate)
-                current_max = torch.zeros(len(keys), device=device)
-                first_escape = [None] * len(keys)
-                embeddings = model(images)
-                finite = torch.isfinite(embeddings).all(dim=1).cpu().tolist()
-                maxima = current_max.cpu().tolist()
-                candidate_rows = [
-                    {
-                        "source_index": key[0],
-                        "orientation": key[1],
-                        "output_finite": bool(is_finite),
-                        "max_ratio": float(maximum),
-                        "first_escape": escape,
-                    }
-                    for key, is_finite, maximum, escape in zip(
-                        keys, finite, maxima, first_escape
+                candidate_rows = []
+                candidate_nonfinite = 0
+                candidate_max_ratio = 0.0
+                for images, _labels, indices, orientations in loader:
+                    images = images.to(device, non_blocking=True).contiguous(
+                        memory_format=torch.channels_last
                     )
-                ]
+                    keys = list(zip(indices.tolist(), orientations.tolist()))
+                    current_max = torch.zeros(len(keys), device=device)
+                    first_escape = [None] * len(keys)
+                    embeddings = model(images)
+                    finite = torch.isfinite(embeddings).all(dim=1).cpu().tolist()
+                    maxima = current_max.cpu().tolist()
+                    candidate_nonfinite += sum(not value for value in finite)
+                    candidate_max_ratio = max(candidate_max_ratio, max(maxima))
+                    candidate_rows.extend(
+                        {
+                            "source_index": key[0],
+                            "orientation": key[1],
+                            "output_finite": bool(is_finite),
+                            "max_ratio": float(maximum),
+                            "first_escape": escape,
+                        }
+                        for key, is_finite, maximum, escape in zip(
+                            keys, finite, maxima, first_escape
+                        )
+                    )
                 results.append({
                     "factor": float(candidate),
-                    "nonfinite_outputs": sum(not value for value in finite),
-                    "max_ratio": float(max(maxima)),
+                    "nonfinite_outputs": candidate_nonfinite,
+                    "max_ratio": float(candidate_max_ratio),
                     "rows": candidate_rows,
                 })
                 print(
                     f"factor={candidate:.6g} nonfinite="
-                    f"{results[-1]['nonfinite_outputs']}/{len(keys)} "
+                    f"{results[-1]['nonfinite_outputs']}/{len(rows)} "
                     f"max_ratio={results[-1]['max_ratio']:.6g}",
                     flush=True,
                 )

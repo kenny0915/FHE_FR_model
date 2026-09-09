@@ -23,6 +23,11 @@ def main():
         required=True,
         help="activation prefix factors, e.g. 'layer1.1.prelu:0.9'",
     )
+    parser.add_argument(
+        "--selection-data",
+        default="non-IJB deployment-tail audit only",
+        help="checkpoint provenance for the source-only contraction choice",
+    )
     args = parser.parse_args()
 
     scales = parse_lam_scale(args.scales)
@@ -41,7 +46,7 @@ def main():
         "source_checkpoint": os.path.abspath(args.checkpoint),
         "requested_scales": scales,
         "touched": touched,
-        "selection_data": "MS1MV3 deployment-tail audit only",
+        "selection_data": args.selection_data,
         "inference_graph_changed": False,
         "fhe_cost": "none; factors folded into existing BatchNorm affine",
     })
