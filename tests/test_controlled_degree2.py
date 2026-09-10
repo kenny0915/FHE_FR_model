@@ -18,6 +18,8 @@ from controlled_degree2.deployment_data import (
 )
 from controlled_degree2.model import (
     DirectQuadratic,
+    FoldedChannelAffine2d,
+    build_folded_controlled_iresnet50,
     collect_causal_tail_penalty,
     contract_preactivation_affines,
     damp_quadratic_terms,
@@ -26,6 +28,30 @@ from controlled_degree2.model import (
     scale_intervals,
     set_quadratic_schedule,
 )
+
+
+def test_folded_channel_affine_applies_per_channel_parameters():
+    affine = FoldedChannelAffine2d(2)
+    with torch.no_grad():
+        affine.weight.copy_(torch.tensor([2.0, 3.0]))
+        affine.bias.copy_(torch.tensor([0.5, -0.5]))
+    inputs = torch.tensor([[[[1.0]], [[2.0]]]])
+
+    assert torch.equal(affine(inputs), torch.tensor([[[[2.5]], [[5.5]]]]))
+
+
+def test_folded_controlled_iresnet50_has_folded_checkpoint_layout():
+    model = build_folded_controlled_iresnet50(dropout=0, fp16=False)
+    state = model.state_dict()
+
+    assert "conv1.bias" in state
+    assert "bn1.weight" not in state
+    assert set(name for name in state if name.startswith("layer1.0.bn1.")) == {
+        "layer1.0.bn1.weight", "layer1.0.bn1.bias"
+    }
+    assert "layer1.0.conv1.bias" in state
+    assert not any(name.startswith("layer1.0.bn2.") for name in state)
+    assert not any(name.startswith("features.") for name in state)
 from controlled_degree2.train import (
     belongs_to_frozen_module,
     causal_tail_names,

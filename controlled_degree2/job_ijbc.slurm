@@ -17,5 +17,6 @@ export CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=12 PYTHONUNBUFFERED=1
 /home/u8798807/.conda/envs/face_recog/bin/python eval_ijbc.py \
   --model-prefix "${CHECKPOINT}" --image-path ijb/IJBC \
   --result-dir "${RESULT_DIR}" --batch-size 512 \
-  --job controlled_d2 --target IJBC --network r50_controlled_d2 \
+  --job "${EVAL_JOB_NAME:-controlled_d2}" --target IJBC \
+  --network "${NETWORK:-r50_controlled_d2}" \
   --nonfinite-manifest "${RESULT_DIR}/nonfinite_manifest.csv"

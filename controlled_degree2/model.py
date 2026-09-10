@@ -29,6 +29,19 @@ from torch.nn import functional as F
 FORMAT = "fhe-fr/controlled-direct-degree2-v1"
 
 
+class FoldedChannelAffine2d(nn.Module):
+    """Per-channel affine left after folding BatchNorm running statistics."""
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(channels))
+        self.bias = nn.Parameter(torch.zeros(channels))
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        shape = (1, -1) + (1,) * (inputs.ndim - 2)
+        return inputs * self.weight.reshape(shape) + self.bias.reshape(shape)
+
+
 def as_channel_tensor(value, channels: int) -> torch.Tensor:
     tensor = torch.as_tensor(value, dtype=torch.float32).reshape(-1)
     if tensor.numel() == 1:
@@ -541,6 +554,39 @@ def build_controlled_iresnet50(**kwargs) -> nn.Module:
         channels = model.get_submodule(name).weight.numel()
         placeholder[name] = {"lam_fit": [1.0] * channels, "lam_reg": [1.0] * channels}
     replace_prelu_with_quadratic(model, placeholder)
+    return model
+
+
+def build_folded_controlled_iresnet50(**kwargs) -> nn.Module:
+    """Build the BatchNorm-folded degree-2 iResNet-50 inference graph.
+
+    Nano4's folded checkpoint format absorbs post-convolution BatchNorms into
+    convolution weights and biases. The pre-activation BatchNorms cannot be
+    absorbed across residual additions, so their frozen statistics are stored
+    directly as a two-parameter channel affine. The final feature BatchNorm is
+    folded into ``fc`` in the same way.
+    """
+    model = build_controlled_iresnet50(**kwargs)
+
+    def add_bias(convolution: nn.Conv2d) -> None:
+        if convolution.bias is None:
+            convolution.bias = nn.Parameter(torch.zeros(convolution.out_channels))
+
+    add_bias(model.conv1)
+    model.bn1 = nn.Identity()
+    for stage in (model.layer1, model.layer2, model.layer3, model.layer4):
+        for block in stage:
+            block.bn1 = FoldedChannelAffine2d(block.bn1.num_features)
+            add_bias(block.conv1)
+            block.bn2 = nn.Identity()
+            add_bias(block.conv2)
+            block.bn3 = nn.Identity()
+            if block.downsample is not None:
+                add_bias(block.downsample[0])
+                block.downsample[1] = nn.Identity()
+
+    model.bn2 = FoldedChannelAffine2d(model.bn2.num_features)
+    model.features = nn.Identity()
     return model
 
 

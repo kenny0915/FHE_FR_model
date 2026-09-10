@@ -96,6 +96,14 @@ def get_controlled_direct_degree2(pretrained=False, progress=True, **kwargs):
     return build_controlled_iresnet50(**kwargs)
 
 
+def get_folded_controlled_direct_degree2(
+        pretrained=False, progress=True, **kwargs):
+    """BatchNorm-folded direct quadratic iResNet-50 inference graph."""
+    del pretrained, progress
+    from controlled_degree2.model import build_folded_controlled_iresnet50
+    return build_folded_controlled_iresnet50(**kwargs)
+
+
 def get_iresnet_precise_relu(depth, pretrained=False, progress=True, **kwargs):
     from . import iresnet_precise_relu
     factory = {
@@ -158,6 +166,8 @@ def get_model(name, **kwargs):
     # no-ReLU / FHE-friendly CryptoFace polynomial variants
     if name in ("r50_controlled_d2",):
         return get_controlled_direct_degree2(False, **kwargs)
+    if name in ("r50_controlled_d2_folded",):
+        return get_folded_controlled_direct_degree2(False, **kwargs)
     elif name in ("r18_herpn_residual_scale",):
         return get_iresnet_herpn_residual_scale(18, False, **kwargs)
     elif name in ("r34_herpn_residual_scale",):
