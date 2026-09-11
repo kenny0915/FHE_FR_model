@@ -13,6 +13,18 @@ export NCCL_SOCKET_IFNAME="=$bootstrap_interface"
 export GLOO_SOCKET_IFNAME="$bootstrap_interface"
 echo "bootstrap interface=$bootstrap_interface address=$node_ip"
 extra=()
+if [[ "$1" == recovery ]]; then
+    if [[ "$RECIPE_SMOKE" == 1 ]]; then
+        extra+=(--smoke --workers 1 --gate-images 32 --no-continue-training)
+    fi
+    exec "$RECIPE_PYTHON" -m torch.distributed.run \
+        --nnodes="${SLURM_NNODES:?}" --nproc_per_node=8 \
+        --node_rank="${SLURM_PROCID:?}" \
+        --master_addr="$RECIPE_MASTER_ADDR" --master_port="$RECIPE_MASTER_PORT" \
+        -m controlled_degree2.recipe_a_recovery \
+        --source "${RECOVERY_SOURCE:-work_dirs/recipe_a_376833}" \
+        --output "$RECIPE_OUTPUT" "${extra[@]}"
+fi
 if [[ "$RECIPE_SMOKE" == 1 ]]; then
     extra+=(--smoke --workers 1 --calibration-images 128)
 fi
