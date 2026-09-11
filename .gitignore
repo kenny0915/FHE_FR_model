@@ -18,6 +18,8 @@ env/
 
 # Logs and runtime outputs
 *.log
+recipe-a-*.out
+recipe-a-*.err
 runs/
 logs/
 wandb/
