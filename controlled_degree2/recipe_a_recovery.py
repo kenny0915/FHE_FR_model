@@ -34,12 +34,17 @@ def group_number(name):
     return 0 if name == 'prelu' else int(name[5])
 
 
+def activation_group(model, module):
+    sites = getattr(model, '_recovery_sites', None)
+    return sites.index(module.name) if sites is not None else group_number(module.name)
+
+
 def configure(model, open_groups):
     model.eval()  # fixed running statistics; autograd remains enabled
     for module in quadratic_modules(model):
         module.alpha = 1.
         module.clip = False
-        module.clip_eval = group_number(module.name) >= open_groups
+        module.clip_eval = activation_group(model, module) >= open_groups
 
 
 def affine_parameters(model):
@@ -60,7 +65,7 @@ class PrefixEscape(Exception):
         self.name, self.penalty, self.ratios = name, penalty, ratios
 
 
-def finite_prefix_loss(model, images, open_groups, guard=1., target=.9):
+def finite_prefix_loss(model, images, open_groups, guard=1., target=.9, detach_bn=True):
     """Stop *before* evaluating the first escaping quadratic.
 
     BN inputs are detached in this probe only, so the penalty can update the
@@ -90,11 +95,11 @@ def finite_prefix_loss(model, images, open_groups, guard=1., target=.9):
     try:
         configure(model, open_groups)
         for module in model.modules():
-            if isinstance(module, nn.modules.batchnorm._BatchNorm):
+            if detach_bn and isinstance(module, nn.modules.batchnorm._BatchNorm):
                 handles.append(module.register_forward_pre_hook(
                     lambda m, inputs: (inputs[0].detach(),)))
         for module in quadratic_modules(model):
-            if group_number(module.name) < open_groups:
+            if activation_group(model, module) < open_groups:
                 handles.append(module.register_forward_pre_hook(check))
         try:
             result = model(images)
@@ -118,13 +123,13 @@ def stage_passes(report):
     return report['rows'] > 0 and report['nonfinite'] == 0
 
 
-def finite_prefix_batch_loss(model, images, open_groups, guard=1., target=.9):
+def finite_prefix_batch_loss(model, images, open_groups, guard=1., target=.9, detach_bn=True):
     """Retry safe rows so one escaping row cannot starve deeper affines."""
     total = images.new_zeros((), dtype=torch.float64)
     remaining = images
     first_site, first_ratios = None, images.new_zeros(len(images))
     while len(remaining):
-        loss, site, ratios = finite_prefix_loss(model, remaining, open_groups, guard, target)
+        loss, site, ratios = finite_prefix_loss(model, remaining, open_groups, guard, target, detach_bn)
         total = total + loss * (len(remaining) / len(images))
         if first_site is None:
             first_site, first_ratios = site, ratios
@@ -229,9 +234,9 @@ def gate(model, args, rows, labels, rank, world, device, groups, stress, label):
         row_ratios = torch.where(finite, row_ratios, torch.full_like(row_ratios, float('inf')))
 
     handles = [m.register_forward_pre_hook(observe) for m in quadratic_modules(model)
-               if group_number(m.name) < groups]
+               if activation_group(model, m) < groups]
     handles += [m.register_forward_hook(observe_output) for m in quadratic_modules(model)
-                if group_number(m.name) < groups]
+                if activation_group(model, m) < groups]
     try:
         for images, _, indices in loader(args, rows[rank::world], labels, True):
             images = images.to(device)
@@ -245,7 +250,10 @@ def gate(model, args, rows, labels, rank, world, device, groups, stress, label):
                 escapes += int((row_ratios > args.guard).sum())
                 peak = torch.maximum(peak, row_ratios.max())
                 count += len(x)
-                for index in indices[(~finite).cpu()].tolist():
+                replay = ~finite
+                if getattr(args, 'replay_ratio', None) is not None:
+                    replay = replay | (row_ratios > args.replay_ratio)
+                for index in indices[replay.cpu()].tolist():
                     if len(failures) < 4096:
                         failures.append(dict(source_index=index, variant=variant))
     finally:

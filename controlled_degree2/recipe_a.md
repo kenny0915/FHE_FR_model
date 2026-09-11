@@ -1,5 +1,10 @@
 # Recipe A: teacher-only full quadratic iResNet50
 
+The original protocol below is preserved for provenance. The explicit
+[A-v2 recovery revision](recipe_a_recovery_v2.md) changes post-epoch-8
+optimization while keeping data isolation, fixed quadratics/intervals and
+BN moments. Report it as a revised training recipe, not an unchanged A/B arm.
+
 Starts only from `work_dirs/ms1mv3_r50/model.pt` (the original 25-PReLU
 iResNet50). It never reads run10, student_best, IJB-C images, their range
 buffers, or their evaluation results. The old controlled experiment remains

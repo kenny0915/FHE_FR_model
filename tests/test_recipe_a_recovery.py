@@ -145,7 +145,8 @@ def test_gate_detects_overflow_hidden_by_clipped_suffix(tmp_path, monkeypatch):
     assert all(not m._forward_hooks and not m._forward_pre_hooks for m in model.modules())
 
 
-def test_slurm_walltime_signal_requests_requeue(tmp_path):
+@pytest.mark.parametrize('script', ['recipe_a_recovery.slurm', 'recipe_a_recovery_v2.slurm'])
+def test_slurm_walltime_signal_requests_requeue(tmp_path, script):
     import os
     import subprocess
     from pathlib import Path
@@ -155,14 +156,14 @@ def test_slurm_walltime_signal_requests_requeue(tmp_path):
         'scontrol': '#!/bin/bash\nif [[ "$1" == show ]]; then echo localhost; else printf "%s\\n" "$*" > "$REQUEUE_MARKER"; fi\n',
         'srun': '#!/bin/bash\nkill -USR1 "$PPID"\n',
     }
-    for name, script in commands.items():
+    for name, command_text in commands.items():
         executable = tmp_path/name
-        executable.write_text(script)
+        executable.write_text(command_text)
         executable.chmod(0o755)
     env = dict(os.environ, PATH=str(tmp_path)+os.pathsep+os.environ['PATH'],
                SLURM_SUBMIT_DIR=str(repo), SLURM_JOB_NODELIST='localhost', SLURM_JOB_ID='123',
                REQUEUE_MARKER=str(marker))
-    result = subprocess.run(['bash', 'controlled_degree2/recipe_a_recovery.slurm'],
+    result = subprocess.run(['bash', 'controlled_degree2/'+script],
                             cwd=repo, env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert marker.read_text().strip() == 'requeue 123'

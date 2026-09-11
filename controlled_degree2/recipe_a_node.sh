@@ -13,7 +13,11 @@ export NCCL_SOCKET_IFNAME="=$bootstrap_interface"
 export GLOO_SOCKET_IFNAME="$bootstrap_interface"
 echo "bootstrap interface=$bootstrap_interface address=$node_ip"
 extra=()
-if [[ "$1" == recovery ]]; then
+if [[ "$1" == recovery || "$1" == recovery-v2 ]]; then
+    recovery_module=controlled_degree2.recipe_a_recovery
+    if [[ "$1" == recovery-v2 ]]; then
+        recovery_module=controlled_degree2.recipe_a_recovery_v2
+    fi
     if [[ -n "${RECOVERY_RESUME:-}" ]]; then
         extra+=(--resume "$RECOVERY_RESUME")
     fi
@@ -27,7 +31,7 @@ if [[ "$1" == recovery ]]; then
         --nnodes="${SLURM_NNODES:?}" --nproc_per_node=8 \
         --node_rank="${SLURM_PROCID:?}" \
         --master_addr="$RECIPE_MASTER_ADDR" --master_port="$RECIPE_MASTER_PORT" \
-        -m controlled_degree2.recipe_a_recovery \
+        -m "$recovery_module" \
         --source "${RECOVERY_SOURCE:-work_dirs/recipe_a_376833}" \
         --output "$RECIPE_OUTPUT" "${extra[@]}"
 fi
