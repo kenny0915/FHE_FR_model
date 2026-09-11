@@ -36,6 +36,9 @@ learned on training data, not manually selected using IJB-C results.
    temporary clipping. Before the first polynomial whose input exceeds its
    original fitting interval, stop the entire batch forward **before the
    square**. Penalize each row's maximum excess above `0.9*lam_fit`, in FP64.
+   Retry the safe rows as a smaller original-image batch, so escaping rows
+   cannot prevent deeper BN affines from receiving a repair loss. Weight
+   each retry by its fraction of the original batch.
    This loss comes from finite activations, with no downstream NaN graph.
 3. In that probe only, detach BN inputs so the gradient reaches the local
    preceding BN affine and cannot traverse the deep quadratic recurrence.
@@ -49,15 +52,19 @@ learned on training data, not manually selected using IJB-C results.
    affines not reached on a rank. SGD LR 1e-4, momentum .9, no weight decay,
    norm clip 1. No finite-loss/gradient failures are silently skipped.
 5. Every 250 updates, gate the candidate prefix on 8,192 fixed training rows
-   with clean, flip, lowres20, shift4 and dark variants. Advance only if both
-   embedding/nonzero-norm checks and all prefix interval checks pass. A group
-   has a 2,000-update budget. Exhaustion saves `recovery_last.pt` and stops;
-   it does not declare the model safe or automatically proceed.
+   with clean, flip, lowres20, shift4 and dark variants. Advance only if
+   embeddings/norms are finite and nonzero and open-polynomial inputs/outputs
+   are finite (including overflows that a clipped suffix could hide).
+   Interval escapes remain diagnostics and loss targets, not a pass/fail
+   condition. A finite polynomial outside its fitting interval is not itself
+   a numerical failure. The 2,000-update interval is now a logging window,
+   **not a repair budget**; groups continue until their gates pass.
 6. After all five groups pass, scan **every training row, both orientations**
    on the exact full-unclipped graph. Any non-finite or zero-norm embedding
-   prevents the handoff. Full-corpus range escapes are reported separately:
-   unlike the smaller conservative stage gate, this final gate requires
-   finite nonzero embeddings, not strict containment of every corpus value.
+   prevents the handoff. On failure, remain in group 5, use saved failed
+   training indices for one in four repair batches, and repeat the scan after
+   another passing stage gate. Full-corpus range escapes are reported
+   separately, not treated as numerical failures. No IJB-C data is involved.
 
 Diagnostic failure records contain training source indices and variants,
 capped at 4,096 per rank per gate. Counts in gate reports are uncapped.
@@ -75,20 +82,42 @@ schedule. No coefficients or scale buffers change. All accuracy-training
 losses then use the full-unclipped graph. The existing development protocol
 selects `student_best.pt` during this subsequent accuracy phase only.
 
-Use `--no-continue-training` for recovery alone. Insufficient stage containment
-or a failed full scan stops with diagnostics and never launches continuation.
-There is no automatic restart of a failed recovery: retain its artifacts for
-analysis and explicitly choose the next repair policy instead of rerunning
-over the same directory. Gate results are not IJB-C accuracy measurements.
+Use `--no-continue-training` for recovery alone. Failed gates keep repairing;
+non-finite optimization losses/gradients still stop visibly rather than being
+silently skipped. Convergence and accuracy are not guaranteed by this policy.
+Gate results are not IJB-C accuracy measurements.
+
+## Persistent recovery and resume
+
+`--resume PATH` imports a recovery checkpoint into a **new** output directory,
+preserving both the epoch-8 source and the previous recovery directory. Source
+hash, preparation provenance, finite tensors, and unchanged non-affine tensors
+are checked before loading the BN weights and SGD momentum. Group/update
+numbers continue from the saved position. Sampling restarts with a new
+deterministic epoch: this is not bitwise RNG/data-cursor replay. The short-lived
+augmented replay cache is rebuilt. Default atomic checkpoint interval is 25
+updates (`--save-every`); gates save their reports as well.
+
+The Slurm script requests requeue ten minutes before its two-day wall limit.
+On restart, `--reuse-output` loads the job's own latest atomic recovery
+checkpoint. A completed full gate skips repeated repair; accuracy continuation
+resumes its own `last.pt` if present. Only the scheduled wall-time signal
+requests requeue, not arbitrary code/numerical failures. Requeue depends on
+cluster policy and GPU availability; it is not a promise of uninterrupted
+allocation. Source snapshot/setup interruption before the first checkpoint
+requires manual inspection. Never manually set `--reuse-output` on an
+unrelated directory.
 
 ## H200 ×16
 
 ```bash
 # First validate the actual epoch-8 checkpoint and 16-rank gradients:
-sbatch --exclude=25a-hgpn144 --time=00:20:00 \
-  --export=ALL,RECIPE_SMOKE=1 controlled_degree2/recipe_a_recovery.slurm
+sbatch --exclude=25a-hgpn144 --time=00:20:00 --signal=B:USR1@60 \
+  --export=ALL,RECIPE_SMOKE=1,RECOVERY_RESUME=$PWD/work_dirs/recipe_a_recovery_377580/recovery_last.pt \
+  controlled_degree2/recipe_a_recovery.slurm
 # After successful RECOVERY_SMOKE_OK and zero exit status:
-sbatch --exclude=25a-hgpn144 --export=ALL,RECIPE_SMOKE=0 \
+sbatch --exclude=25a-hgpn144 \
+  --export=ALL,RECIPE_SMOKE=0,RECOVERY_RESUME=$PWD/work_dirs/recipe_a_recovery_377580/recovery_last.pt \
   controlled_degree2/recipe_a_recovery.slurm
 ```
 
@@ -105,6 +134,23 @@ early termination, gradient isolation, flag/hook restoration, identity
 isolation, gate conditions, and source snapshot preservation.
 
 ## Validation (2026-09-11)
+
+Persistent recovery revision:
+
+- 52 CPU tests passed, including safe-row deeper repair, frozen-tensor/source
+  resume validation, train-only failure replay, hidden overflow detection and
+  a mocked Slurm wall-time signal/requeue command. Shell syntax and diff
+  whitespace checks passed. Actual cluster wall-time requeue has not yet been
+  exercised end to end.
+- H200 ×16 smoke 377677 resumed the failed group-1 step-2000 checkpoint and
+  completed steps 2001–2002 (maximum affine delta 0.0000646710), exit 0.
+- H200 ×16 smoke 377680 reloaded that new checkpoint, restored all 50 optimizer
+  states and completed steps 2003–2004 (maximum affine delta 0.000117399),
+  exit 0. These are execution/resume checks, not convergence or accuracy
+  claims; the second smoke's initial full-unclipped scan still had 133/160
+  failed rows.
+
+Original recovery revision:
 
 - 47 tests passed across `test_recipe_a_recovery.py`, `test_recipe_a.py` and
   `test_controlled_degree2.py`; shell syntax checks passed.

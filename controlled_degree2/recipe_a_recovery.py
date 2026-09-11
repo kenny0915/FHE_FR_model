@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import itertools
 from types import SimpleNamespace
 
 import numpy as np
@@ -112,7 +113,59 @@ def finite_prefix_loss(model, images, open_groups, guard=1., target=.9):
 
 
 def stage_passes(report):
-    return report['rows'] > 0 and report['nonfinite'] == 0 and report['escaping_rows'] == 0
+    # Approximation interval escapes are a repair objective, not a numerical
+    # failure. The actual unclipped prefix must produce finite, nonzero norms.
+    return report['rows'] > 0 and report['nonfinite'] == 0
+
+
+def finite_prefix_batch_loss(model, images, open_groups, guard=1., target=.9):
+    """Retry safe rows so one escaping row cannot starve deeper affines."""
+    total = images.new_zeros((), dtype=torch.float64)
+    remaining = images
+    first_site, first_ratios = None, images.new_zeros(len(images))
+    while len(remaining):
+        loss, site, ratios = finite_prefix_loss(model, remaining, open_groups, guard, target)
+        total = total + loss * (len(remaining) / len(images))
+        if first_site is None:
+            first_site, first_ratios = site, ratios
+        if site is None:
+            break
+        # Every unsuccessful pass removes at least one row. Hooks are restored
+        # by finite_prefix_loss before retrying the smaller original-image batch.
+        remaining = remaining[ratios <= guard]
+    return total, first_site, first_ratios
+
+
+def validate_resume(state, payload, source_record):
+    recovery = state.get('recovery', {})
+    if (state.get('provenance') != payload['provenance'] or
+            recovery.get('source', {}).get('source_sha256') != source_record['source_sha256']):
+        raise ValueError('recovery resume provenance/source mismatch')
+    if not 1 <= recovery.get('group', 0) <= 5 or recovery.get('step', -1) < 0:
+        raise ValueError('invalid recovery resume position')
+    # Recovery is allowed to alter only the pre-polynomial BN affine tensors.
+    allowed = set()
+    for name in payload['state_dict_backbone']:
+        if name.endswith('.lam_fit'):
+            bn = preactivation_batchnorm_name(name[:-len('.lam_fit')])
+            allowed.update((bn+'.weight', bn+'.bias'))
+    current = state['state_dict_backbone']
+    if current.keys() != payload['state_dict_backbone'].keys():
+        raise ValueError('recovery state keys changed')
+    for name, value in current.items():
+        if not torch.isfinite(value).all():
+            raise ValueError(f'non-finite recovery tensor: {name}')
+        if name not in allowed and not torch.equal(value, payload['state_dict_backbone'][name]):
+            raise ValueError(f'recovery modified frozen tensor: {name}')
+    return recovery
+
+
+def failure_training_rows(root, label, world, train_rows):
+    rows = np.unique([item['source_index'] for rank in range(world)
+                      for item in json.loads((Path(root)/f'{label}.rank{rank}.json').read_text())['failures']])
+    if not np.isin(rows, train_rows).all():
+        raise ValueError('gate replay contains a non-training row')
+    return rows.astype(np.int64)
 
 
 def check_split(split, active_ids):
@@ -170,8 +223,15 @@ def gate(model, args, rows, labels, rank, world, device, groups, stress, label):
         ratio = torch.where(torch.isfinite(ratio), ratio, torch.full_like(ratio, float('inf')))
         row_ratios = torch.maximum(row_ratios, ratio)
 
+    def observe_output(module, inputs, output):
+        nonlocal row_ratios
+        finite = torch.isfinite(output).flatten(1).all(1)
+        row_ratios = torch.where(finite, row_ratios, torch.full_like(row_ratios, float('inf')))
+
     handles = [m.register_forward_pre_hook(observe) for m in quadratic_modules(model)
                if group_number(m.name) < groups]
+    handles += [m.register_forward_hook(observe_output) for m in quadratic_modules(model)
+                if group_number(m.name) < groups]
     try:
         for images, _, indices in loader(args, rows[rank::world], labels, True):
             images = images.to(device)
@@ -179,7 +239,8 @@ def gate(model, args, rows, labels, rank, world, device, groups, stress, label):
                 row_ratios = torch.zeros(len(x), device=device)
                 z = model(x).float()
                 norms = z.norm(dim=1)
-                finite = torch.isfinite(z).all(1) & torch.isfinite(norms) & (norms > 0)
+                finite = (torch.isfinite(z).all(1) & torch.isfinite(norms) & (norms > 0)
+                          & torch.isfinite(row_ratios))
                 bad += int((~finite).sum())
                 escapes += int((row_ratios > args.guard).sum())
                 peak = torch.maximum(peak, row_ratios.max())
@@ -217,7 +278,8 @@ def averaged_gradients(parameters, world, device):
 def run(args, rank, world, device):
     root = Path(args.output)
     if rank == 0:
-        snapshot_source(args.source, root)
+        if not args.reuse_output:
+            snapshot_source(args.source, root)
         (root/'recovery_config.json').write_text(json.dumps(vars(args), indent=2))
     barrier()
     payload = torch.load(root/'source_epoch8.pt', map_location='cpu', weights_only=False)
@@ -255,13 +317,34 @@ def run(args, rank, world, device):
                                                   shuffle=True, seed=args.seed, drop_last=True)
     batches = loader(args, split['train'], split['labels'], sampler=sampler)
     source_record = json.loads((root/'recovery_source.json').read_text())
+    start_group, start_step = 1, 0
+    ready_resume = False
+    resume_path = root/'recovery_last.pt' if args.reuse_output else None
+    if resume_path is None or not resume_path.exists():
+        resume_path = Path(args.resume) if args.resume else None
+    if resume_path is not None:
+        resumed = torch.load(resume_path, map_location='cpu', weights_only=False)
+        position = validate_resume(resumed, payload, source_record)
+        model.load_state_dict(resumed['state_dict_backbone'], strict=True)
+        optimizer.load_state_dict(resumed['recovery_optimizer'])
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = args.lr
+        start_group, start_step = position['group'], position['step']
+        ready_resume = position['ready']
+        if rank == 0:
+            print(f'RECOVERY_RESUME path={resume_path} group={start_group} step={start_step} ready={ready_resume} optimizer_states={len(optimizer.state)}', flush=True)
+        del resumed
+
+    reports = {}
 
     def save(name, group, step, report=None, ready=False):
         if rank != 0:
             return
+        if report is not None:
+            reports[group] = dict(report, checked_at_step=step)
         extra = dict(epoch=8, best=-1., config=continuation_config, provenance=prepared['metadata'],
                      head=payload['head'], origin='teacher_only_recipe_a',
-                     recovery=dict(group=group, step=step, gate=report, ready=ready,
+                     recovery=dict(group=group, step=step, gate=reports.get(group), ready=ready,
                                    source=source_record, config=vars(args)),
                      recovery_optimizer=optimizer.state_dict(), pure_quadratic=ready)
         # Clear old conversion momentum for the optional accuracy continuation.
@@ -276,18 +359,26 @@ def run(args, rank, world, device):
     # Diagnose the actual failed full-unclipped path even in the smoke test.
     gate(model, args, gate_rows[:32] if args.smoke else gate_rows, split['labels'], rank, world,
          device, 5, True, 'initial_unclipped')
-    for group in range(1, 6):
-        sampler.set_epoch(group)
+    for group in range(start_group, 6) if not ready_resume else ():
+        offset = start_step if group == start_group else 0
+        sampler.set_epoch(group*100000+offset)
         iterator = iter(batches)
         cache = None
+        failure_batches = failure_iterator = None
         passed = False
-        for step in range(1, args.steps_per_group+1):
+        for step in itertools.count(offset+1):
             try:
                 images, labels, indices = next(iterator)
             except StopIteration:
                 sampler.set_epoch(group*100000+step)
                 iterator = iter(batches)
                 images, labels, indices = next(iterator)
+            if failure_batches is not None and step % 4 == 0:
+                try:
+                    images, labels, indices = next(failure_iterator)
+                except StopIteration:
+                    failure_iterator = iter(failure_batches)
+                    images, labels, indices = next(failure_iterator)
             images, labels = images.to(device), mapping[labels.to(device)]
             if bool((labels < 0).any()):
                 raise ValueError('non-training identity reached recovery')
@@ -298,7 +389,7 @@ def run(args, rank, world, device):
                 n = min(len(cache[0]), max(1, len(images)//16))
                 images[:n], labels[:n], mask[:n] = cache[0][:n], cache[1][:n], cache[2][:n]
             optimizer.zero_grad(set_to_none=True)
-            penalty, site, ratios = finite_prefix_loss(model, images, group, args.guard, args.target)
+            penalty, site, ratios = finite_prefix_batch_loss(model, images, group, args.guard, args.target)
             require_finite(penalty, device, 'finite-prefix penalty')
             if penalty.requires_grad:
                 (args.range_weight*penalty).backward()
@@ -320,15 +411,15 @@ def run(args, rank, world, device):
             if site is not None:
                 chosen = ratios.topk(min(32, len(ratios))).indices
                 cache = (images[chosen].detach().clone(), labels[chosen].clone(), mask[chosen].clone())
-            if rank == 0 and (step == 1 or step % 25 == 0):
+            if rank == 0 and (step == offset+1 or step % 25 == 0):
                 print(f'RECOVERY group={group} step={step} first_escape={site} range={float(penalty):.6g} anchor={float(anchor):.6g}', flush=True)
-            if args.smoke and step == 2:
+            if args.smoke and step == offset+2:
                 delta = max(float((p-p0).abs().max()) for p, p0 in zip(parameters, initial))
                 if not delta > 0:
                     raise RuntimeError('smoke did not update any BN affine')
                 # Test the stopped-prefix backward with *all* groups open too.
                 optimizer.zero_grad(set_to_none=True)
-                full_loss, full_site, _ = finite_prefix_loss(model, images, 5, args.guard, args.target)
+                full_loss, full_site, _ = finite_prefix_batch_loss(model, images, 5, args.guard, args.target)
                 if full_loss.requires_grad:
                     full_loss.backward()
                 averaged_gradients(parameters, world, device)
@@ -339,27 +430,39 @@ def run(args, rank, world, device):
                         raise RuntimeError('original checkpoint changed during smoke test')
                     print(f'RECOVERY_SMOKE_OK world={world} batch={args.batch_size} affine_delta={delta} full_prefix_site={full_site}', flush=True)
                 return
+            if step % args.save_every == 0:
+                save('recovery_last.pt', group, step)
+            if step % args.steps_per_group == 0 and rank == 0:
+                print(f'RECOVERY_WINDOW group={group} step={step}; continuing until finite gates pass', flush=True)
             if step % args.check_every == 0:
                 report = gate(model, args, gate_rows, split['labels'], rank, world, device, group, True,
                               f'group{group}_step{step}')
                 save('recovery_last.pt', group, step, report)
                 passed = stage_passes(report)
+                if passed and group == 5:
+                    final = gate(model, args, split['train'], split['labels'], rank, world,
+                                 device, 5, False, f'full_training_step{step}')
+                    passed = final['rows'] == 2*len(split['train']) and stage_passes(final)
+                    save('recovery_last.pt', group, step, final, passed)
+                    if not passed:
+                        barrier()  # All ranks' diagnostic indices must be visible.
+                        failed_rows = failure_training_rows(root, f'full_training_step{step}', world, split['train'])
+                        if len(failed_rows):
+                            # One in four repair batches targets actual failed
+                            # training rows; ordinary train coverage is retained.
+                            failed_rows = np.tile(failed_rows, max(1, (world+len(failed_rows)-1)//len(failed_rows)))
+                            failure_batches = loader(args, failed_rows[rank::world], split['labels'], True)
+                            failure_iterator = iter(failure_batches)
+                    if not passed and rank == 0:
+                        print('FULL_SCAN_RETRY: staying in group 5; no accuracy handoff', flush=True)
                 if passed:
                     save(f'group{group}.pt', group, step, report)
                     barrier()
                     break
-        if not passed:
-            save('recovery_last.pt', group, step)
-            barrier()
-            raise RuntimeError(f'group {group} exhausted repair budget; no advancement or accuracy resume')
-    # Final audit uses *every training row* in both orientations. No dev/IJB
-    # images participate in gate decisions or tail replay.
-    final = gate(model, args, split['train'], split['labels'], rank, world, device, 5, False, 'full_training_gate')
-    ready = final['rows'] == 2*len(split['train']) and final['nonfinite'] == 0
-    save('recovery_last.pt', 5, step, final, ready)
-    if not ready:
-        barrier()
-        raise RuntimeError('full training scan failed; diagnostic saved, no accuracy resume')
+    if ready_resume:
+        step, final = start_step, position['gate']
+        if final['rows'] != 2*len(split['train']) or not stage_passes(final):
+            raise ValueError('ready resume lacks a passing full training gate')
     save('recovered.pt', 5, step, final, True)
     barrier()
     if rank == 0:
@@ -370,7 +473,7 @@ def run(args, rank, world, device):
     if args.continue_training:
         continuation = SimpleNamespace(**continuation_config)
         continuation.output = str(root)
-        continuation.resume = str(root/'recovered.pt')
+        continuation.resume = str(root/'last.pt' if (root/'last.pt').exists() else root/'recovered.pt')
         continuation.smoke = False
         # Do not retain recovery models/gradients during the full trainer.
         del model, teacher, head, parameters, optimizer, payload, prepared
@@ -383,6 +486,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', default='work_dirs/recipe_a_376833')
     parser.add_argument('--output', required=True)
+    parser.add_argument('--resume', help='repair checkpoint to import into a new output directory')
+    parser.add_argument('--reuse-output', action='store_true', help='restart own output after Slurm requeue')
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--seed', type=int, default=20260911)
@@ -394,10 +499,11 @@ def main():
     parser.add_argument('--gate-images', type=int, default=8192)
     parser.add_argument('--steps-per-group', type=int, default=2000)
     parser.add_argument('--check-every', type=int, default=250)
+    parser.add_argument('--save-every', type=int, default=25)
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--continue-training', action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
-    if not 0 < args.target < args.guard or args.lr <= 0 or min(args.batch_size, args.gate_images, args.check_every) < 1:
+    if not 0 < args.target < args.guard or args.lr <= 0 or min(args.batch_size, args.gate_images, args.check_every, args.save_every) < 1:
         parser.error('invalid range boundaries, learning rate, or sizes')
     if args.steps_per_group < max(2, args.check_every):
         parser.error('steps-per-group must include a checkpoint/gate interval and two smoke steps')

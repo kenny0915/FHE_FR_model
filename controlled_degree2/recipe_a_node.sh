@@ -14,6 +14,12 @@ export GLOO_SOCKET_IFNAME="$bootstrap_interface"
 echo "bootstrap interface=$bootstrap_interface address=$node_ip"
 extra=()
 if [[ "$1" == recovery ]]; then
+    if [[ -n "${RECOVERY_RESUME:-}" ]]; then
+        extra+=(--resume "$RECOVERY_RESUME")
+    fi
+    if [[ "${SLURM_RESTART_COUNT:-0}" -gt 0 && -f "$RECIPE_OUTPUT/source_epoch8.pt" ]]; then
+        extra+=(--reuse-output)
+    fi
     if [[ "$RECIPE_SMOKE" == 1 ]]; then
         extra+=(--smoke --workers 1 --gate-images 32 --no-continue-training)
     fi

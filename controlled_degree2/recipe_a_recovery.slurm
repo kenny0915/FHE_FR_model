@@ -7,6 +7,9 @@
 #SBATCH --cpus-per-task=64
 #SBATCH --gres=gpu:H200:8
 #SBATCH --time=2-00:00:00
+#SBATCH --requeue
+#SBATCH --signal=B:USR1@600
+#SBATCH --open-mode=append
 #SBATCH --output=recipe-a-recovery-%j.out
 #SBATCH --error=recipe-a-recovery-%j.err
 
@@ -21,8 +24,13 @@ RECIPE_MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export RECIPE_MASTER_PORT=$((20000 + SLURM_JOB_ID % 20000))
 export RECIPE_OUTPUT="${RECIPE_OUTPUT:-$PWD/work_dirs/recipe_a_recovery_${SLURM_JOB_ID}}"
 export RECOVERY_SOURCE="${RECOVERY_SOURCE:-$PWD/work_dirs/recipe_a_376833}"
+export RECOVERY_RESUME="${RECOVERY_RESUME:-}"
 export RECIPE_SMOKE="${RECIPE_SMOKE:-0}"
 export RECIPE_COMMIT
 RECIPE_COMMIT=$(git rev-parse HEAD)
+# Only a scheduled wall-time signal requests requeue. Real code/numerical
+# failures stay visible rather than entering an endless crash/restart loop.
+trap 'echo "Wall-time approaching: requeue from latest atomic checkpoint"; scontrol requeue "$SLURM_JOB_ID"; exit 0' USR1
 srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --distribution=block:block \
-    --kill-on-bad-exit=1 bash controlled_degree2/recipe_a_node.sh recovery
+    --kill-on-bad-exit=1 bash controlled_degree2/recipe_a_node.sh recovery &
+wait $!
