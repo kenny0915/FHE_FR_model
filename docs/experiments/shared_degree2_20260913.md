@@ -268,3 +268,10 @@ activation-input/radius ratio was 3.9498515129. This establishes finiteness only
 on that holdout sample. B continued into epoch 5 with no IJBC evaluation yet.
 About three of the 48 wall-clock hours have elapsed; no new allocation or
 parameter change is based on these first-checkpoint results alone.
+
+B epoch 5 improved its clean/flip TAR@FAR=1e-4 to 0.1161372289 and
+low-resolution/selection TAR to 0.0700671598. The full holdout audit remained
+finite (zero non-finite observations), with embedding absolute maximum
+0.8642792106 and activation-input/radius maximum 3.5960447788. Despite low
+absolute accuracy, the internal improvement supports continuing into epoch 6.
+The model selection and training policy remain unchanged; B IJBC is pending.
