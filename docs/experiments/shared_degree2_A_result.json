@@ -1,0 +1,47 @@
+{
+  "attempt": "A",
+  "strategy": {
+    "SHARED_INIT": "fit",
+    "SHARED_BN": "train",
+    "SHARED_CONVERSION": "3",
+    "SHARED_EPOCHS": "12",
+    "SHARED_COEFF_LR": ".0001"
+  },
+  "selected_epoch": 5,
+  "checkpoint_sha256": "3cd884d0c3ca315194213d9f8b577154986dbac3a49da2f71c0c00613a44cc44",
+  "training_job": "379616",
+  "evaluation_job": "379810",
+  "development": {
+    "nonfinite": 0,
+    "embedding_absmax": 0.7287324666976929,
+    "activation_max_ratio": 2.9865827560424805,
+    "clean": {
+      "tar_1e4": 0.14703212678432465,
+      "threshold": 0.6837056875228882,
+      "empirical_far": 9.999999747378752e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "lowres": {
+      "tar_1e4": 0.0834997296333313,
+      "threshold": 0.6992918252944946,
+      "empirical_far": 9.999999747378752e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "tar_1e4": 0.0834997296333313
+  },
+  "ijbc": {
+    "requested_far": 0.1,
+    "tar_percent": 67.99100066472363,
+    "actual_far": 0.10000759642666136,
+    "source_images": 469375,
+    "original_plus_flip_forwards": 938750,
+    "nonfinite_augmented_embedding_rows": 10,
+    "nonfinite_module_observations": 146246796,
+    "audit_sha256": "584684bacc1fa126f95977b109a20d4ede16ae03f5cbdf2fcb1360dad7481535",
+    "interpretation": "Diagnostic pipeline TAR: non-finite embeddings were sanitized by the existing evaluator; not a qualifying result. Module observation counts include repeated boundaries and diagnostic replays."
+  },
+  "target_met": false,
+  "next_strategy_policy_fixed_before_ijbc": true
+}

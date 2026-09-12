@@ -66,8 +66,8 @@ qualify even if final embeddings or sanitized evaluator scores are finite.
 | Attempt | Strategy | Slurm job | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
 |---|---|---|---|---|---|---|
 | Smoke | fitted, adaptive BN, two distributed updates | 379596 | not an accuracy run | not evaluated | finite training loss/gradients; inference not certified | completed |
-| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | job 379810 running | 0 on full internal audit; IJBC pending | training stopped by internal rule |
-| B | near-linear / adaptive BN | pending | pending | pending | pending | planned |
+| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | 67.99% diagnostic | 10 non-finite augmented IJBC rows | failed target; evaluation complete |
+| B | near-linear / adaptive BN | 379865 | pending | pending | pending | running |
 | C | fitted / frozen BN / slower conversion | pending | pending | pending | pending | planned |
 
 Artifacts remain under `work_dirs/shared_d2_*`; source and this ledger are
@@ -223,3 +223,22 @@ running via the existing pipeline on 469,375 source images (plus flips),
 with the complete module-boundary audit and unrounded TAR sidecar. No final
 IJBC metric has yet been consumed; no candidate parameter changed after
 selection. The sequential controller remains responsible for B/C dispatch.
+
+## A final evaluation and B launch
+
+A IJBC job 379810 completed. The existing pipeline reported TAR 67.99% at
+FAR=0.1 (unrounded 67.9910006647%, actual nearest ROC FAR .1000075964).
+There were 10 non-finite augmented embedding rows among 938,750 original/flip
+forwards. The complete audit also contains non-finite intermediate values.
+The pipeline replaces non-finite features with zero, so this TAR is diagnostic
+and cannot qualify. A fails both the numerical requirement and the target TAR.
+No IJBC per-layer statistics or failing images are used to tune later models.
+See shared_degree2_A_result.json for the selected checksum and audit digest.
+
+B job 379865 has started on 16 H200 GPUs and completed fresh MS1MV3-only
+preparation. It uses exactly the near-linear initialization, adaptive BN,
+three-epoch conversion, and coefficient LR .0005 declared before A's IJBC
+result. Its teacher/split/calibration provenance is independently saved.
+Roughly two wall-clock hours have been used since experiment start; the
+absolute deadline remains 2026-09-14 18:27 UTC. D remains prepared from the
+prior internal-validation evidence, with no IJBC-driven parameter changes.
