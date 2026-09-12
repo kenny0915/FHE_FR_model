@@ -152,3 +152,21 @@ at every audited module input/output. Embedding absolute maximum .289545.
 Saved details: work_dirs/shared_d2_A_20260913/early_cpu_probe.json.
 This covers only four forwards and does not certify full validation or IJBC.
 No model parameters or selection rules changed from this probe.
+
+A epoch-4 full internal validation: clean+flip TAR@FAR=1e-4
+7.351606%, lowres20 5.510982%; selected score .05510982. Zero non-finite
+values/invalid embedding rows across 55460 variant forwards on 11092 held-out
+MS1MV3 images. Maximum embedding magnitude .564650; maximum polynomial
+input/radius ratio 4.438465. Accuracy is far below the teacher despite this
+finite audit. This is not an IJBC result.
+
+An MS1MV3-only checkpoint audit found median running-variance ratios versus
+the teacher of 2984x in layer3.13.bn3, 2417x in layer3.12.bn3, and 2260x in
+layer2.3.bn3. This suggests distribution shift as a candidate explanation,
+not causal proof. Details: epoch4_bn_variance_audit.json in A output.
+
+Budget adaptation decided before any candidate IJBC evaluation: allow A
+through epoch 6 (three full-quadratic validation points). If best clean
+TAR remains below 50% and best selection score below 15%, stop A early,
+evaluate its internally selected checkpoint, then continue the predefined
+B/C strategies. This reallocates roughly an hour without using test feedback.
