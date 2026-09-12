@@ -695,6 +695,7 @@ x_labels = [10 ** -6, 10 ** -5, 10 ** -4, 10 ** -3, 10 ** -2, 10 ** -1]
 tpr_fpr_columns = ['Methods'] + [str(x) for x in x_labels]
 tpr_fpr_table = PrettyTable(tpr_fpr_columns)
 tpr_fpr_rows = []
+raw_tpr_fpr_rows = []
 fig = plt.figure()
 for method in methods:
     fpr, tpr, _ = roc_curve(label, scores[method])
@@ -709,12 +710,18 @@ for method in methods:
                     (method.split('-')[-1], roc_auc * 100)))
     tpr_fpr_row = []
     tpr_fpr_row.append("%s-%s" % (method, target))
+    raw_row = {'method': tpr_fpr_row[0], 'points': {}}
     for fpr_iter in np.arange(len(x_labels)):
         _, min_index = min(
             list(zip(abs(fpr - x_labels[fpr_iter]), range(len(fpr)))))
         tpr_fpr_row.append('%.2f' % (tpr[min_index] * 100))
+        raw_row['points'][str(x_labels[fpr_iter])] = {
+            'tar_percent': float(tpr[min_index] * 100),
+            'actual_far': float(fpr[min_index]),
+        }
     tpr_fpr_table.add_row(tpr_fpr_row)
     tpr_fpr_rows.append(tpr_fpr_row)
+    raw_tpr_fpr_rows.append(raw_row)
 plt.xlim([10 ** -6, 0.1])
 plt.ylim([0.3, 1.0])
 plt.grid(linestyle='--', linewidth=1)
@@ -729,5 +736,7 @@ fig.savefig(os.path.join(save_path, '%s.pdf' % target.lower()))
 tpr_fpr_save_file = os.path.join(
     save_path, '%s_tar_at_far.csv' % target.lower())
 save_tar_at_far(tpr_fpr_save_file, tpr_fpr_columns, tpr_fpr_rows)
+with open(os.path.join(save_path, '%s_tar_at_far_raw.json' % target.lower()), 'w') as stream:
+    json.dump(raw_tpr_fpr_rows, stream, indent=2)
 print(tpr_fpr_table)
 print('TAR@FAR results saved to {}'.format(tpr_fpr_save_file))

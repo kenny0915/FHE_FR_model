@@ -125,3 +125,14 @@ allocated compute node 006; push remains unavailable.
 provided a current GitHub address; a per-command http.curloptResolve override
 (with normal TLS verification, no persistent configuration changes) allowed
 the push. origin/main now includes all commits through b96e53a.
+
+A reached all-25-quadratic, unclipped training at epoch 3, step 625.
+The transition raised loss from about 8 to 46.69; it then declined to
+31.86 by step 1025. Completed updates remained finite. This is optimization
+evidence only, not an inference or verification result.
+
+The existing IJBC evaluator now also saves ijbc_tar_at_far_raw.json using
+the exact same selected ROC indices as its customary two-decimal CSV/table.
+Before certifying success, inspect the unrounded FAR=.1 TAR >=96.56 and
+the complete finite audit. A rounded threshold hit alone is insufficient.
+No scoring, alignment, aggregation, or FAR-selection convention changed.
