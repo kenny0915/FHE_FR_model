@@ -284,3 +284,22 @@ holdout outputs; no B IJBC metric exists. This reduces the nominal 12-epoch cap
 only when both internal thresholds fail, reserving compute for the predeclared
 frozen-BN and bounded comparisons. Evaluate the internally selected checkpoint
 once after stopping. If either threshold is reached, retain the original cap.
+
+B epoch 6 reached clean/flip TAR@FAR=1e-4 0.1617353410 and low-resolution /
+selection TAR 0.0816845149. All three completed full holdout audits had zero
+non-finite observations. Epoch-6 embedding absolute maximum was 0.9579501152;
+activation-input/radius maximum was 3.2408437729. Both screening thresholds
+failed, so job 379865 was cancelled after its completed epoch-6 checkpoint,
+at roughly 80 minutes of job wall time. early_stop.json records the complete
+internal history and that no B IJBC result existed at selection.
+
+Selected B checkpoint: student_best.pt, epoch 6, SHA-256
+0811dc5262b41787e6e7fff63ea672784af94c7ad62b4c34cb0878aa3246b45b.
+All backbone state tensors were checked finite; all 25 coefficient tensors
+have shape (1,3). shared_degree2_B_coefficients.json records the triplets and
+their original MS1MV3 calibration intervals. Final IJBC remains pending;
+the sequential controller will dispatch it after the training allocation ends.
+
+The controller dispatched B final IJBC job 379947 on one H200 (dev partition)
+after the 16-GPU training job ended. The selected checkpoint is fixed; both
+unrounded TAR reporting and the complete module-boundary audit are enabled.
