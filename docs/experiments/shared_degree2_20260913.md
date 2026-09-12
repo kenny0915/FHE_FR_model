@@ -332,3 +332,14 @@ result: fitted initialization, frozen BN statistics, six-epoch conversion,
 coefficient LR .00005, and a nominal 16-epoch cap. D remains staged for the
 subsequent bounded comparison if needed. About four wall-clock hours have
 elapsed; the absolute deadline remains 2026-09-14 18:27 UTC.
+
+C progressed through epoch 5 with finite bounded-conversion losses, and its
+saved configuration was verified against the predeclared frozen-BN policy.
+Before bounds are removed in epoch 6, its epoch-5 checkpoint with identity
+head and optimizer was preserved as
+work_dirs/shared_d2_C_20260913/pre_unclipped.pt, SHA-256
+04278668d2089728a7b1dd9007f81382113bb5c26ebbc008f42940d59b331f82.
+This is an intermediate state for a possible MS1MV3-only comparison, not a
+selected final candidate or an inference-stability certification. No C IJBC
+evaluation has run. Roughly five wall-clock hours have elapsed; C's current
+training allocation and D's previously declared policy remain unchanged.
