@@ -27,5 +27,10 @@ export RECIPE_SMOKE="${RECIPE_SMOKE:-0}"
 export RECIPE_COMMIT
 RECIPE_COMMIT=$(git rev-parse HEAD)
 
-srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --distribution=block:block --kill-on-bad-exit=1 bash controlled_degree2/recipe_a_node.sh prepare
+if [[ "${RECIPE_PREPARED:-0}" != 1 ]]; then
+  srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --distribution=block:block --kill-on-bad-exit=1 bash controlled_degree2/recipe_a_node.sh prepare
+else
+  test -f "$RECIPE_OUTPUT/prepared.pt"
+  test -f "$RECIPE_OUTPUT/split.npz"
+fi
 srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --distribution=block:block --kill-on-bad-exit=1 bash controlled_degree2/recipe_a_node.sh train

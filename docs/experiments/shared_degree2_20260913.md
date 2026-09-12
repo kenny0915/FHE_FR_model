@@ -82,3 +82,15 @@ graph so all ranks evaluate the same running statistics.
 18:33 UTC: smoke completed on nodes 006–007. World size 16, batch 128,
 two optimizer updates; initial loss .7857; max backbone update .00061.
 Additional recipe/shared/nonfinite-trace tests passed.
+
+18:36 UTC: A preparation job 379605 completed MS1MV3 calibration/centers but
+Slurm failed to launch the second step (socket timeout confirming allocation).
+No training updates or accuracy results. Reuse saved prepared.pt/split.npz
+with hashes checked by the trainer; no strategy change.
+
+The sequential controller `shared_campaign.py` runs the fixed A/B/C policy
+list, evaluates only after each training allocation ends, records checkpoint
+SHA-256/development/Slurm states/final IJBC/audit in campaign.json, and stops
+if both target conditions pass. It cancels its current job at the absolute
+deadline. Finishing three attempts leaves the remaining budget available for
+MS1MV3-guided work; it does not pretend the full experiment is complete.

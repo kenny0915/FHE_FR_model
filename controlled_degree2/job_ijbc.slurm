@@ -14,9 +14,13 @@ cd /work/u8798807/FHE_FR_model
 test -f "${CHECKPOINT}"
 mkdir -p "${RESULT_DIR}"
 export CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=12 PYTHONUNBUFFERED=1
+audit_args=()
+if [[ "${FINITE_AUDIT:-0}" == 1 ]]; then
+  audit_args+=(--finite-audit "${RESULT_DIR}/finite_audit.json")
+fi
 /home/u8798807/.conda/envs/face_recog/bin/python eval_ijbc.py \
   --model-prefix "${CHECKPOINT}" --image-path ijb/IJBC \
   --result-dir "${RESULT_DIR}" --batch-size 512 \
   --job "${EVAL_JOB_NAME:-controlled_d2}" --target IJBC \
   --network "${NETWORK:-r50_controlled_d2}" \
-  --nonfinite-manifest "${RESULT_DIR}/nonfinite_manifest.csv"
+  --nonfinite-manifest "${RESULT_DIR}/nonfinite_manifest.csv" "${audit_args[@]}"
