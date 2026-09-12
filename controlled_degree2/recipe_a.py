@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -192,6 +193,18 @@ def prepare(args, rank, world, device):
         lam = (upper_edges[quantile_indices] * args.guard_band).clamp_min(0.05)
         even, error = weighted_quadratic_abs_fit(probabilities, bin_centers, widths, lam,
                                                 slope=teacher.get_submodule(name).weight)
+        if getattr(args, 'shared', False):
+            from controlled_degree2.shared import fit_shared
+            pooled = h.counts.sum(0)
+            index = int((pooled.cumsum(0)/pooled.sum() < args.quantile).sum().clamp_max(h.bins-1))
+            radius = max(.05, float(upper_edges[index])*args.guard_band)
+            coefficients = fit_shared(h.counts, bin_centers, teacher.get_submodule(name).weight,
+                                      radius, args.initialization)
+            calibration[name] = dict(radius=radius, reg_ratio=args.reg_ratio,
+                                     coefficients=coefficients.cpu().tolist(),
+                                     teacher_max=float(h.maximum.max()),
+                                     initialization=args.initialization)
+            continue
         calibration[name] = dict(lam_fit=lam.cpu().tolist(), lam_reg=(lam*args.reg_ratio).cpu().tolist(),
                                  even_coeffs=even.cpu().tolist(), teacher_max=h.maximum.cpu().tolist(),
                                  fit_relative_error=error.cpu().tolist())
@@ -205,6 +218,8 @@ def prepare(args, rank, world, device):
                         teacher_may_have_seen_development_identities=True,
                         approximation_target='channelwise PReLU', interval='[-lam_fit, lam_fit]',
                         source='MS1MV3 training identities only; fresh teacher statistics')
+        if getattr(args, 'shared', False):
+            metadata.update(approximation_target='joint channel PReLU fit with one coefficient triplet per layer', interval='[-radius, radius] per layer')
         torch.save(dict(calibration=calibration, centers=F.normalize(centers, dim=1).cpu(),
                         active_ids=active.tolist(), metadata=metadata), root/'prepared.pt')
         (root/'provenance.json').write_text(json.dumps(metadata, indent=2))
@@ -270,7 +285,7 @@ def apply_phase(student, epoch, args):
         module.alpha, module.clip, module.clip_eval = alphas[group], clipped, False
     # Use pretrained running statistics throughout; affine weights can adapt.
     for module in student.modules():
-        if isinstance(module, nn.modules.batchnorm._BatchNorm):
+        if isinstance(module, nn.modules.batchnorm._BatchNorm) and getattr(args, 'batchnorm_mode', 'frozen') == 'frozen':
             module.eval()
     return alphas, clipped
 
@@ -325,6 +340,8 @@ def verification_metric(features, labels, seed, negative_pairs=2_000_000):
 def validate(student, args, rank, world, device, split):
     student.eval()
     set_quadratic_schedule(student, alpha=1., clip_eval=False)
+    from eval.finite_audit import FiniteAudit
+    audit = FiniteAudit(student) if getattr(args, 'shared', False) else None
     features, degraded, labels = [], [], []
     bad, peak = 0, 0.
     activation_ratio = torch.zeros((), device=device)
@@ -356,6 +373,13 @@ def validate(student, args, rank, world, device, split):
     for handle in handles:
         handle.remove()
     reduce(activation_ratio, dist.ReduceOp.MAX)
+    if audit is not None:
+        audit_result = audit.result()
+        audit.close()
+        boundary_bad = torch.tensor(audit_result['nonfinite_values'], device=device, dtype=torch.long)
+        reduce(boundary_bad)
+        if rank == 0:
+            Path(args.output, 'last_validation_ranges.json').write_text(json.dumps(audit_result, indent=2))
     # Bounded development embeddings, no images in the collective.
     local = (torch.cat(features), labels, bad, peak, torch.cat(degraded))
     gathered = [None]*world
@@ -366,8 +390,8 @@ def validate(student, args, rank, world, device, split):
     result = None
     if rank == 0:
         bad = sum(x[2] for x in gathered)
-        result = dict(nonfinite=bad, embedding_absmax=max(x[3] for x in gathered), activation_max_ratio=float(activation_ratio))
-        if bad == 0:
+        result = dict(nonfinite=bad + (int(boundary_bad) if audit is not None else 0), embedding_absmax=max(x[3] for x in gathered), activation_max_ratio=float(activation_ratio))
+        if result['nonfinite'] == 0:
             all_labels = sum([x[1] for x in gathered], [])
             clean = verification_metric(torch.cat([x[0] for x in gathered]), all_labels, args.seed, args.negative_pairs)
             lowres = verification_metric(torch.cat([x[4] for x in gathered]), all_labels, args.seed, args.negative_pairs)
@@ -389,8 +413,14 @@ def train(args, rank, world, device):
     torch.manual_seed(args.seed)
     student = load_teacher(args.teacher, device)
     teacher = copy.deepcopy(student).eval().requires_grad_(False)
-    replace_prelu_with_quadratic(student, prepared['calibration'])
+    if getattr(args, 'shared', False):
+        from controlled_degree2.shared import replace_shared
+        replace_shared(student, prepared['calibration'])
+    else:
+        replace_prelu_with_quadratic(student, prepared['calibration'])
     student.to(device)
+    if getattr(args, 'shared', False) and args.batchnorm_mode == 'train' and world > 1:
+        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
     active = torch.tensor(prepared['active_ids'], dtype=torch.long)
     head = IdentityHead(prepared['centers'][active]).to(device)
     mapping = torch.full((len(prepared['centers']),), -1, dtype=torch.long, device=device)
@@ -404,13 +434,18 @@ def train(args, rank, world, device):
     optimizer = torch.optim.SGD([dict(params=[p for p in student.parameters() if p.requires_grad], lr=args.lr),
                                  dict(params=head.parameters(), lr=args.head_lr)], momentum=.9,
                                 weight_decay=5e-4, nesterov=True)
+    if getattr(args, 'shared', False):
+        coefficient_params = [m.coeffs for m in modules]
+        coefficient_ids = {id(p) for p in coefficient_params}
+        optimizer.param_groups[0]['params'] = [p for p in optimizer.param_groups[0]['params'] if id(p) not in coefficient_ids]
+        optimizer.add_param_group(dict(params=coefficient_params, lr=args.coefficient_lr, weight_decay=0.))
     start, best = 0, -1.
     if args.resume:
         state = torch.load(args.resume, map_location='cpu', weights_only=False)
         if state['provenance'] != prepared['metadata']:
             raise ValueError('resume checkpoint has different preparation provenance')
-        for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr', 'range_weight', 'global_batch'):
-            if state['config'][key] != vars(args)[key]:
+        for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr', 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr', 'batchnorm_mode'):
+            if state['config'].get(key, vars(args)[key]) != vars(args)[key]:
                 raise ValueError(f'resume changes fixed training policy: {key}')
         student.load_state_dict(state['state_dict_backbone'], strict=True)
         head.load_state_dict(state['head'])
@@ -444,6 +479,8 @@ def train(args, rank, world, device):
         for step, (images, labels, _) in enumerate(batches):
             if step >= steps:
                 break
+            if args.deadline and time.time() >= args.deadline:
+                raise TimeoutError('experiment wall-clock deadline reached')
             progress = epoch+step/steps
             if args.smoke:
                 progress = args.head_warmup+.1+step*.05
@@ -451,6 +488,8 @@ def train(args, rank, world, device):
             factor = .05+.95*.5*(1+math.cos(math.pi*progress/args.epochs))
             optimizer.param_groups[0]['lr'] = (0. if progress < args.head_warmup else args.lr*factor)
             optimizer.param_groups[1]['lr'] = args.head_lr*factor
+            if getattr(args, 'shared', False):
+                optimizer.param_groups[2]['lr'] = args.coefficient_lr*factor
             images, labels = images.to(device), mapping[labels.to(device)]
             if bool((labels < 0).any()):
                 raise ValueError('development identity reached training')
@@ -502,6 +541,8 @@ def train(args, rank, world, device):
             extra = dict(epoch=epoch, best=best, development=result, pure_quadratic=full,
                          origin='teacher_only_recipe_a', config=vars(args), provenance=prepared['metadata'],
                          head=head.state_dict(), optimizer=optimizer.state_dict())
+            if getattr(args, 'shared', False):
+                extra.update(network='r50_shared_d2', format='fhe-fr/shared-degree2-v1', approximation_target='layer-shared fit to PReLU', interval='per-layer [-radius, radius]')
             save_checkpoint(str(root/'last.tmp.pt'), student, prepared['calibration'], teacher_weights=args.teacher, extra=extra)
             os.replace(root/'last.tmp.pt', root/'last.pt')
             if improved:
@@ -543,6 +584,11 @@ def parse_args():
     p.add_argument('--range-weight', type=float, default=1.)
     p.add_argument('--negative-pairs', type=int, default=2000000)
     p.add_argument('--limit-batches', type=int, default=0, help='smoke test only')
+    p.add_argument('--batchnorm-mode', choices=['frozen', 'train'], default='frozen')
+    p.add_argument('--shared', action='store_true')
+    p.add_argument('--initialization', choices=['fit', 'near_linear'], default='fit')
+    p.add_argument('--coefficient-lr', type=float, default=.0001)
+    p.add_argument('--deadline', type=float, default=0., help='absolute UTC Unix time; all ranks stop before updates')
     p.add_argument('--resume')
     p.add_argument('--smoke', action='store_true', help='isolated 64-identity preparation and two optimizer steps')
     args = p.parse_args()

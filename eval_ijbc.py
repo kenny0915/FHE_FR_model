@@ -94,7 +94,9 @@ parser.add_argument(
     ),
 )
 
+parser.add_argument('--finite-audit', default=None, help='JSON audit of all module inputs/outputs; single visible GPU required')
 args = parser.parse_args()
+finite_audits = []
 
 target = args.target
 model_path = args.model_prefix
@@ -167,6 +169,11 @@ class Embedding(object):
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()
+        if args.finite_audit:
+            if torch.cuda.device_count() != 1:
+                raise ValueError('--finite-audit requires one visible GPU for exact hook accounting')
+            from eval.finite_audit import FiniteAudit
+            finite_audits.append(FiniteAudit(resnet))
         self.nonfinite_rows = 0
         self.nonfinite_records = []
         self.trace_model = resnet if args.nonfinite_manifest else None
@@ -386,6 +393,19 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
         nonfinite_rows += embedding.nonfinite_rows
         nonfinite_records.extend(embedding.nonfinite_records)
     print('Non-finite augmented embedding rows: {}'.format(nonfinite_rows))
+    if args.finite_audit:
+        audits = [audit.result() for audit in finite_audits]
+        for audit in finite_audits:
+            audit.close()
+        summary = dict(nonfinite_values=sum(a['nonfinite_values'] for a in audits),
+                       embedding_nonfinite_rows=nonfinite_rows, batches=audits,
+                       scope='all module inputs and outputs, original and flip, including remainder')
+        os.makedirs(os.path.dirname(os.path.abspath(args.finite_audit)), exist_ok=True)
+        with open(args.finite_audit, 'w') as stream:
+            json.dump(summary, stream, indent=2)
+        print('All-boundary non-finite values:', summary['nonfinite_values'])
+        if args.fail_on_nonfinite and summary['nonfinite_values']:
+            raise FloatingPointError('non-finite intermediate outputs; see finite audit')
     if args.nonfinite_manifest:
         manifest_directory = os.path.dirname(args.nonfinite_manifest)
         if manifest_directory:

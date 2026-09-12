@@ -1,0 +1,84 @@
+# Layer-shared degree-two ResNet-50 experiment ledger
+
+Start: 2026-09-12 18:27 UTC (2026-09-13 Taiwan time).
+Hard deadline: 2026-09-14 18:27 UTC, including preparation and queue time.
+Resource ceiling: 16 H200 GPUs concurrently. Training uses the documented
+Slurm `16gpus` partition, two nodes, eight H200 each. No local full training.
+
+Target: IJBC TAR >=96.56% at FAR=0.1, with zero non-finite values at all
+observed module inputs/outputs during inference. Audit includes convolutions,
+BatchNorm, residual-block sums, polynomial outputs, and final embeddings,
+for original and flipped IJBC images. Zero failures is an empirical dataset
+result, not a proof for arbitrary real-valued inputs or CKKS execution.
+
+All 25 PReLUs become scalar-coefficient quadratics: exactly 75 trainable
+polynomial numbers. Original per-channel PReLU slopes exist only as frozen
+training blend targets; evaluation never reads them. No inference clipping.
+A quadratic adds one ciphertext square per activation; along the deepest
+path there are 25 such nonlinear levels, excluding affine operations.
+
+## Allocation and predeclared selection policy
+
+Reserve first hour for code checks and a 16-GPU two-update smoke. Initially
+reserve up to four hours each for three distinct training attempts, plus
+up to four hours each for final IJBC evaluation. Use remaining time for
+extensions or revised strategies based exclusively on MS1MV3 development
+accuracy, activation ranges and optimization behavior. Never alter a
+candidate using IJBC statistics, images, tails, or TAR/FAR feedback.
+
+1. Fitted shared quadratic, adaptive training BatchNorm statistics, 0.25
+   head-only epoch, three-epoch progressive conversion, 12 total epochs,
+   backbone LR .004, coefficient LR .0001.
+2. Near-linear initialization (a=.001/radius, c=0, fitted b), adaptive
+   BatchNorm, same conversion and 12 epochs, coefficient LR .0005.
+3. Fitted shared quadratic, frozen baseline BN statistics, slower six-epoch
+   conversion and 16 epochs, coefficient LR .00005.
+
+Each starts from `work_dirs/ms1mv3_r50/model.pt`, never a prior polynomial
+checkpoint. ArcFace classification, teacher embedding/stage distillation,
+training range penalties and augmented training tail replay reuse recipe A.
+Training input clipping is disabled after conversion. Different configurations
+are decided before inspecting their IJBC results. IJBC can only trigger the
+requested success stop; it cannot drive further tuning.
+
+The existing seeded MS1MV3 identity split (seed 20260911, 2% development
+identities, up to six images each) is reused by convention. Calibration and
+classification centers use only the other 98%. The pretrained teacher may
+have seen development identities; the student training split is disjoint.
+Select the epoch maximizing the existing minimum(clean+flip, lowres20)
+verification TAR at sampled FAR=1e-4, gated by finite clean/flip/lowres/shift/
+dark inference, including intermediate boundaries. Use the existing two
+million fixed seeded impostor draws. These metrics are not IJBC substitutes.
+
+Fit target: pooled channel PReLU responses on each site's MS1MV3-derived
+symmetric interval [-radius, radius]. Radius is pooled absolute-input
+histogram quantile .9995 times 1.5; 95% empirical symmetric weighting and 5%
+uniform interval weighting. Coefficients are jointly least-squares fitted
+across channels, not averaged channel-specific deployed coefficients.
+
+Final evaluation reuses `eval_ijbc.py`, its image alignment, template/media
+aggregation, detector scores, flip fusion, FAR points and result CSV. The
+new `--finite-audit` only observes tensors. Failed intermediate audits cannot
+qualify even if final embeddings or sanitized evaluator scores are finite.
+
+## Attempts
+
+| Attempt | Strategy | Slurm job | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
+|---|---|---|---|---|---|---|
+| Smoke | fitted, adaptive BN, two distributed updates | 379596 | not an accuracy run | not evaluated | finite training loss/gradients; inference not certified | completed |
+| A | fitted / adaptive BN | pending | pending | pending | pending | planned |
+| B | near-linear / adaptive BN | pending | pending | pending | pending | planned |
+| C | fitted / frozen BN / slower conversion | pending | pending | pending | pending | planned |
+
+Artifacts remain under `work_dirs/shared_d2_*`; source and this ledger are
+versioned. Record actual jobs, times, failed attempts, and evaluation hashes
+as execution progresses. No numerical result is inferred from a historical
+per-channel or IJBC-calibrated checkpoint.
+
+Implementation check: 45 lightweight tests passed (shared coefficients, recipe A,
+controlled degree two). Adaptive BN uses SyncBatchNorm on the 16-rank training
+graph so all ranks evaluate the same running statistics.
+
+18:33 UTC: smoke completed on nodes 006–007. World size 16, batch 128,
+two optimizer updates; initial loss .7857; max backbone update .00061.
+Additional recipe/shared/nonfinite-trace tests passed.

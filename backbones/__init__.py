@@ -163,6 +163,9 @@ def get_mbf_large_no_relu(fp16=False, num_features=512, blocks=(2, 8, 12, 4), sc
 
 
 def get_model(name, **kwargs):
+    if name == "r50_shared_d2":
+        from controlled_degree2.shared import build_shared_iresnet50
+        return build_shared_iresnet50(**kwargs)
     # no-ReLU / FHE-friendly CryptoFace polynomial variants
     if name in ("r50_controlled_d2",):
         return get_controlled_direct_degree2(False, **kwargs)

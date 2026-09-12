@@ -35,6 +35,15 @@ if [[ "$1" == recovery || "$1" == recovery-v2 ]]; then
         --source "${RECOVERY_SOURCE:-work_dirs/recipe_a_376833}" \
         --output "$RECIPE_OUTPUT" "${extra[@]}"
 fi
+if [[ "${RECIPE_SHARED:-0}" == 1 ]]; then
+    extra+=(--shared --initialization "${SHARED_INIT:-fit}"
+            --coefficient-lr "${SHARED_COEFF_LR:-0.0001}"
+            --batchnorm-mode "${SHARED_BN:-train}"
+            --head-warmup "${SHARED_WARMUP:-0.25}"
+            --conversion-epochs "${SHARED_CONVERSION:-3}"
+            --epochs "${SHARED_EPOCHS:-12}"
+            --lr "${SHARED_LR:-0.004}" --deadline "${SHARED_DEADLINE:?}")
+fi
 if [[ "$RECIPE_SMOKE" == 1 ]]; then
     extra+=(--smoke --workers 1 --calibration-images 128)
 fi
