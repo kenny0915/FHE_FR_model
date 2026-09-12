@@ -248,3 +248,11 @@ regression check for 96.559% rounding to 96.56%. The already-running controller
 loaded the earlier parser: any provisional success from that process must be
 verified against the raw sidecar before stopping the experiment. This changes
 only the success decision, not evaluation scoring or model selection.
+
+B reached epoch 3 with finite bounded-conversion training losses. Its epoch-2
+checkpoint, including the training head and optimizer state, was preserved as
+work_dirs/shared_d2_B_20260913/pre_unclipped.pt before scheduled bound removal.
+SHA-256: 4e34dd4e83911bfa3d087b5e553a70ceeda4d8315021a622fe144d3189a93e80.
+This preserves a possible MS1MV3-only comparison starting point; it is not a
+selected final candidate and has no inference-stability certification. No B
+IJBC evaluation has run, and B's current training policy remains unchanged.
