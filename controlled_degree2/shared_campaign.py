@@ -80,7 +80,9 @@ def candidate(root):
 def evaluation_result(root):
     audit_path = root/'finite_audit.json'
     table_path = root/'shared_d2'/'ijbc_tar_at_far.csv'
-    result = dict(ijbc_tar_at_far_01=None, inference_nonfinite_values=None)
+    raw_path = root/'shared_d2'/'ijbc_tar_at_far_raw.json'
+    result = dict(ijbc_tar_at_far_01=None, ijbc_tar_at_far_01_raw=None,
+                  inference_nonfinite_values=None)
     if audit_path.exists():
         result['inference_nonfinite_values'] = json.loads(audit_path.read_text())['nonfinite_values']
     if table_path.exists():
@@ -89,9 +91,14 @@ def evaluation_result(root):
         if len(rows) != 1:
             raise ValueError('expected exactly one final IJBC result')
         result['ijbc_tar_at_far_01'] = float(rows[0]['0.1'])
+    if raw_path.exists():
+        rows = json.loads(raw_path.read_text())
+        if len(rows) != 1:
+            raise ValueError('expected exactly one unrounded final IJBC result')
+        result['ijbc_tar_at_far_01_raw'] = float(rows[0]['points']['0.1']['tar_percent'])
     result['target_met'] = (result['inference_nonfinite_values'] == 0
-                            and result['ijbc_tar_at_far_01'] is not None
-                            and result['ijbc_tar_at_far_01'] >= 96.56)
+                            and result['ijbc_tar_at_far_01_raw'] is not None
+                            and result['ijbc_tar_at_far_01_raw'] >= 96.56)
     result['metric_valid'] = result['inference_nonfinite_values'] == 0
     return result
 

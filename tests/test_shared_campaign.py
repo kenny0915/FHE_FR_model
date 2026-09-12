@@ -10,6 +10,11 @@ def test_success_requires_both_metric_and_intermediate_finiteness(tmp_path):
     (tmp_path/'finite_audit.json').write_text(json.dumps(dict(nonfinite_values=1)))
     assert not evaluation_result(tmp_path)['target_met']
     (tmp_path/'finite_audit.json').write_text(json.dumps(dict(nonfinite_values=0)))
+    assert not evaluation_result(tmp_path)['target_met']
+    raw_path = tmp_path/'shared_d2'/'ijbc_tar_at_far_raw.json'
+    raw_path.write_text(json.dumps([dict(points={'0.1': dict(tar_percent=96.559)})]))
+    assert not evaluation_result(tmp_path)['target_met']
+    raw_path.write_text(json.dumps([dict(points={'0.1': dict(tar_percent=96.56)})]))
     assert evaluation_result(tmp_path)['target_met']
 
 

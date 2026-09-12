@@ -242,3 +242,9 @@ result. Its teacher/split/calibration provenance is independently saved.
 Roughly two wall-clock hours have been used since experiment start; the
 absolute deadline remains 2026-09-14 18:27 UTC. D remains prepared from the
 prior internal-validation evidence, with no IJBC-driven parameter changes.
+
+The campaign success parser now requires the unrounded TAR sidecar, with a
+regression check for 96.559% rounding to 96.56%. The already-running controller
+loaded the earlier parser: any provisional success from that process must be
+verified against the raw sidecar before stopping the experiment. This changes
+only the success decision, not evaluation scoring or model selection.
