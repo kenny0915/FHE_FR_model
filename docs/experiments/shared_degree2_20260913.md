@@ -256,3 +256,15 @@ SHA-256: 4e34dd4e83911bfa3d087b5e553a70ceeda4d8315021a622fe144d3189a93e80.
 This preserves a possible MS1MV3-only comparison starting point; it is not a
 selected final candidate and has no inference-stability certification. No B
 IJBC evaluation has run, and B's current training policy remains unchanged.
+
+B's bounds were removed at epoch 3, step 625 after all groups became quadratic.
+Training loss rose from about 7 to about 45 and subsequently varied sharply
+between batches, while the finite training guards continued passing. At epoch
+4, its first full MS1MV3 holdout evaluation gave clean/flip TAR@FAR=1e-4
+0.0847703740, low-resolution TAR 0.0519513525, and selection score 0.0519513525.
+There were zero non-finite module observations across 55,460 validation
+forwards; embedding absolute maximum was 0.5297237635 and the largest observed
+activation-input/radius ratio was 3.9498515129. This establishes finiteness only
+on that holdout sample. B continued into epoch 5 with no IJBC evaluation yet.
+About three of the 48 wall-clock hours have elapsed; no new allocation or
+parameter change is based on these first-checkpoint results alone.
