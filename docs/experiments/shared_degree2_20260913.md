@@ -366,3 +366,11 @@ tensor was finite. shared_degree2_C_coefficients.json records all 25 scalar
 triplets and original MS1MV3 approximation intervals. All quadratic terms are
 nonzero. Finite checkpoint tensors do not establish finite unbounded inference;
 the complete IJBC audit remains pending.
+
+Following the observed Slurm get_api_token rejection, the submission helper now
+retries only that explicit no-job-submitted response (empty stdout plus the
+token-service and submission-failed diagnostics), at most three attempts with
+30-second waits. Ambiguous failures and responses containing a possible job ID
+are not retried. Six campaign tests passed, including the retry limit and
+non-retry cases. This applies to subsequent submissions; C's live evaluation
+is unchanged.

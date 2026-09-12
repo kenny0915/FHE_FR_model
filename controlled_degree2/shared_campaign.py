@@ -40,8 +40,22 @@ def remaining_limit(deadline, cap=4*3600):
 
 def submit(script, name, variables, deadline):
     export = ','.join(['ALL']+[f'{key}={value}' for key, value in variables.items()])
-    return command('sbatch', '--parsable', '--job-name='+name, '--time='+remaining_limit(deadline),
-                   '--export='+export, script).split(';')[0]
+    for attempt in range(3):
+        args = ('sbatch', '--parsable', '--job-name='+name,
+                '--time='+remaining_limit(deadline), '--export='+export, script)
+        result = subprocess.run(args, text=True, capture_output=True)
+        if result.returncode == 0:
+            return result.stdout.strip().split(';')[0]
+        # This service rejection explicitly means no job was submitted. Do not
+        # retry ambiguous failures or responses containing a possible job ID.
+        rejected = (not result.stdout.strip()
+                    and 'get_api_token' in result.stderr
+                    and 'Batch job submission failed:' in result.stderr)
+        if not rejected or attempt == 2:
+            raise subprocess.CalledProcessError(result.returncode, args,
+                                                result.stdout, result.stderr)
+        print('Slurm token service rejected submission; retrying in 30 seconds', flush=True)
+        time.sleep(30)
 
 
 def wait_job(job, deadline):
