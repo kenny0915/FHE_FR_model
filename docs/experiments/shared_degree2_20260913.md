@@ -112,3 +112,11 @@ TAR gates pass; no failed/partial PReLU blend is evaluated as a polynomial.
 Git commits 2ad9df5 and bde4b5b are local. Push attempts failed because the
 execution host cannot resolve github.com. Unrelated untracked files remain
 excluded from commits.
+
+2026-09-12 18:52 UTC: A completed epoch 0 and saved last.pt.
+Actual checkpoint inspection passed strict r50_shared_d2 loading, all 25
+coefficient tensors have shape (1,3), exactly 75 polynomial coefficients,
+no nn.PReLU modules, and all state tensors finite. Training conversion is
+incomplete; these checks do not certify finite inference or final accuracy.
+Job 379616 and controller PID 2908563 are live. GitHub DNS also failed from
+allocated compute node 006; push remains unavailable.
