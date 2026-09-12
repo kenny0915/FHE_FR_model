@@ -2,7 +2,7 @@
 
 Runs the predeclared A/B/C policies, without concurrent GPU allocations.
 Training checkpoint selection uses only its saved development metrics. A
-failed run without any full-conversion checkpoint is recorded as unevaluable.
+failed run without any trained checkpoint is recorded as unevaluable.
 The initial comparison finishing is not equivalent to exhausting the budget.
 """
 import argparse
@@ -61,7 +61,7 @@ def candidate(root):
         if not path.exists():
             continue
         state = torch.load(path, map_location='cpu', weights_only=False)
-        if not state.get('pure_quadratic') or state.get('network') != 'r50_shared_d2':
+        if state.get('network') != 'r50_shared_d2':
             continue
         coefficients = [v for k,v in state['state_dict_backbone'].items() if k.endswith('.coeffs')]
         if len(coefficients) != 25 or any(v.shape != (1, 3) for v in coefficients):
@@ -71,8 +71,10 @@ def candidate(root):
             for block in iter(lambda: stream.read(8*1024*1024), b''):
                 digest.update(block)
         return path, dict(checkpoint_sha256=digest.hexdigest(), epoch=state['epoch'],
-                          development=state['development'], selection=filename)
-    return None, dict(reason='no full-conversion layer-shared checkpoint; IJBC unavailable')
+                          development=state['development'], selection=filename,
+                          completed_full_quadratic_training=state.get('pure_quadratic', False),
+                          inference='all 25 sites quadratic; evaluation disables training blends')
+    return None, dict(reason='no trained layer-shared checkpoint; IJBC unavailable')
 
 
 def evaluation_result(root):

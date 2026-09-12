@@ -66,7 +66,7 @@ qualify even if final embeddings or sanitized evaluator scores are finite.
 | Attempt | Strategy | Slurm job | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
 |---|---|---|---|---|---|---|
 | Smoke | fitted, adaptive BN, two distributed updates | 379596 | not an accuracy run | not evaluated | finite training loss/gradients; inference not certified | completed |
-| A | fitted / adaptive BN | pending | pending | pending | pending | planned |
+| A | fitted / adaptive BN | 379605 preparation; 379616 training | running | pending | pending | running |
 | B | near-linear / adaptive BN | pending | pending | pending | pending | planned |
 | C | fitted / frozen BN / slower conversion | pending | pending | pending | pending | planned |
 
@@ -94,3 +94,21 @@ SHA-256/development/Slurm states/final IJBC/audit in campaign.json, and stops
 if both target conditions pass. It cancels its current job at the absolute
 deadline. Finishing three attempts leaves the remaining budget available for
 MS1MV3-guided work; it does not pretend the full experiment is complete.
+
+18:39 UTC: A has begun optimization under job 379616, 16 H200 GPUs.
+Teacher development: clean+flip TAR=.99016154, lowres20 TAR=.34576148
+at sampled FAR=1e-4; zero audited non-finite values. The teacher checkpoint
+SHA-256 is ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a.
+Initial fitted radii span .6102–1.6710; the sampled teacher maxima exceed
+some robust radii, motivating explicit range loss and stress validation.
+These statistics use MS1MV3 only.
+
+If training terminates during conversion, a saved shared last.pt may still
+be evaluated diagnostically: its inference graph always uses all 25 pure
+quadratics (training alpha is ignored in eval). Record incomplete training
+separately. Such a result only qualifies if the same all-boundary finite and
+TAR gates pass; no failed/partial PReLU blend is evaluated as a polynomial.
+
+Git commits 2ad9df5 and bde4b5b are local. Push attempts failed because the
+execution host cannot resolve github.com. Unrelated untracked files remain
+excluded from commits.
