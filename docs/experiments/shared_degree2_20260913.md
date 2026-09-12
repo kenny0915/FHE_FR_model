@@ -343,3 +343,20 @@ This is an intermediate state for a possible MS1MV3-only comparison, not a
 selected final candidate or an inference-stability certification. No C IJBC
 evaluation has run. Roughly five wall-clock hours have elapsed; C's current
 training allocation and D's previously declared policy remain unchanged.
+
+C job 379956 failed at the removal of training bounds in epoch 6 (last logged
+bounded step 600), with FloatingPointError on non-finite training embeddings.
+The finite guard aborted before any invalid optimizer update. No full-polynomial
+holdout metric was reached; record it as unavailable due to this training
+failure. The last completed epoch-5 checkpoint has the same checksum as the
+preserved pre_unclipped.pt above. Its final diagnostic inference still replaces
+all 25 sites with quadratics and disables every training blend and clamp.
+
+The original sequential controller exited after Slurm definitively rejected C's
+evaluation submission with a get_api_token service error. A manual retry of the
+identical evaluation succeeded as job 380032 on one H200. campaign.json records
+the rejected submission and recovery; the old controller PID is no longer live.
+The root agent now monitors this evaluation and will dispatch the staged D
+strategy after it finishes if no success is established. The campaign deadline
+and 16-GPU total limit remain unchanged. C's failure is training evidence, not
+an IJBC-derived parameter adjustment.
