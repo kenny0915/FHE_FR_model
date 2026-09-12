@@ -303,3 +303,14 @@ the sequential controller will dispatch it after the training allocation ends.
 The controller dispatched B final IJBC job 379947 on one H200 (dev partition)
 after the 16-GPU training job ended. The selected checkpoint is fixed; both
 unrounded TAR reporting and the complete module-boundary audit are enabled.
+
+D preparation is now staged in work_dirs/shared_d2_D_20260913 without GPU
+training. A's prepared.pt and split.npz were copied unchanged, and the real
+epoch-2 warm start passed strict backbone and identity-head loading against
+the matching provenance. All restored backbone tensors were finite. The
+prepared.pt SHA-256 is
+73f67b1b26a8b87f4d3105d5a56e3f753ead62afeaf1661b506818a35efce295.
+staging.json records the source checksum and verification. This is the same D
+strategy declared from A's internal evidence before its IJBC result; staging
+does not change its policy or establish accuracy. Persistent bounds require
+comparisons and remain explicitly distinct from purely polynomial inference.
