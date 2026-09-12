@@ -145,3 +145,10 @@ after removing clipping; preserving the source allows a bounded-input
 comparison if internal validation supports it. No IJBC results were used.
 By epoch 3 step 1700, the current unclipped run reported loss 9.07, so this
 is not yet evidence that recovery has failed. A continues unchanged.
+
+Lightweight CPU FP32 inference probe of A epoch 3: fixed development rows
+3053 and 3056, each original and flipped, yielded zero non-finite values
+at every audited module input/output. Embedding absolute maximum .289545.
+Saved details: work_dirs/shared_d2_A_20260913/early_cpu_probe.json.
+This covers only four forwards and does not certify full validation or IJBC.
+No model parameters or selection rules changed from this probe.
