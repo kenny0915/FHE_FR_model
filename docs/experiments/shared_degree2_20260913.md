@@ -136,3 +136,12 @@ the exact same selected ROC indices as its customary two-decimal CSV/table.
 Before certifying success, inspect the unrounded FAR=.1 TAR >=96.56 and
 the complete finite audit. A rounded threshold hit alone is insufficient.
 No scoring, alignment, aggregation, or FAR-selection convention changed.
+
+Preserved A epoch-2 checkpoint as pre_unclipped.pt before later epochs
+overwrote last.pt. SHA-256:
+075e710d04013d2d9c07abaf78ff7d200461ae5ae99deeb26bc82cd01c989a1a.
+Reason: the training loss remained around 32–40 for several hundred steps
+after removing clipping; preserving the source allows a bounded-input
+comparison if internal validation supports it. No IJBC results were used.
+By epoch 3 step 1700, the current unclipped run reported loss 9.07, so this
+is not yet evidence that recovery has failed. A continues unchanged.
