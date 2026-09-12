@@ -42,7 +42,16 @@ if [[ "${RECIPE_SHARED:-0}" == 1 ]]; then
             --head-warmup "${SHARED_WARMUP:-0.25}"
             --conversion-epochs "${SHARED_CONVERSION:-3}"
             --epochs "${SHARED_EPOCHS:-12}"
-            --lr "${SHARED_LR:-0.004}" --deadline "${SHARED_DEADLINE:?}")
+            --lr "${SHARED_LR:-0.004}" --head-lr "${SHARED_HEAD_LR:-0.02}" --deadline "${SHARED_DEADLINE:?}")
+fi
+if [[ "${SHARED_INFERENCE_BOUND:-0}" == 1 ]]; then
+    extra+=(--inference-bound)
+fi
+if [[ "${SHARED_ALL_QUADRATIC_START:-0}" == 1 ]]; then
+    extra+=(--all-quadratic-start)
+fi
+if [[ -n "${SHARED_WARM_START:-}" ]]; then
+    extra+=(--warm-start "$SHARED_WARM_START")
 fi
 if [[ "$RECIPE_SMOKE" == 1 ]]; then
     extra+=(--smoke --workers 1 --calibration-images 128)

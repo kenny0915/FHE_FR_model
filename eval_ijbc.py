@@ -114,6 +114,10 @@ class Embedding(object):
         image_size = (112, 112)
         self.image_size = image_size
         checkpoint = torch.load(prefix)
+        if (isinstance(checkpoint, dict)
+                and checkpoint.get('network') in ('r50_shared_d2', 'r50_shared_d2_bounded')
+                and checkpoint['network'] != args.network):
+            raise ValueError('shared checkpoint network mismatch: bounded and unbounded inference are distinct')
         checkpoint_blends = None
         checkpoint_grouping = None
         if (isinstance(checkpoint, dict)

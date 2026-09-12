@@ -66,7 +66,7 @@ qualify even if final embeddings or sanitized evaluator scores are finite.
 | Attempt | Strategy | Slurm job | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
 |---|---|---|---|---|---|---|
 | Smoke | fitted, adaptive BN, two distributed updates | 379596 | not an accuracy run | not evaluated | finite training loss/gradients; inference not certified | completed |
-| A | fitted / adaptive BN | 379605 preparation; 379616 training | running | pending | pending | running |
+| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 4: clean 7.35%, lowres 5.51% at FAR 1e-4 | pending | 0 on full internal audit; IJBC pending | running |
 | B | near-linear / adaptive BN | pending | pending | pending | pending | planned |
 | C | fitted / frozen BN / slower conversion | pending | pending | pending | pending | planned |
 
@@ -170,3 +170,34 @@ through epoch 6 (three full-quadratic validation points). If best clean
 TAR remains below 50% and best selection score below 15%, stop A early,
 evaluate its internally selected checkpoint, then continue the predefined
 B/C strategies. This reallocates roughly an hour without using test feedback.
+
+## Prepared strategy D: persistent bounds and frozen BN
+
+Decision based on A's MS1MV3 loss discontinuity, 7.35% internal clean TAR,
+and changed running variances, before any candidate IJBC result. Preserve
+A/B/C as the unclipped comparisons. If they do not trigger the success stop,
+reserve up to three training hours and four evaluation hours for D.
+
+D starts from A's preserved epoch-2 pre_unclipped.pt (hash above), reuses the
+exact A teacher/calibration/split/identity-head mapping, and starts a fresh
+optimizer. All 25 sites are quadratic from the first update. Keep the fixed
+MS1MV3 input bounds at every site during both training and evaluation; freeze
+BN running statistics from this source while allowing affine/conv/head and
+all 75 polynomial coefficients to adapt. Use eight epochs, backbone LR .001,
+coefficient LR .0001, head LR .005, no head warmup, existing distillation and
+training augmentation. Select on the same full internal finite/accuracy gate.
+
+Its distinct network ID is r50_shared_d2_bounded. Checkpoint metadata states
+inference_input_bounds=true, fhe_requires_comparisons=true, and
+pure_quadratic=false even after all_activations_quadratic=true. The clamps
+are explicitly permitted by the requested design space, but they introduce
+comparisons: this is not a purely polynomial encrypted computation. No claim
+of CKKS deployability is made. The IJBC loader rejects a shared checkpoint
+whose requested network would silently change bounded/unbounded semantics.
+
+The additional flags are --inference-bound, --all-quadratic-start, and
+--warm-start. Warm-start loading strictly checks teacher/split/calibration
+provenance and restores the matching classification head; it does not reuse
+optimizer momentum. 49 lightweight tests passed, including matching bounded
+train/eval outputs and rejection of a mismatched warm-start split. GPU testing
+of D remains pending; no extra allocation is launched alongside A.

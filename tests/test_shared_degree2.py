@@ -61,3 +61,45 @@ def test_audit_detects_hidden_nonfinite_despite_finite_final_output():
     assert audit.result()['nonfinite_values'] > 0
     assert audit.result()['boundaries']['0.output']['nonfinite_values'] == 6
     audit.close()
+
+
+def test_bounded_policy_keeps_identical_train_eval_function():
+    from types import SimpleNamespace
+    from controlled_degree2.recipe_a import apply_phase
+    from controlled_degree2.model import set_quadratic_schedule
+    q = SharedQuadratic(torch.tensor([.1, .8, -.2]), radius=2., coefficients=[[.2, .5, .1]], name='prelu')
+    args = SimpleNamespace(all_quadratic_start=True, inference_bound=True, batchnorm_mode='frozen')
+    alphas, clipped = apply_phase(q, 0., args)
+    assert alphas == [1.]*5 and clipped and q.clip_eval
+    x = torch.tensor([[[[-20.]], [[0.]], [[20.]]]])
+    expected = .2+.5*x.clamp(-2, 2)+.1*x.clamp(-2, 2).square()
+    torch.testing.assert_close(q.train()(x), expected)
+    set_quadratic_schedule(q, alpha=1., clip_eval=True)
+    torch.testing.assert_close(q.eval()(x), expected)
+    assert q.coeffs.numel() == 3
+
+
+def test_warm_start_checks_provenance_and_restores_head(tmp_path):
+    import pytest
+    from controlled_degree2.recipe_a import load_shared_warm_start
+    student, head = nn.Linear(2, 2), nn.Linear(2, 3)
+    path = tmp_path/'source.pt'
+    provenance = {'teacher_sha256':'teacher', 'split_sha256':'split'}
+    torch.save(dict(network='r50_shared_d2', provenance=provenance, epoch=2,
+                    state_dict_backbone=student.state_dict(), head=head.state_dict()), path)
+    clone, clone_head = nn.Linear(2, 2), nn.Linear(2, 3)
+    info = load_shared_warm_start(clone, clone_head, path, provenance)
+    torch.testing.assert_close(clone.weight, student.weight)
+    torch.testing.assert_close(clone_head.weight, head.weight)
+    assert info['epoch'] == 2 and len(info['sha256']) == 64
+    with pytest.raises(ValueError, match='provenance'):
+        load_shared_warm_start(clone, clone_head, path, {'split_sha256':'different'})
+
+
+def test_bounded_registry_preserves_shared_parameter_contract():
+    from backbones import get_model
+    model = get_model('r50_shared_d2_bounded', dropout=0, fp16=False)
+    modules = [m for m in model.modules() if isinstance(m, SharedQuadratic)]
+    assert len(modules) == 25 and all(m.clip_eval for m in modules)
+    assert sum(m.coeffs.numel() for m in modules) == 75
+    assert not any(isinstance(m, nn.PReLU) for m in model.modules())

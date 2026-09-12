@@ -279,10 +279,15 @@ def phase_at(epoch, warmup=1.0, conversion=8.0):
 
 
 def apply_phase(student, epoch, args):
-    alphas, clipped = phase_at(epoch, args.head_warmup, args.conversion_epochs)
+    if getattr(args, 'all_quadratic_start', False):
+        alphas, clipped = [1.]*5, False
+    else:
+        alphas, clipped = phase_at(epoch, args.head_warmup, args.conversion_epochs)
+    inference_bound = bool(getattr(args, 'inference_bound', False))
+    clipped = clipped or inference_bound
     for module in quadratic_modules(student):
         group = 0 if module.name == 'prelu' else int(module.name[5])
-        module.alpha, module.clip, module.clip_eval = alphas[group], clipped, False
+        module.alpha, module.clip, module.clip_eval = alphas[group], clipped, inference_bound
     # Use pretrained running statistics throughout; affine weights can adapt.
     for module in student.modules():
         if isinstance(module, nn.modules.batchnorm._BatchNorm) and getattr(args, 'batchnorm_mode', 'frozen') == 'frozen':
@@ -339,7 +344,7 @@ def verification_metric(features, labels, seed, negative_pairs=2_000_000):
 @torch.no_grad()
 def validate(student, args, rank, world, device, split):
     student.eval()
-    set_quadratic_schedule(student, alpha=1., clip_eval=False)
+    set_quadratic_schedule(student, alpha=1., clip_eval=bool(getattr(args, 'inference_bound', False)))
     from eval.finite_audit import FiniteAudit
     audit = FiniteAudit(student) if getattr(args, 'shared', False) else None
     features, degraded, labels = [], [], []
@@ -402,6 +407,18 @@ def validate(student, args, rank, world, device, split):
     return message[0]
 
 
+def load_shared_warm_start(student, head, path, provenance):
+    """New optimization policy, identical teacher/split and identity-head mapping."""
+    source = torch.load(path, map_location='cpu', weights_only=False)
+    if source.get('network') not in ('r50_shared_d2', 'r50_shared_d2_bounded'):
+        raise ValueError('warm start requires a layer-shared degree-two checkpoint')
+    if source.get('provenance') != provenance:
+        raise ValueError('warm start teacher/split/calibration provenance differs')
+    student.load_state_dict(source['state_dict_backbone'], strict=True)
+    head.load_state_dict(source['head'], strict=True)
+    return dict(path=str(Path(path).resolve()), sha256=digest(path), epoch=source['epoch'])
+
+
 def train(args, rank, world, device):
     root = Path(args.output)
     prepared = torch.load(root/'prepared.pt', map_location='cpu', weights_only=False)
@@ -423,6 +440,9 @@ def train(args, rank, world, device):
         student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
     active = torch.tensor(prepared['active_ids'], dtype=torch.long)
     head = IdentityHead(prepared['centers'][active]).to(device)
+    warm_start_info = {}
+    if getattr(args, 'warm_start', None):
+        warm_start_info = load_shared_warm_start(student, head, args.warm_start, prepared['metadata'])
     mapping = torch.full((len(prepared['centers']),), -1, dtype=torch.long, device=device)
     mapping[active.to(device)] = torch.arange(len(active), device=device)
     student_hints, teacher_hints, elements = {}, {}, {}
@@ -444,7 +464,7 @@ def train(args, rank, world, device):
         state = torch.load(args.resume, map_location='cpu', weights_only=False)
         if state['provenance'] != prepared['metadata']:
             raise ValueError('resume checkpoint has different preparation provenance')
-        for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr', 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr', 'batchnorm_mode'):
+        for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr', 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr', 'batchnorm_mode', 'inference_bound', 'all_quadratic_start'):
             if state['config'].get(key, vars(args)[key]) != vars(args)[key]:
                 raise ValueError(f'resume changes fixed training policy: {key}')
         student.load_state_dict(state['state_dict_backbone'], strict=True)
@@ -532,17 +552,22 @@ def train(args, rank, world, device):
                     print(f'SMOKE_OK: world={world} batch={args.batch_size} two optimizer updates; backbone_delta={delta.item():.3g}; checkpoint exported', flush=True)
                 barrier()
                 return
-        full = epoch >= args.head_warmup+args.conversion_epochs
+        full = getattr(args, 'all_quadratic_start', False) or epoch >= args.head_warmup+args.conversion_epochs
         result = validate(student, args, rank, world, device, split) if full else {'phase': 'conversion'}
         improved = full and result['nonfinite'] == 0 and result['tar_1e4'] > best
         if improved:
             best = result['tar_1e4']
         if rank == 0:
             extra = dict(epoch=epoch, best=best, development=result, pure_quadratic=full,
-                         origin='teacher_only_recipe_a', config=vars(args), provenance=prepared['metadata'],
+                         origin='shared_degree2_warm_start' if warm_start_info else 'teacher_only_recipe_a', config=vars(args), provenance=prepared['metadata'],
                          head=head.state_dict(), optimizer=optimizer.state_dict())
             if getattr(args, 'shared', False):
-                extra.update(network='r50_shared_d2', format='fhe-fr/shared-degree2-v1', approximation_target='layer-shared fit to PReLU', interval='per-layer [-radius, radius]')
+                bounded = bool(getattr(args, 'inference_bound', False))
+                extra.update(network='r50_shared_d2_bounded' if bounded else 'r50_shared_d2',
+                             format='fhe-fr/shared-degree2-v1', approximation_target='layer-shared fit to PReLU',
+                             interval='per-layer [-radius, radius]', warm_start=warm_start_info,
+                             all_activations_quadratic=full, pure_quadratic=full and not bounded,
+                             inference_input_bounds=bounded, fhe_requires_comparisons=bounded)
             save_checkpoint(str(root/'last.tmp.pt'), student, prepared['calibration'], teacher_weights=args.teacher, extra=extra)
             os.replace(root/'last.tmp.pt', root/'last.pt')
             if improved:
@@ -589,10 +614,19 @@ def parse_args():
     p.add_argument('--initialization', choices=['fit', 'near_linear'], default='fit')
     p.add_argument('--coefficient-lr', type=float, default=.0001)
     p.add_argument('--deadline', type=float, default=0., help='absolute UTC Unix time; all ranks stop before updates')
+    p.add_argument('--inference-bound', action='store_true', help='keep calibrated input clamps in inference; requires comparisons')
+    p.add_argument('--all-quadratic-start', action='store_true')
+    p.add_argument('--warm-start', help='reuse shared backbone/head with a new optimizer and policy')
     p.add_argument('--resume')
     p.add_argument('--smoke', action='store_true', help='isolated 64-identity preparation and two optimizer steps')
     args = p.parse_args()
-    if args.conversion_epochs <= 0 or args.head_warmup < 0 or args.epochs <= args.head_warmup+args.conversion_epochs:
+    if args.all_quadratic_start and args.head_warmup != 0:
+        p.error('all-quadratic start requires zero head warmup')
+    if (args.inference_bound or args.warm_start or args.all_quadratic_start) and not args.shared:
+        p.error('bounded inference and warm starts require the shared model')
+    if args.warm_start and args.resume:
+        p.error('warm start and optimizer resume are mutually exclusive')
+    if args.epochs <= 0 or args.conversion_epochs <= 0 or args.head_warmup < 0 or (not args.all_quadratic_start and args.epochs <= args.head_warmup+args.conversion_epochs):
         p.error('need positive conversion duration and a final pure-quadratic phase')
     if not 0 < args.quantile < 1 or args.guard_band <= 0 or not 0 < args.reg_ratio <= 1:
         p.error('invalid calibration quantile, guard band or regularization ratio')

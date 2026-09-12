@@ -3,8 +3,10 @@
 Fit the original channel PReLU curves jointly over pooled MS1MV3 activation
 histograms on [-radius, radius]. Symmetric histogram weighting and a 5%
 uniform edge component give a degree-two least-squares approximation.
-Only training uses the original slopes and optional input bounds. Evaluation
-uses c + b*x + a*x*x, one ciphertext square per activation (25 serial sites).
+Only training uses the original slopes. The default evaluation graph uses
+c + b*x + a*x*x, one ciphertext square per activation (25 serial sites).
+The separately named bounded variant retains fixed input clamps in evaluation;
+those comparisons are non-polynomial and must be accounted for under FHE.
 """
 import torch
 from torch import nn
@@ -62,10 +64,12 @@ def replace_shared(model, calibration):
     return names
 
 
-def build_shared_iresnet50(**kwargs):
+def build_shared_iresnet50(inference_bound=False, **kwargs):
     from backbones.iresnet import iresnet50
     model = iresnet50(**kwargs)
     for name in prelu_names(model):
         original = model.get_submodule(name)
-        _set_module(model, name, SharedQuadratic(original.weight, name=name))
+        module = SharedQuadratic(original.weight, name=name)
+        module.clip_eval = bool(inference_bound)
+        _set_module(model, name, module)
     return model
