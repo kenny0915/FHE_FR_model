@@ -66,7 +66,7 @@ qualify even if final embeddings or sanitized evaluator scores are finite.
 | Attempt | Strategy | Slurm job | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
 |---|---|---|---|---|---|---|
 | Smoke | fitted, adaptive BN, two distributed updates | 379596 | not an accuracy run | not evaluated | finite training loss/gradients; inference not certified | completed |
-| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | pending | 0 on full internal audit; IJBC pending | running |
+| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | job 379810 running | 0 on full internal audit; IJBC pending | training stopped by internal rule |
 | B | near-linear / adaptive BN | pending | pending | pending | pending | planned |
 | C | fitted / frozen BN / slower conversion | pending | pending | pending | pending | planned |
 
@@ -207,3 +207,19 @@ at sampled FAR=1e-4, zero non-finite/invalid outputs across the complete
 55,460-forward holdout audit. Maximum embedding magnitude .728732; maximum
 input/radius ratio 2.986583. This is an improvement but remains far below
 the teacher. The recorded epoch-6 pruning rule remains unchanged.
+
+A epoch-6 validation: clean TAR 13.497913%, lowres TAR 7.772736% at
+sampled FAR=1e-4, zero non-finite/invalid outputs on the full holdout audit.
+Both metrics declined from epoch 5. The predeclared pruning conditions held
+(best clean <50%, best selection <15%); job 379616 was cancelled after the
+completed epoch-6 checkpoint/metrics, at roughly 82 minutes of training-job
+wall time. This leaves last.pt with optimizer state for a possible later
+MS1MV3-guided resume, without committing to additional compute now.
+
+Final A candidate: student_best.pt, epoch 5, SHA-256
+3cd884d0c3ca315194213d9f8b577154986dbac3a49da2f71c0c00613a44cc44.
+Its 25 coefficient tensors all have shape (1,3). Final IJBC job 379810 is
+running via the existing pipeline on 469,375 source images (plus flips),
+with the complete module-boundary audit and unrounded TAR sidecar. No final
+IJBC metric has yet been consumed; no candidate parameter changed after
+selection. The sequential controller remains responsible for B/C dispatch.
