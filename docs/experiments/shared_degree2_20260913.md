@@ -360,3 +360,9 @@ The root agent now monitors this evaluation and will dispatch the staged D
 strategy after it finishes if no success is established. The campaign deadline
 and 16-GPU total limit remain unchanged. C's failure is training evidence, not
 an IJBC-derived parameter adjustment.
+
+C's diagnostic checkpoint checksum was reverified, and every saved backbone
+tensor was finite. shared_degree2_C_coefficients.json records all 25 scalar
+triplets and original MS1MV3 approximation intervals. All quadratic terms are
+nonzero. Finite checkpoint tensors do not establish finite unbounded inference;
+the complete IJBC audit remains pending.
