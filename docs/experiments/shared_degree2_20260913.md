@@ -314,3 +314,21 @@ staging.json records the source checksum and verification. This is the same D
 strategy declared from A's internal evidence before its IJBC result; staging
 does not change its policy or establish accuracy. Persistent bounds require
 comparisons and remain explicitly distinct from purely polynomial inference.
+
+## B final evaluation and C launch
+
+B final IJBC job 379947 completed with TAR 71.37% at FAR=0.1 (unrounded
+71.3657513934%, actual nearest ROC FAR .0999611738). All 938,750 original/flip
+forwards passed the module-input/output audit: zero non-finite observations
+and zero non-finite augmented embedding rows, including the remainder batch.
+The selected checkpoint checksum was verified unchanged after evaluation.
+B meets the observed IJBC inference-stability requirement but misses the TAR
+target. shared_degree2_B_result.json records the exact metric and audit digest.
+No IJBC statistics are used to alter subsequent coefficients or schedules.
+
+C job 379956 started on 16 H200 GPUs (nodes 026–027), completed preparation,
+and entered training. It retains the policy fixed before either final IJBC
+result: fitted initialization, frozen BN statistics, six-epoch conversion,
+coefficient LR .00005, and a nominal 16-epoch cap. D remains staged for the
+subsequent bounded comparison if needed. About four wall-clock hours have
+elapsed; the absolute deadline remains 2026-09-14 18:27 UTC.

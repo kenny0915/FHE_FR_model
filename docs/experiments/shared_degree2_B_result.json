@@ -1,0 +1,47 @@
+{
+  "attempt": "B",
+  "strategy": {
+    "SHARED_INIT": "near_linear",
+    "SHARED_BN": "train",
+    "SHARED_CONVERSION": "3",
+    "SHARED_EPOCHS": "12",
+    "SHARED_COEFF_LR": ".0005"
+  },
+  "selected_epoch": 6,
+  "checkpoint_sha256": "0811dc5262b41787e6e7fff63ea672784af94c7ad62b4c34cb0878aa3246b45b",
+  "training_job": "379865",
+  "evaluation_job": "379947",
+  "development": {
+    "nonfinite": 0,
+    "embedding_absmax": 0.9579501152038574,
+    "activation_max_ratio": 3.2408437728881836,
+    "clean": {
+      "tar_1e4": 0.16173534095287323,
+      "threshold": 0.6755598187446594,
+      "empirical_far": 9.999999747378752e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "lowres": {
+      "tar_1e4": 0.08168451488018036,
+      "threshold": 0.6903842687606812,
+      "empirical_far": 9.999999747378752e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "tar_1e4": 0.08168451488018036
+  },
+  "ijbc": {
+    "requested_far": 0.1,
+    "tar_percent": 71.36575139336298,
+    "actual_far": 0.09996117381928638,
+    "source_images": 469375,
+    "original_plus_flip_forwards": 938750,
+    "nonfinite_augmented_embedding_rows": 0,
+    "nonfinite_module_observations": 0,
+    "audit_sha256": "2f1cd7b907032df3dcbb86aa13ba74a41ab45572eda2450fd9d48e136f498a8f",
+    "interpretation": "Complete module-boundary audit passed on original and flipped IJBC images including remainder; TAR is below the target."
+  },
+  "target_met": false,
+  "next_strategy_policy_fixed_before_ijbc": true
+}
