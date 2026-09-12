@@ -275,3 +275,12 @@ finite (zero non-finite observations), with embedding absolute maximum
 0.8642792106 and activation-input/radius maximum 3.5960447788. Despite low
 absolute accuracy, the internal improvement supports continuing into epoch 6.
 The model selection and training policy remain unchanged; B IJBC is pending.
+
+Before B's epoch-6 evaluation, apply the same exploratory screening thresholds
+used for A: after the completed epoch-6 checkpoint is saved, stop B if its best
+full-quadratic clean TAR remains below 0.50 and its best selection score remains
+below 0.15. The trigger is B's weak epoch-4/5 MS1MV3 results despite finite
+holdout outputs; no B IJBC metric exists. This reduces the nominal 12-epoch cap
+only when both internal thresholds fail, reserving compute for the predeclared
+frozen-BN and bounded comparisons. Evaluate the internally selected checkpoint
+once after stopping. If either threshold is reached, retain the original cap.
