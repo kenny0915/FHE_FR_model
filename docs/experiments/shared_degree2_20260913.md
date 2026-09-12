@@ -66,7 +66,7 @@ qualify even if final embeddings or sanitized evaluator scores are finite.
 | Attempt | Strategy | Slurm job | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
 |---|---|---|---|---|---|---|
 | Smoke | fitted, adaptive BN, two distributed updates | 379596 | not an accuracy run | not evaluated | finite training loss/gradients; inference not certified | completed |
-| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 4: clean 7.35%, lowres 5.51% at FAR 1e-4 | pending | 0 on full internal audit; IJBC pending | running |
+| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | pending | 0 on full internal audit; IJBC pending | running |
 | B | near-linear / adaptive BN | pending | pending | pending | pending | planned |
 | C | fitted / frozen BN / slower conversion | pending | pending | pending | pending | planned |
 
@@ -201,3 +201,9 @@ provenance and restores the matching classification head; it does not reuse
 optimizer momentum. 49 lightweight tests passed, including matching bounded
 train/eval outputs and rejection of a mismatched warm-start split. GPU testing
 of D remains pending; no extra allocation is launched alongside A.
+
+A epoch-5 validation: clean+flip TAR 14.703213%, lowres20 8.349973%
+at sampled FAR=1e-4, zero non-finite/invalid outputs across the complete
+55,460-forward holdout audit. Maximum embedding magnitude .728732; maximum
+input/radius ratio 2.986583. This is an improvement but remains far below
+the teacher. The recorded epoch-6 pruning rule remains unchanged.
