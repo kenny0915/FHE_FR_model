@@ -120,3 +120,8 @@ no nn.PReLU modules, and all state tensors finite. Training conversion is
 incomplete; these checks do not certify finite inference or final accuracy.
 Job 379616 and controller PID 2908563 are live. GitHub DNS also failed from
 allocated compute node 006; push remains unavailable.
+
+2026-09-12 18:53 UTC: Push connectivity recovered. Cloudflare DNS-over-HTTPS
+provided a current GitHub address; a per-command http.curloptResolve override
+(with normal TLS verification, no persistent configuration changes) allowed
+the push. origin/main now includes all commits through b96e53a.
