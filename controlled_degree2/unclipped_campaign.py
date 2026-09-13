@@ -15,6 +15,8 @@ POLICIES = {
     'projected': dict(unclip=6, cap=.15, epochs=18, lr=.0005, coeff=.00005, range_weight=5),
     'adaptive_prefix': dict(mode='gated', accuracy_epochs=24, training_cap_hours=12),
     'small_curvature': dict(unclip=6, cap=.05, epochs=24, lr=.001, coeff=.0001, range_weight=5),
+    'adaptive_bn': dict(unclip=0, cap=.05, epochs=24, lr=.001, coeff=.0001,
+                        range_weight=5, bn='train'),
     'range_first': dict(mode='gated', accuracy_epochs=24, training_cap_hours=12,
                         repair_lr=.001, max_step_ratio=.001, gradient_priority='range', max_site_updates=3000),
     'slow_projected': dict(unclip=12, cap=.3, epochs=28, lr=.0002, coeff=.00002, range_weight=10),
@@ -107,7 +109,7 @@ def run(args):
         raise ValueError('warm-start source changed since campaign began')
     if state.get('policies') and state['policies'] != POLICIES:
         state.setdefault('policy_history', []).append(dict(at=time.time(), policies=state['policies'],
-            reason='MS1MV3 repair still at site one after over an hour: cap gated arms at 12h and move the predeclared small-curvature arm earlier to preserve comparison time; no adaptive IJBC result exists'))
+            reason='Fixed MS probe at repair step 4325 has four nonfinite full-network embeddings: add an independently initialized BN-adaptive small-curvature arm to test distribution recalibration; no adaptive IJBC result exists'))
     state.update(status='running', policies=POLICIES, source_sha256=source_sha, controller_pid=os.getpid())
     snapshot(path, state)
     for name, policy in POLICIES.items():
@@ -152,7 +154,7 @@ def run(args):
                     script, cap = 'controlled_degree2/shared_recovery.slurm', policy['training_cap_hours']*3600
                 else:
                     variables = dict(RECIPE_SHARED=1, RECIPE_PREPARED=1, RECIPE_SMOKE=0, RECIPE_OUTPUT=out,
-                                     SHARED_DEADLINE=state['deadline'], SHARED_BN='frozen', SHARED_WARMUP=0,
+                                     SHARED_DEADLINE=state['deadline'], SHARED_BN=policy.get('bn', 'frozen'), SHARED_WARMUP=0,
                                      SHARED_ALL_QUADRATIC_START=1, SHARED_INFERENCE_BOUND=0,
                                      SHARED_WARM_START=source/'continuation_best.pt', SHARED_EPOCHS=policy['epochs'],
                                      SHARED_LR=policy['lr'], SHARED_COEFF_LR=policy['coeff'], SHARED_HEAD_LR=.0025,

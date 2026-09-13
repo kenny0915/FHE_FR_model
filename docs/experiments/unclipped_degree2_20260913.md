@@ -374,3 +374,30 @@ repair cannot eventually succeed. It rules out bypassing repair on the
 assumption that the existing full forward pass is already finite. See
 unclipped_degree2_adaptive_prefix_probe.json. The active training job and
 its policy remain unchanged.
+
+## Additional predeclared BN-adaptive trial
+
+Before any adaptive-repair IJBC evaluation, add adaptive_bn immediately after
+small_curvature. It independently starts from original D with all 25 shared
+quadratics and no training/inference clamps from the first update. Use the
+existing synchronized-BN training path (global batch 2048 on 16 H200s),
+curvature cap .05, backbone LR .001, coefficient LR .0001, head LR .0025,
+range weight 5 and 24 epochs, with a maximum six-hour attempt allocation.
+The hypothesis is that adapting statistics to unclipped quadratic feature
+distributions may control amplification that frozen clipped-source statistics
+do not. This is an untested hypothesis for this warm-start configuration.
+The inherited pooled-PReLU approximation intervals remain fixed; the existing
+range audits measure the changed distributions. Checkpoint selection still
+uses only the fixed MS1MV3 holdout. No IJBC-guided statistic recalibration is
+allowed. All queued arms run only as the common budget permits.
+
+Only non-IJBC fields from prior A/B reports were inspected as context. Those
+BN-trained arms had zero internal non-finites but poor holdout verification:
+A clean/lowres TAR 14.7032%/8.3500%, B 16.1735%/8.1685% at FAR=1e-4.
+This identifies an accuracy risk despite numerical stability; it does not
+establish the behavior of a longer D-warm-start fine-tune with bounded
+curvature. Their IJBC fields were not exposed or used for this decision.
+The inference evaluator reloads the selected state into ordinary evaluation
+BN modules, then exports fixed affine constants. Twenty-four focused tests
+passed, including adaptive running statistics surviving checkpoint reload
+and producing an equivalent polynomial export with no BN operation.

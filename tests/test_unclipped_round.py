@@ -27,6 +27,26 @@ def test_curriculum_never_enables_eval_clipping():
     torch.testing.assert_close(q[2](x), .2+.6*x+.1*x*x)
 
 
+def test_adaptive_bn_trains_statistics_but_exports_fixed_affine():
+    q = model().train()
+    args = SimpleNamespace(all_quadratic_start=True, inference_bound=False,
+                           batchnorm_mode='train', unclipped_continuation=True, unclip_epochs=0.)
+    assert not apply_phase(q, 0., args)[1]
+    assert q[1].training and not q[2].clip and not q[2].clip_eval
+    before = q[1].running_mean.clone()
+    q(torch.ones(4, 3, 4, 4)*3)
+    assert not torch.equal(before, q[1].running_mean)
+    # Final evaluation reloads state into a fresh model, without retained
+    # training-loss tensors or autograd graphs.
+    restored = model().eval()
+    restored.load_state_dict(q.state_dict())
+    q = restored
+    graph, certificate = export_graph(q, expected_sites=1)
+    x = torch.randn(2, 3, 4, 4)
+    torch.testing.assert_close(q(x), graph(x), atol=2e-5, rtol=1e-5)
+    assert certificate['pure_polynomial'] and not any(isinstance(m, nn.BatchNorm2d) for m in graph.modules())
+
+
 def test_projection_and_export_preserve_scalar_contract():
     q = model()
     with torch.no_grad():
