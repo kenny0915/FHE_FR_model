@@ -440,3 +440,23 @@ Resume monitoring also recognizes an explicit invalid-job-ID response from
 squeue as a possible aged-out completed job, and requires a terminal sacct
 record before proceeding. Other query failures continue to retry. Twenty
 focused tests pass, including that aged-out-job case.
+
+## Adaptive-prefix allocation stop and fixed final candidate
+
+The late progress rule triggered at the 7,500-update gate: max ratio
+2.4152164459 versus 2.5503737926 at 6,500, an improvement of only
+0.1351573467. The prefix gate had zero non-finite observations, but remained
+at site one with 19,630/40,960 stress forwards outside the ratio-2 criterion.
+The operator verified an atomic checkpoint containing that completed gate
+before requesting cancellation of only job 380900. Slurm reports CANCELLED
+by the owner. The last saved cursor is site one, step 7,575, ready=False.
+This is an allocation stop for slow progress, not a claim of fundamental
+architectural impossibility. It used no IJBC feedback.
+
+The fixed diagnostic candidate recovery_last.pt has SHA-256
+b52556d21afd008abb564605f2e9a1b8ef3281d5c4436f5da217337454f3c804.
+Final IJBC job 381189 has been assigned; the fixed full MS holdout report
+will follow before the controller consumes its test metric. The next arm
+remains the independently initialized, predeclared small_curvature policy.
+At the allocation transition, accounting recorded 4.8965 wall hours used,
+43.1035 remaining, and 61.3956 allocated GPU-hours.
