@@ -105,6 +105,18 @@ def run(args):
         try:
             if 'training_job' not in run:
                 if gated:
+                    smoke_output = root/(name+'_smoke')
+                    if 'smoke_job' not in run:
+                        run['smoke_job'] = submit('controlled_degree2/shared_recovery.slurm', 'unclip-gated-smoke',
+                            dict(RECIPE_OUTPUT=smoke_output, SHARED_DEADLINE=state['deadline'], RECIPE_SMOKE=1,
+                                 RECOVERY_SOURCE=source, RECOVERY_ACCURACY_EPOCHS=policy['accuracy_epochs']),
+                            state['deadline'], 20*60)
+                        snapshot(path, state)
+                    if 'smoke_state' not in run:
+                        run['smoke_state'] = wait_job(run['smoke_job'], state['deadline'])
+                        snapshot(path, state)
+                    if run['smoke_state'].strip() != 'COMPLETED' or not (smoke_output/'smoke.pt').exists():
+                        raise RuntimeError('shared gated GPU smoke failed; do not launch full repair')
                     variables = dict(RECIPE_OUTPUT=out, SHARED_DEADLINE=state['deadline'], RECIPE_SMOKE=0,
                                      RECOVERY_SOURCE=source, RECOVERY_ACCURACY_EPOCHS=policy['accuracy_epochs'])
                     script, cap = 'controlled_degree2/shared_recovery.slurm', policy['training_cap_hours']*3600

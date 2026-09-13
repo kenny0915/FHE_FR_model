@@ -140,3 +140,16 @@ def test_controller_resume_monitors_existing_evaluation_without_resubmission(tmp
     state = json.loads((tmp_path/'campaign.json').read_text())
     assert waited == ['124'] and state['status'] == 'target_met'
     assert len(state['attempts']) == 1 and state['attempts'][0]['evaluation_job'] == '124'
+
+
+def test_failed_gated_smoke_blocks_full_allocation(tmp_path, monkeypatch):
+    import time
+    from controlled_degree2 import unclipped_campaign as campaign
+    (tmp_path/'campaign.json').write_text(json.dumps(dict(status='running', started=time.time()-100,
+        deadline=time.time()+1000, source_sha256='fixed', attempts=[dict(name='adaptive_prefix',
+            smoke_job='123', smoke_state='FAILED')])))
+    monkeypatch.setattr(campaign, 'POLICIES', {'adaptive_prefix': campaign.POLICIES['adaptive_prefix']})
+    monkeypatch.setattr(campaign, 'digest', lambda _: 'fixed')
+    monkeypatch.setattr(campaign, 'submit', lambda *a, **k: pytest.fail('failed smoke must prevent allocation'))
+    with pytest.raises(RuntimeError, match='smoke failed'):
+        campaign.run(SimpleNamespace(root=str(tmp_path), resume=True))

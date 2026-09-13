@@ -27,7 +27,7 @@ def collect(root):
     root = Path(root)
     campaign = json.loads((root/'campaign.json').read_text())
     jobs = [str(run[key]) for run in campaign['attempts']
-            for key in ('training_job', 'evaluation_job', 'development_job') if key in run]
+            for key in ('smoke_job', 'training_job', 'evaluation_job', 'development_job') if key in run]
     report = dict(slurm_timestamp_timezone='Asia/Taipei (cluster local)', collected_at_utc=datetime.now(timezone.utc).isoformat(),
                   wall_hours_elapsed=(time.time()-campaign['started'])/3600,
                   wall_hours_remaining=max(0., campaign['deadline']-time.time())/3600,

@@ -176,3 +176,9 @@ controller consumes the IJBC metric. This supplies missing non-IJBC reporting;
 it does not reselect or alter a checkpoint. All allocations remain sequential.
 The standalone holdout job rechecks the saved split hash and checkpoint hash.
 Ten focused tests pass, including restart without duplicate submission.
+
+Gated repair additionally requires an isolated two-update H200 x16 smoke job
+(maximum 20 minutes) before its full allocation. It exercises the actual shared
+source/head, gradients and checkpoint invariants with a 32-image training gate;
+full repair is not submitted unless Slurm completes and smoke.pt exists.
+This smoke is accounted separately and does not certify inference or accuracy.
