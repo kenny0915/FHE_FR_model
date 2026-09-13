@@ -460,3 +460,10 @@ will follow before the controller consumes its test metric. The next arm
 remains the independently initialized, predeclared small_curvature policy.
 At the allocation transition, accounting recorded 4.8965 wall hours used,
 43.1035 remaining, and 61.3956 allocated GPU-hours.
+
+![Adaptive prefix range-gate progression](unclipped_degree2_adaptive_gate.png)
+
+The shaded final 1,000 updates improved the maximum ratio by only 0.135.
+[Gate data](unclipped_degree2_adaptive_gate.csv) retain all 31 measurements,
+including non-finite and out-of-range counts. This plot concerns the training
+prefix only; it does not certify the unclipped full network.
