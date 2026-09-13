@@ -418,3 +418,16 @@ selection TAR to 0.6486113667. The complete holdout audit again had zero
 non-finite observations. Embedding absolute maximum was 9.4886198044 and the
 pre-clamp activation-input/radius maximum was 7.2338681221. D continued into
 epoch 2 without any policy change or IJBC evaluation.
+
+Subsequent D holdout checks (TAR at FAR=1e-4; all 55,460 forwards audited):
+
+| Epoch | Clean/flip TAR | Low-resolution / selection TAR | Non-finite observations |
+| --- | ---: | ---: | ---: |
+| 2 | 0.9807587862 | 0.6557269692 | 0 |
+| 3 | 0.9807950854 | 0.6549283266 | 0 |
+| 4 | 0.9810491800 | 0.6654565334 | 0 |
+
+Epoch 4 became the selected checkpoint after improving the internal selection
+score. Its embedding absolute maximum was 8.8295249939 and pre-clamp input /
+radius maximum was 6.9015088081. D continued into epoch 5 of its planned eight
+epochs. No D IJBC evaluation has run and no policy has changed.
