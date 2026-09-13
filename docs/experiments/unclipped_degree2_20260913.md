@@ -401,3 +401,17 @@ The inference evaluator reloads the selected state into ordinary evaluation
 BN modules, then exports fixed affine constants. Twenty-four focused tests
 passed, including adaptive running statistics surviving checkpoint reload
 and producing an equivalent polynomial export with no BN operation.
+
+## Late progress stopping rule declared at 10:51 UTC
+
+The site-one gates at 5,000/5,250/5,500/5,750 updates reached
+2.8734520/2.8057425/2.7437186/2.6881895, all finite, but marginal
+improvement is slowing. To leave more time for distinct strategies, the
+operator will stop this arm at a completed gate >=7,500 updates if it remains
+at site one above ratio 2 and improves by less than 0.20 over the preceding
+1,000 updates. Wait for the corresponding atomic checkpoint before cancelling
+the training job. This is a training-data progress rule, not an IJBC rule or
+a claim that the architecture cannot succeed. The detached controller retains
+the 12-hour maximum cap if the operator is interrupted. Final reporting uses
+the fixed saved checkpoint, and the next predeclared arm remains small_curvature.
+The allocation decision was recorded before any adaptive IJBC evaluation.
