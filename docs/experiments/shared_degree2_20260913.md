@@ -13,7 +13,10 @@ result, not a proof for arbitrary real-valued inputs or CKKS execution.
 
 All 25 PReLUs become scalar-coefficient quadratics: exactly 75 trainable
 polynomial numbers. Original per-channel PReLU slopes exist only as frozen
-training blend targets; evaluation never reads them. No inference clipping.
+training blend targets; evaluation never reads them. A/B/C use unbounded
+polynomial inference. D and the conditional E continuation retain MS1MV3-derived
+input bounds, which require comparisons and are not a purely polynomial
+encrypted path.
 A quadratic adds one ciphertext square per activation; along the deepest
 path there are 25 such nonlinear levels, excluding affine operations.
 
@@ -34,10 +37,10 @@ candidate using IJBC statistics, images, tails, or TAR/FAR feedback.
 3. Fitted shared quadratic, frozen baseline BN statistics, slower six-epoch
    conversion and 16 epochs, coefficient LR .00005.
 
-Each starts from `work_dirs/ms1mv3_r50/model.pt`, never a prior polynomial
+Each initial A/B/C attempt starts from `work_dirs/ms1mv3_r50/model.pt`, never a prior polynomial
 checkpoint. ArcFace classification, teacher embedding/stage distillation,
 training range penalties and augmented training tail replay reuse recipe A.
-Training input clipping is disabled after conversion. Different configurations
+For A/B/C, training input clipping is disabled after conversion. Different configurations
 are decided before inspecting their IJBC results. IJBC can only trigger the
 requested success stop; it cannot drive further tuning.
 
@@ -63,12 +66,13 @@ qualify even if final embeddings or sanitized evaluator scores are finite.
 
 ## Attempts
 
-| Attempt | Strategy | Slurm job | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
+| Attempt | Strategy | Training / IJBC jobs | MS1MV3 validation | Final IJBC TAR @ .1 | Non-finite inference | Status |
 |---|---|---|---|---|---|---|
 | Smoke | fitted, adaptive BN, two distributed updates | 379596 | not an accuracy run | not evaluated | finite training loss/gradients; inference not certified | completed |
-| A | fitted / adaptive BN | 379605 preparation; 379616 training | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | 67.99% diagnostic | 10 non-finite augmented IJBC rows | failed target; evaluation complete |
-| B | near-linear / adaptive BN | 379865 | pending | pending | pending | running |
-| C | fitted / frozen BN / slower conversion | pending | pending | pending | pending | planned |
+| A | fitted / adaptive BN / unbounded inference | 379616 / 379810 | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | 67.9910% diagnostic | 10 non-finite augmented IJBC rows; intermediate failures | failed |
+| B | near-linear / adaptive BN / unbounded inference | 379865 / 379947 | epoch 6: clean 16.17%, lowres 8.17% at FAR 1e-4 | 71.3658% | 0 in full IJBC audit | below accuracy target |
+| C | fitted / frozen BN / slower conversion / unbounded inference | 379956 / 380032 | unavailable: training non-finites before full holdout check | 0.00% diagnostic | 938,647 non-finite augmented IJBC rows; intermediate failures | failed |
+| D | A epoch-2 warm-start / frozen BN / persistent input bounds / eight epochs | 380052 / 380135 | epoch 7: clean 98.18%, lowres 66.94% at FAR 1e-4 | pending | 0 in all eight MS1MV3 audits; IJBC pending | final evaluation running |
 
 Artifacts remain under `work_dirs/shared_d2_*`; source and this ledger are
 versioned. Record actual jobs, times, failed attempts, and evaluation hashes
