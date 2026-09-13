@@ -1,0 +1,99 @@
+{
+  "budget_start_utc": "2026-09-12T18:27:00+00:00",
+  "deadline_utc": "2026-09-14T18:27:00+00:00",
+  "last_job_end_utc": "2026-09-13T02:25:12+00:00",
+  "elapsed_wall_seconds": 28692.0,
+  "allocated_gpu_hours": 86.11944444444444,
+  "peak_concurrent_gpus": 16,
+  "source": "Slurm sacct allocation records; source timestamps interpreted in Asia/Taipei",
+  "jobs": [
+    {
+      "job": "379596",
+      "state": "COMPLETED",
+      "start_utc": "2026-09-12T18:31:40+00:00",
+      "end_utc": "2026-09-12T18:32:52+00:00",
+      "allocated_seconds": 72,
+      "allocated_gpus": 16
+    },
+    {
+      "job": "379605",
+      "state": "FAILED",
+      "start_utc": "2026-09-12T18:33:44+00:00",
+      "end_utc": "2026-09-12T18:36:05+00:00",
+      "allocated_seconds": 141,
+      "allocated_gpus": 16
+    },
+    {
+      "job": "379616",
+      "state": "CANCELLED by 29412",
+      "start_utc": "2026-09-12T18:37:04+00:00",
+      "end_utc": "2026-09-12T20:00:05+00:00",
+      "allocated_seconds": 4981,
+      "allocated_gpus": 16
+    },
+    {
+      "job": "379810",
+      "state": "COMPLETED",
+      "start_utc": "2026-09-12T20:00:21+00:00",
+      "end_utc": "2026-09-12T20:30:05+00:00",
+      "allocated_seconds": 1784,
+      "allocated_gpus": 1
+    },
+    {
+      "job": "379865",
+      "state": "CANCELLED by 29412",
+      "start_utc": "2026-09-12T20:30:25+00:00",
+      "end_utc": "2026-09-12T21:50:15+00:00",
+      "allocated_seconds": 4790,
+      "allocated_gpus": 16
+    },
+    {
+      "job": "379947",
+      "state": "COMPLETED",
+      "start_utc": "2026-09-12T21:50:51+00:00",
+      "end_utc": "2026-09-12T22:23:42+00:00",
+      "allocated_seconds": 1971,
+      "allocated_gpus": 1
+    },
+    {
+      "job": "379956",
+      "state": "FAILED",
+      "start_utc": "2026-09-12T22:23:59+00:00",
+      "end_utc": "2026-09-12T23:27:05+00:00",
+      "allocated_seconds": 3786,
+      "allocated_gpus": 16
+    },
+    {
+      "job": "380032",
+      "state": "COMPLETED",
+      "start_utc": "2026-09-12T23:30:14+00:00",
+      "end_utc": "2026-09-13T00:24:50+00:00",
+      "allocated_seconds": 3276,
+      "allocated_gpus": 1
+    },
+    {
+      "job": "380050",
+      "state": "FAILED",
+      "start_utc": "2026-09-13T00:26:26+00:00",
+      "end_utc": "2026-09-13T00:26:43+00:00",
+      "allocated_seconds": 17,
+      "allocated_gpus": 16
+    },
+    {
+      "job": "380052",
+      "state": "COMPLETED",
+      "start_utc": "2026-09-13T00:29:29+00:00",
+      "end_utc": "2026-09-13T01:53:25+00:00",
+      "allocated_seconds": 5036,
+      "allocated_gpus": 16
+    },
+    {
+      "job": "380135",
+      "state": "COMPLETED",
+      "start_utc": "2026-09-13T01:54:41+00:00",
+      "end_utc": "2026-09-13T02:25:12+00:00",
+      "allocated_seconds": 1831,
+      "allocated_gpus": 1
+    }
+  ]
+}

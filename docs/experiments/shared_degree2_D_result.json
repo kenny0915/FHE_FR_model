@@ -1,0 +1,57 @@
+{
+  "attempt": "D",
+  "strategy": {
+    "SHARED_INIT": "fit",
+    "SHARED_BN": "frozen",
+    "SHARED_EPOCHS": "8",
+    "SHARED_WARMUP": "0",
+    "SHARED_CONVERSION": "3",
+    "SHARED_LR": ".001",
+    "SHARED_COEFF_LR": ".0001",
+    "SHARED_HEAD_LR": ".005",
+    "SHARED_INFERENCE_BOUND": "1",
+    "SHARED_ALL_QUADRATIC_START": "1",
+    "SHARED_WARM_START": "/work/u8798807/FHE_FR_model/work_dirs/shared_d2_A_20260913/pre_unclipped.pt"
+  },
+  "network": "r50_shared_d2_bounded",
+  "selected_epoch": 7,
+  "checkpoint_sha256": "300dfe09bfcad28a2b5a5c2eeff359878b6bcc6cbae9d3991572f4e8113c5e6f",
+  "training_job": "380052",
+  "evaluation_job": "380135",
+  "development": {
+    "nonfinite": 0,
+    "embedding_absmax": 9.612229347229004,
+    "activation_max_ratio": 6.829787731170654,
+    "clean": {
+      "tar_1e4": 0.9817752838134766,
+      "threshold": 0.2501007914543152,
+      "empirical_far": 9.999999747378752e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "lowres": {
+      "tar_1e4": 0.6693773865699768,
+      "threshold": 0.2708479166030884,
+      "empirical_far": 9.999999747378752e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "tar_1e4": 0.6693773865699768
+  },
+  "ijbc": {
+    "requested_far": 0.1,
+    "tar_percent": 99.10006647236284,
+    "actual_far": 0.09925594663369595,
+    "source_images": 469375,
+    "original_plus_flip_forwards": 938750,
+    "nonfinite_augmented_embedding_rows": 0,
+    "nonfinite_module_observations": 0,
+    "audit_sha256": "27b9ae09f27ea802cfca364d85c9ab58c08252c60a78904e452907c7ca7f2b26",
+    "scope": "all module inputs and outputs, original and flip, including remainder"
+  },
+  "target_met": true,
+  "inference_input_bounds": true,
+  "fhe_requires_comparisons": true,
+  "interpretation": "Target achieved with persistent input bounds. All 25 activations are layer-shared quadratics; clipping adds comparisons and is not a purely polynomial encrypted path.",
+  "conditional_followup_not_run": true
+}

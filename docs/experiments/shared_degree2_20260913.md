@@ -1,5 +1,11 @@
 # Layer-shared degree-two ResNet-50 experiment ledger
 
+**Complete: attempt D achieved IJBC TAR 99.1000664724% at requested FAR=0.1,
+with zero non-finite module observations across all 938,750 original/flip
+forwards.** The successful variant uses persistent MS1MV3 input bounds;
+clipping requires comparisons, so it is not a purely polynomial encrypted path.
+The campaign stopped after this result. The conditional E run was not launched.
+
 Start: 2026-09-12 18:27 UTC (2026-09-13 Taiwan time).
 Hard deadline: 2026-09-14 18:27 UTC, including preparation and queue time.
 Resource ceiling: 16 H200 GPUs concurrently. Training uses the documented
@@ -72,7 +78,7 @@ qualify even if final embeddings or sanitized evaluator scores are finite.
 | A | fitted / adaptive BN / unbounded inference | 379616 / 379810 | epoch 5: clean 14.70%, lowres 8.35% at FAR 1e-4 | 67.9910% diagnostic | 10 non-finite augmented IJBC rows; intermediate failures | failed |
 | B | near-linear / adaptive BN / unbounded inference | 379865 / 379947 | epoch 6: clean 16.17%, lowres 8.17% at FAR 1e-4 | 71.3658% | 0 in full IJBC audit | below accuracy target |
 | C | fitted / frozen BN / slower conversion / unbounded inference | 379956 / 380032 | unavailable: training non-finites before full holdout check | 0.00% diagnostic | 938,647 non-finite augmented IJBC rows; intermediate failures | failed |
-| D | A epoch-2 warm-start / frozen BN / persistent input bounds / eight epochs | 380052 / 380135 | epoch 7: clean 98.18%, lowres 66.94% at FAR 1e-4 | pending | 0 in all eight MS1MV3 audits; IJBC pending | final evaluation running |
+| D | A epoch-2 warm-start / frozen BN / persistent input bounds / eight epochs | 380052 / 380135 | epoch 7: clean 98.18%, lowres 66.94% at FAR 1e-4 | 99.1001% | 0 in all eight MS1MV3 audits and full IJBC audit | target met; campaign stopped |
 
 Artifacts remain under `work_dirs/shared_d2_*`; source and this ledger are
 versioned. Record actual jobs, times, failed attempts, and evaluation hashes
@@ -472,3 +478,30 @@ any D IJBC result was available.
 D final IJBC job 380135 was submitted after training completed, using the
 existing pipeline with network r50_shared_d2_bounded, all-boundary audit,
 and unrounded TAR sidecar. No model parameter is changed during evaluation.
+
+## Final outcome
+
+D final evaluation 380135 completed successfully. Unrounded TAR was
+99.10006647236284% at requested FAR=0.1, using the existing pipeline's nearest
+ROC point (actual FAR 0.09925594663369595). The complete audit reported zero
+non-finite values at all observed module inputs/outputs and zero non-finite
+augmented embedding rows, covering 469,375 source images and both original
+and flipped inference, including the remainder batch. The selected checkpoint
+SHA-256 was reverified unchanged after evaluation. See
+shared_degree2_D_result.json and shared_degree2_D_coefficients.json.
+
+Winner: work_dirs/shared_d2_D_20260913/student_best.pt, epoch 7,
+network r50_shared_d2_bounded. All 25 PReLUs are replaced by one scalar
+quadratic triplet per layer. Load the bounded network name to retain the
+validated input bounds; the evaluator rejects a conflicting checkpoint name.
+This meets the requested accuracy and observed inference-finiteness conditions
+with the user-permitted bounding option, and retains the comparison-operation
+limitation described above.
+
+The last job ended 2026-09-13 02:25:12 UTC: 7 hours 58 minutes 12 seconds after
+the budget start, well within 48 hours. Slurm allocation records verify a peak
+of 16 concurrent GPUs and 86.1194 allocated GPU-hours including smoke,
+preparation, failed allocations and evaluations. Full accounting is in
+shared_degree2_budget.json. No experiment jobs remain running. E was not
+launched because D met both success conditions; no subsequent parameter
+adjustment was made from its IJBC result.
