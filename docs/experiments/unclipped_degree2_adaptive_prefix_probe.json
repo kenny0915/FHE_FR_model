@@ -1,0 +1,47 @@
+{
+  "checkpoint_sha256": "e20ddb15dd92d9a9b8918c6ee2ae05a201ba9f72478e8b58eaf13131c1d7857f",
+  "epoch": -1,
+  "repair_cursor": {
+    "site": 1,
+    "step": 4325,
+    "ready": false
+  },
+  "source_rows": [
+    3053,
+    3056
+  ],
+  "forwards": 4,
+  "certificate": {
+    "pure_polynomial": true,
+    "quadratic_sites": 25,
+    "coefficients": 75,
+    "operations": [
+      "addition",
+      "multiplication",
+      "affine convolution/linear",
+      "reshape"
+    ],
+    "batchnorm": "fixed scale/offset constants",
+    "inference_clipping": false,
+    "scope": "image-to-embedding backbone before plaintext normalization/scoring"
+  },
+  "diagnostic_only": true,
+  "valid_candidate": false,
+  "max_output_difference": null,
+  "source_finite_audit": {
+    "nonfinite_values": 41363504,
+    "first_nonfinite_boundary": "layer3.0.prelu.output",
+    "embedding": {
+      "nonfinite_values": 2048,
+      "finite_absmax": 0.0
+    }
+  },
+  "export_finite_audit": {
+    "nonfinite_values": 12037912,
+    "first_nonfinite_boundary": "layer3.0.conv2.input[0]",
+    "embedding": {
+      "nonfinite_values": 2048,
+      "finite_absmax": 0.0
+    }
+  }
+}

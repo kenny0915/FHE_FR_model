@@ -361,3 +361,16 @@ budget enforcement or the sequential follow-up pipeline. The process lock
 and --resume job-ID checks remain in use. No GPU job was restarted.
 The budget snapshot at about 10:05 UTC recorded 3.4206 wall hours used,
 44.5794 remaining, and 38.0006 allocated GPU-hours.
+
+A fixed CPU probe of the site-one step-4,325 snapshot (SHA-256
+e20ddb15dd92d9a9b8918c6ee2ae05a201ba9f72478e8b58eaf13131c1d7857f)
+used dev rows 3053/3056 and their flips, four forwards total, matching the
+earlier export probe. Both original and serialized polynomial export failed:
+all 2,048 embedding values were non-finite. The first source failure was at
+layer3.0.prelu.output; the export first observed it at layer3.0.conv2.input.
+The exported graph remained structurally polynomial. This is a small
+non-IJBC numerical diagnostic, not an accuracy measurement or evidence that
+repair cannot eventually succeed. It rules out bypassing repair on the
+assumption that the existing full forward pass is already finite. See
+unclipped_degree2_adaptive_prefix_probe.json. The active training job and
+its policy remain unchanged.
