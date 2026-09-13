@@ -396,3 +396,10 @@ remains 2026-09-14 18:27 UTC. About six wall-clock hours have elapsed.
 D's bounds introduce comparisons and are explicitly marked in its network and
 checkpoint metadata; this is not a purely polynomial encrypted path. The D
 policy was declared from A's internal evidence before any final IJBC result.
+
+D's first allocation (380050) failed after 17 seconds while moving the teacher
+to CUDA: a device was busy or unavailable. No optimizer update or checkpoint
+was produced. The identical configuration was resubmitted as job 380052 on
+nodes 176–177, excluding the failed allocation's nodes 143–144. This is an
+infrastructure retry, not another model strategy. submission.json and the
+campaign ledger retain both job IDs and the failure reason.
