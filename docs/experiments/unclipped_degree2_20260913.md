@@ -467,3 +467,32 @@ The shaded final 1,000 updates improved the maximum ratio by only 0.135.
 [Gate data](unclipped_degree2_adaptive_gate.csv) retain all 31 measurements,
 including non-finite and out-of-range counts. This plot concerns the training
 prefix only; it does not certify the unclipped full network.
+
+## Adaptive-prefix final diagnostic result; small-curvature run starts
+
+Final IJBC 381189 and fixed MS holdout 381250 completed. The repaired
+checkpoint remains numerically invalid without clipping. Its MS audit found
+84,646,618,869 non-finite boundary/embedding observations across 55,460
+forwards, so holdout verification TAR was withheld. IJBC reported
+71.0231630618% TAR at requested FAR=1e-4 (actual .00009987894314010701),
+but 337,466/938,750 augmented embedding rows were non-finite, with
+1,976,240,019,266 non-finite boundary observations. The export is structurally
+polynomial, but this is an **invalid diagnostic** score because the existing
+evaluator replaces bad features with zero. It cannot qualify or be compared
+as valid accuracy. See unclipped_degree2_adaptive_prefix_result.json.
+
+The final checkpoint's dimensionless quadratic terms aR span .7058–.7852,
+versus .6574–.7709 in source D; no enormous coefficient growth was observed.
+The stem convolution norm fell from 2.5785 to 2.0895 and stem BN affine-weight
+norm from 2.1422 to 1.7639. Together with the earlier fixed CPU probe, these
+observations point to compounded activation growth, rather than merely huge
+stored coefficients. The arm stopped before repairing deeper sites, so this
+is not evidence of a fundamental degree-two capacity limit.
+
+The independently initialized small_curvature trial is running as job 381251
+on 16 H200s, nodes 032–033. It retains the predeclared cap .05, six-epoch
+training-clamp removal, 24 epochs, frozen BN, backbone LR .001, coefficient
+LR .0001, head LR .0025 and range weight 5. Its first training updates are
+finite. No parameter changed in response to the preceding IJBC result.
+Versioned result JSON files encode non-finite diagnostic ratios as strings
+so they remain valid standard JSON; internal run artifacts are unchanged.

@@ -1,0 +1,132 @@
+{
+  "name": "adaptive_prefix",
+  "policy": {
+    "mode": "gated",
+    "accuracy_epochs": 24,
+    "training_cap_hours": 24
+  },
+  "started": 1789288439.7458866,
+  "output": "/work/u8798807/FHE_FR_model/work_dirs/unclipped_round_20260913/adaptive_prefix",
+  "smoke_job": "380897",
+  "smoke_state": "COMPLETED",
+  "training_job": "380900",
+  "effective_training_cap_hours": 12,
+  "training_cutoff": 1789331639.7458866,
+  "training_state": "CANCELLED by 29412",
+  "validation_history": [],
+  "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/unclipped_round_20260913/adaptive_prefix/recovery_last.pt",
+  "checkpoint_sha256": "b52556d21afd008abb564605f2e9a1b8ef3281d5c4436f5da217337454f3c804",
+  "development": {
+    "phase": "training-only repair"
+  },
+  "selection": "diagnostic last checkpoint; no valid holdout candidate",
+  "repair_cursor": {
+    "site": 1,
+    "step": 7575,
+    "ready": false,
+    "gate": {
+      "rows": 40960,
+      "nonfinite": 0,
+      "escaping_rows": 19630,
+      "max_ratio": 2.4152164459228516,
+      "open_groups": 1,
+      "train_only": true,
+      "stress": true
+    }
+  },
+  "evaluation_job": "381189",
+  "evaluation_state": "COMPLETED",
+  "development_job": "381250",
+  "development_state": "COMPLETED",
+  "final_development": {
+    "nonfinite": 84646618869,
+    "embedding_absmax": 4.706395180109992e+33,
+    "activation_max_ratio": "Infinity",
+    "checkpoint_sha256": "b52556d21afd008abb564605f2e9a1b8ef3281d5c4436f5da217337454f3c804",
+    "epoch": -1,
+    "source_images": 11092,
+    "forwards": 55460,
+    "selection": "report only; checkpoint already fixed before final evaluations"
+  },
+  "ijbc_tar_at_far_1e4": 71.02316306181929,
+  "nonfinite_values": 1976240019266,
+  "pure_polynomial": true,
+  "target_met": false,
+  "actual_far": 9.987894314010701e-05,
+  "embedding_nonfinite_rows": 337466,
+  "finished": 1789300917.0644522,
+  "allocation_decisions": [
+    {
+      "at": 1789290122.1007664,
+      "attempt": "adaptive_prefix",
+      "training_job": "380900",
+      "decision": "continue",
+      "evidence": "MS training gate site1_step1000: max_ratio=6.118903636932373, nonfinite=0; predeclared >6.5 stop condition is false",
+      "ijbc_used": false
+    },
+    {
+      "at": 1789292885.108417,
+      "attempt": "adaptive_prefix",
+      "training_job": "380900",
+      "decision": "resume controller after user interruption; existing Slurm job unchanged",
+      "ijbc_used": false
+    },
+    {
+      "at": 1789296701.099803,
+      "attempt": "adaptive_prefix",
+      "training_job": "380900",
+      "decision": "declare late progress stop rule",
+      "rule": "At a completed gate with step >=7500, still site1 and max_ratio>2, stop if max_ratio(step-1000)-max_ratio(step)<0.20; wait for atomic checkpoint before cancellation",
+      "evidence": "finite site1 gates: step5000 2.87345195, step5250 2.80574250, step5500 2.74371862, step5750 2.68818951; step4325 full CPU probe has 4/4 nonfinite embeddings",
+      "ijbc_used": false,
+      "enforcement": "operator monitors gates; detached controller retains 12h hard attempt cap"
+    },
+    {
+      "at": 1789299176.7997346,
+      "attempt": "adaptive_prefix",
+      "training_job": "380900",
+      "decision": "stop for insufficient MS gate progress",
+      "gate_step": 7500,
+      "checkpoint_step": 7575,
+      "max_ratio": 2.4152164459228516,
+      "previous_max_ratio": 2.5503737926483154,
+      "improvement_over_1000": 0.13515734672546387,
+      "nonfinite": 0,
+      "ijbc_used": false,
+      "cancellation_requested": true
+    }
+  ],
+  "coefficient_comparison_summary": {
+    "source": {
+      "path": "work_dirs/shared_d2_D_20260913/continuation_best.pt",
+      "dimensionless_min": [
+        0.010658212937414646,
+        0.2520218789577484,
+        0.6574243903160095
+      ],
+      "dimensionless_max": [
+        0.04947672784328461,
+        0.5146258473396301,
+        0.7709260582923889
+      ],
+      "stem_conv_norm": 2.578526496887207,
+      "stem_bn_weight_norm": 2.1421730518341064
+    },
+    "repaired": {
+      "path": "work_dirs/unclipped_round_20260913/adaptive_prefix/recovery_last.pt",
+      "dimensionless_min": [
+        -0.01618352346122265,
+        0.24706187844276428,
+        0.7058006525039673
+      ],
+      "dimensionless_max": [
+        0.04525700956583023,
+        0.5132311582565308,
+        0.7852240800857544
+      ],
+      "stem_conv_norm": 2.0894505977630615,
+      "stem_bn_weight_norm": 1.7639155387878418
+    }
+  },
+  "metric_validity": "invalid diagnostic: nonfinite embeddings are zeroed by existing evaluator; not qualifying accuracy"
+}
