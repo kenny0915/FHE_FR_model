@@ -403,3 +403,12 @@ was produced. The identical configuration was resubmitted as job 380052 on
 nodes 176–177, excluding the failed allocation's nodes 143–144. This is an
 infrastructure retry, not another model strategy. submission.json and the
 campaign ledger retain both job IDs and the failure reason.
+
+D retry 380052 reached training successfully and its saved configuration
+matches the predeclared policy. Epoch 0's complete MS1MV3 holdout check gave
+clean/flip TAR@FAR=1e-4 0.9789798260, low-resolution/selection TAR 0.6402614117,
+and zero non-finite module observations across 55,460 forwards. Embedding
+absolute maximum was 9.3622579575; the largest pre-clamp activation-input /
+radius ratio was 7.2749419212. The bounds remain active during inference.
+This is a promising internal result, not an IJBC result. D continues its
+planned eight epochs with checkpoint selection based solely on the holdout.
