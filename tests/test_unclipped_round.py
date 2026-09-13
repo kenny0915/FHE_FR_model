@@ -115,3 +115,28 @@ def test_shared_repair_resume_cannot_extend_campaign_deadline():
     args.deadline = 1235
     with pytest.raises(ValueError, match='deadline'):
         recovery.validate_resume(state, source, args, set(), 25)
+
+
+def test_controller_resume_monitors_existing_evaluation_without_resubmission(tmp_path, monkeypatch):
+    import time
+    from controlled_degree2 import unclipped_campaign as campaign
+    checkpoint = tmp_path/'gradual'/'last.pt'
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b'fixture')
+    run = dict(name='gradual', training_job='123', training_state='FAILED',
+               checkpoint=str(checkpoint), checkpoint_sha256='fixed', evaluation_job='124')
+    (tmp_path/'campaign.json').write_text(json.dumps(dict(status='running', started=time.time()-100,
+        deadline=time.time()+1000, source_sha256='fixed', attempts=[run])))
+    monkeypatch.setattr(campaign, 'POLICIES', {'gradual': campaign.POLICIES['gradual']})
+    monkeypatch.setattr(campaign, 'digest', lambda _: 'fixed')
+    monkeypatch.setattr(torch, 'load', lambda *a, **k: dict(network='r50_shared_d2', inference_input_bounds=False,
+                                                         development={'nonfinite':0, 'tar_1e4':.5}))
+    waited = []
+    monkeypatch.setattr(campaign, 'wait_job', lambda job, deadline: waited.append(job) or 'COMPLETED')
+    monkeypatch.setattr(campaign, 'submit', lambda *a, **k: pytest.fail('must not resubmit a recorded job'))
+    monkeypatch.setattr(campaign, 'result', lambda _: dict(target_met=True))
+    monkeypatch.setattr('controlled_degree2.campaign_accounting.collect', lambda _: {})
+    campaign.run(SimpleNamespace(root=str(tmp_path), resume=True))
+    state = json.loads((tmp_path/'campaign.json').read_text())
+    assert waited == ['124'] and state['status'] == 'target_met'
+    assert len(state['attempts']) == 1 and state['attempts'][0]['evaluation_job'] == '124'

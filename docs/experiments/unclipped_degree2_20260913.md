@@ -146,3 +146,33 @@ source graph and serialized/reloaded polynomial export. Maximum embedding
 difference 2.3841857910e-6. Source rows and boundary audits are in
 work_dirs/unclipped_round_20260913/gradual/early_export_probe.json. This is
 four-forward export validation, not a model-selection or dataset-wide gate.
+
+07:19 UTC decision: gradual training job 380603 failed after 22m03s, in epoch
+2 shortly after opening site nine. The finite-embedding guard passed, but the
+subsequent training-loss guard failed. This does not identify a particular
+layer as the cause; the unclipped prefix can yield very large finite values
+whose training range penalties overflow even while the bounded suffix keeps
+embeddings finite. No update with the bad loss was taken.
+
+The predeclared diagnostic last-checkpoint evaluation is job 380686, using
+saved epoch 1 (SHA-256
+89e752090600d235dd1bf6f6b9b46a8bccb3a37034dc7b9bd7419d63a93fb818). It never
+reached ordinary full-curriculum holdout selection. Final test results remain
+unavailable at this decision point; no IJBC metric or failing image is used.
+
+Prioritize the prepared adaptive-prefix strategy after the unchanged projected
+arm, ahead of the remaining slower fixed curricula. This allocation revision
+is supported by the two MS1MV3 failures, not IJBC. Its maximum training and
+accuracy allocation is 24 hours within the common deadline; the remaining
+fixed alternatives retain their original policies and six-hour caps. Stop
+immediately if a final candidate meets the target instead of launching more.
+
+The controller is being resumed against the existing ledger/evaluation job;
+recorded jobs are monitored, never blindly resubmitted. A process lock prevents
+duplicate controllers. The old/new policy lists and reason are preserved in
+campaign.json. Fixed diagnostic checkpoints additionally receive the full
+MS1MV3 holdout report after their IJBC allocation finishes but before the
+controller consumes the IJBC metric. This supplies missing non-IJBC reporting;
+it does not reselect or alter a checkpoint. All allocations remain sequential.
+The standalone holdout job rechecks the saved split hash and checkpoint hash.
+Ten focused tests pass, including restart without duplicate submission.
