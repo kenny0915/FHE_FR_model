@@ -341,3 +341,23 @@ After the user's interruption/continue, the original Slurm allocation stayed
 active. The local controller was restarted with --resume and the existing job
 ID; no training job was resubmitted. The event is recorded in the allocation
 log.
+
+## Adaptive repair through 4,000 updates and persistent controller
+
+The 3,500 / 3,750 / 4,000-update gates reached maximum ratios
+3.5141997 / 3.3697522 / 3.2372344, respectively, each with zero non-finite
+prefix observations on 40,960 fixed training forwards. The arm still has
+not opened site two. Marginal improvement is slowing; there is no held-out
+accuracy or final IJBC result from this arm yet. The revised 12-hour cap
+remains in force. Seventeen focused tests passed for the allocation revision
+(committed/pushed as 61759a9), including distinguishing per-attempt timeout
+from global exhaustion and waiting for cancelled resources to be released.
+
+The controller now runs detached via subprocess.Popen(start_new_session=True),
+with stdin redirected to DEVNULL and stdout/stderr to the campaign's
+controller.log. Its PID and session ID were verified to match after the
+launching process exited. This prevents a chat/tool interruption from killing
+budget enforcement or the sequential follow-up pipeline. The process lock
+and --resume job-ID checks remain in use. No GPU job was restarted.
+The budget snapshot at about 10:05 UTC recorded 3.4206 wall hours used,
+44.5794 remaining, and 38.0006 allocated GPU-hours.
