@@ -412,3 +412,9 @@ absolute maximum was 9.3622579575; the largest pre-clamp activation-input /
 radius ratio was 7.2749419212. The bounds remain active during inference.
 This is a promising internal result, not an IJBC result. D continues its
 planned eight epochs with checkpoint selection based solely on the holdout.
+
+D epoch 1 improved clean/flip TAR@FAR=1e-4 to 0.9799963832 and low-resolution /
+selection TAR to 0.6486113667. The complete holdout audit again had zero
+non-finite observations. Embedding absolute maximum was 9.4886198044 and the
+pre-clamp activation-input/radius maximum was 7.2338681221. D continued into
+epoch 2 without any policy change or IJBC evaluation.
