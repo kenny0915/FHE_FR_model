@@ -19,6 +19,10 @@ POLICIES = {
                              range_weight=1, bn='train'),
     'adaptive_bn': dict(unclip=0, cap=.05, epochs=24, lr=.001, coeff=.0001,
                         range_weight=5, bn='train'),
+    # The original control was externally cancelled before saving a checkpoint.
+    # Repeat its unchanged policy in a fresh directory, retaining both records.
+    'adaptive_bn_free_retry': dict(unclip=0, cap=0, epochs=24, lr=.0002, coeff=.00002,
+                                  range_weight=1, bn='train'),
     'adaptive_bn_moderate': dict(unclip=0, cap=.15, epochs=24, lr=.001, coeff=.0001,
                                  range_weight=5, bn='train'),
     'range_first': dict(mode='gated', accuracy_epochs=24, training_cap_hours=12,
@@ -149,7 +153,7 @@ def run(args):
         raise ValueError('warm-start source changed since campaign began')
     if state.get('policies') and state['policies'] != POLICIES:
         state.setdefault('policy_history', []).append(dict(at=time.time(), policies=state['policies'],
-            reason='Add BN-adaptive control preserving source coefficients and direct-arm learning rates, based on direct MS first-batch failure and source coefficient scale inspection; no IJBC score sets this policy'))
+            reason='Retry externally cancelled BN control with unchanged parameters and fresh output; original job had no checkpoint. Current BN trial and global deadline unchanged; no IJBC score sets this policy.'))
     state.update(status='running', policies=POLICIES, source_sha256=source_sha, controller_pid=os.getpid())
     snapshot(path, state)
     for name, policy in POLICIES.items():

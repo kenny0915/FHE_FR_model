@@ -550,3 +550,11 @@ remain in force. Allocation decisions are appended to the existing ledger.
 Validation before resumption: 34 focused tests passed in
 `test_unclipped_round.py`, `test_shared_degree2.py`, and
 `test_shared_campaign.py` (four PyTorch deprecation warnings).
+
+The externally cancelled source-preserving BN control is scheduled again as
+`adaptive_bn_free_retry` after the current .05-cap trial, in a fresh output
+directory with exactly the original parameters. The original cancelled
+record is retained. This fills a missing comparison, not a response to an
+IJBC metric; no BN candidate has received final IJBC evaluation at this
+decision. The retry is capped at six hours and the common deadline still
+wins. The running job's policy and allocation are unchanged.
