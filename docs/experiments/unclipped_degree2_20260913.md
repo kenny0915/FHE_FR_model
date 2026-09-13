@@ -188,3 +188,24 @@ checkpoint. An IJBC-only pass cannot override an observed internal failure or
 an unavailable internal audit. Twelve focused controller/export/recovery tests
 pass, including this combined success gate, before any new final metric is
 consumed. No training parameters change from these orchestration checks.
+
+## Gradual final diagnostic outcome; projected arm starts unchanged
+
+Final IJBC 380686 and fixed MS1MV3 holdout 380728 completed. The epoch-1
+checkpoint's MS1MV3 audit observed 2,379,654,743 non-finite values (repeated
+module boundaries plus invalid embeddings/norms) across 55,460 forwards;
+verification TAR was therefore withheld. Its IJBC export was structurally
+polynomial but produced 25,541 non-finite augmented embedding rows among
+938,750 original/flip forwards, and 30,625,358,238 non-finite boundary values.
+The reported TAR was 2.7560464284% at requested FAR=1e-4 (actual nearest FAR
+.00010000682911083698). This is a **diagnostic, invalid** accuracy result:
+the existing evaluator replaces bad features with zero. The candidate fails
+numerical validity regardless of that number. The corresponding compact
+report is unclipped_degree2_gradual_result.json.
+
+Projector job 380734 started on 16 H200s, nodes 018–019, with the original
+predeclared cap .15, six-epoch clamp curriculum, 18 total epochs, backbone LR
+.0005, coefficient LR .00005, range weight 5, and a fresh start from D. No
+parameter was changed in response to the gradual candidate's IJBC result.
+The training-data-gated fallback was already prepared and prioritized before
+that result existed. Its GPU smoke remains required before full repair.

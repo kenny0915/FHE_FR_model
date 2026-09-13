@@ -1,0 +1,36 @@
+{
+  "strategy": {
+    "unclip": 6,
+    "cap": 0,
+    "epochs": 18,
+    "lr": 0.0005,
+    "coeff": 5e-05,
+    "range_weight": 5
+  },
+  "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/unclipped_round_20260913/gradual/last.pt",
+  "checkpoint_sha256": "89e752090600d235dd1bf6f6b9b46a8bccb3a37034dc7b9bd7419d63a93fb818",
+  "selected_epoch": 1,
+  "selection": "diagnostic last checkpoint; no valid holdout candidate",
+  "training_job": "380603",
+  "evaluation_job": "380686",
+  "development_job": "380728",
+  "internal_validation": {
+    "nonfinite_observations": 2379654743,
+    "source_images": 11092,
+    "forwards": 55460,
+    "tar_at_far_1e4": null,
+    "reason": "non-finite audit; accuracy withheld"
+  },
+  "ijbc": {
+    "tar_at_far_1e4_percent": 2.756046428388812,
+    "actual_far": 0.00010000682911083698,
+    "nonfinite_embedding_rows": 25541,
+    "nonfinite_observations": 30625358238,
+    "metric_valid": false,
+    "source_images": 469375,
+    "original_flip_forwards": 938750
+  },
+  "pure_polynomial_export": true,
+  "target_met": false,
+  "interpretation": "Numerical failure; diagnostic IJBC score includes existing evaluator zero replacement and cannot qualify. Not used for tuning."
+}
