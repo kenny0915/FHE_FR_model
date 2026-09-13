@@ -426,8 +426,23 @@ Subsequent D holdout checks (TAR at FAR=1e-4; all 55,460 forwards audited):
 | 2 | 0.9807587862 | 0.6557269692 | 0 |
 | 3 | 0.9807950854 | 0.6549283266 | 0 |
 | 4 | 0.9810491800 | 0.6654565334 | 0 |
+| 5 | 0.9812670350 | 0.6664004326 | 0 |
+| 6 | 0.9815937281 | 0.6686149836 | 0 |
 
 Epoch 4 became the selected checkpoint after improving the internal selection
 score. Its embedding absolute maximum was 8.8295249939 and pre-clamp input /
 radius maximum was 6.9015088081. D continued into epoch 5 of its planned eight
 epochs. No D IJBC evaluation has run and no policy has changed.
+
+Before D's final IJBC evaluation, reserve a possible E continuation based only
+on D's improving MS1MV3 results and remaining clean-holdout gap to the teacher
+(0.9815937281 versus 0.9901615381 at epoch 6). If the campaign still needs a
+candidate, E will warm-start from D's internally selected final checkpoint,
+retain the same fixed input bounds and frozen BN statistics, and train all
+quadratics from the first step with a fresh optimizer for 16 epochs. Backbone
+LR .0005, coefficient LR .00005, head LR .0025, zero head warmup; same
+MS1MV3 preparation, augmentation, objectives and internal selection criterion.
+Reserve up to four training hours plus the existing final-evaluation cap,
+always bounded by the absolute campaign deadline. No E job is submitted now.
+This policy is fixed before D IJBC is observed; an IJBC success ends the
+campaign, while a failure does not determine any E parameter or coefficient.
