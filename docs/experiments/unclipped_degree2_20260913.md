@@ -229,3 +229,31 @@ continuation without mismatching checkpoint epochs. Legacy recovery namespaces
 that predate the new optional flags remain accepted by the resume-policy
 check. Twenty-nine focused recipe/recovery/campaign tests passed after these
 changes. The two already-failed training runs are not changed retroactively.
+
+## Projected final diagnostic result and gated repair execution
+
+Projected final IJBC 380792 and fixed holdout 380893 completed. The holdout
+observed 223,296,064 non-finite values across 55,460 forwards, so TAR was
+withheld. IJBC reported 18.9139438564% TAR at requested FAR=1e-4 (actual
+.00009994288612547199), but 4,287 of 938,750 augmented embedding rows were
+non-finite, with 1,290,206,600 non-finite boundary observations. This remains
+an **invalid diagnostic** score despite the structurally polynomial export.
+See unclipped_degree2_projected_result.json. It does not establish a valid
+accuracy improvement and is not used to tune subsequent parameters.
+
+Gated smoke 380897 completed on H200 x16 with two joint updates and
+JOINT_SMOKE_OK. It trained 234 tensors (Conv/spatial-BN tensors plus 25 shared
+coefficient triplets), changed the stem convolution by up to .00010278821,
+and passed frozen-tensor checks on save. Its 160-forward first-site gate was
+finite but had maximum ratio 6.4301, above the advancement threshold. This
+is execution validation of the training machinery, not deployment safety.
+
+Full gated repair 380900 started on nodes 173–174 after smoke completion,
+using the unchanged declared policy and the original D source. Main batch is
+2048 across 16 H200s, plus up to 512 exact replay/prefix probes per update.
+The production first-site gate covers 40,960 training forwards: initial max
+ratio 6.8518133, after 250 updates 6.8157592. Both prefix gates have zero
+non-finite rows, but neither passes the <=2 advancement criterion. The suffix
+remains a training-only bounded auxiliary computation. No all-25 unclipped
+inference claim is made. Further allocation decisions will use these MS1MV3
+measurements only; no new IJBC evaluation is used during repair.

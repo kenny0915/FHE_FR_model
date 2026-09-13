@@ -1,0 +1,36 @@
+{
+  "strategy": {
+    "unclip": 6,
+    "cap": 0.15,
+    "epochs": 18,
+    "lr": 0.0005,
+    "coeff": 5e-05,
+    "range_weight": 5
+  },
+  "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/unclipped_round_20260913/projected/last.pt",
+  "checkpoint_sha256": "f55ea7cc2b510e2a7d21911859c51f829a83d01d1055d41959530cdb0bd35c07",
+  "selected_epoch": 1,
+  "selection": "diagnostic last checkpoint; no valid holdout candidate",
+  "training_job": "380734",
+  "evaluation_job": "380792",
+  "development_job": "380893",
+  "internal_validation": {
+    "nonfinite_observations": 223296064,
+    "source_images": 11092,
+    "forwards": 55460,
+    "tar_at_far_1e4": null,
+    "reason": "non-finite audit; accuracy withheld"
+  },
+  "ijbc": {
+    "tar_at_far_1e4_percent": 18.913943856419696,
+    "actual_far": 9.994288612547199e-05,
+    "nonfinite_embedding_rows": 4287,
+    "nonfinite_observations": 1290206600,
+    "metric_valid": false,
+    "source_images": 469375,
+    "original_flip_forwards": 938750
+  },
+  "pure_polynomial_export": true,
+  "target_met": false,
+  "interpretation": "Numerical failure. Diagnostic score includes existing evaluator zero replacement and cannot qualify. Not used for tuning."
+}
