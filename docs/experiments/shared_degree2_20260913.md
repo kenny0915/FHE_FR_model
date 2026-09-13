@@ -374,3 +374,25 @@ token-service and submission-failed diagnostics), at most three attempts with
 are not retried. Six campaign tests passed, including the retry limit and
 non-retry cases. This applies to subsequent submissions; C's live evaluation
 is unchanged.
+
+## C final diagnostic result and D launch
+
+C final evaluation 380032 completed. The existing ROC procedure reported
+diagnostic TAR 0.00% at requested FAR=0.1 (selected ROC point FAR=0.0).
+938,647 of 938,750 augmented embedding rows were non-finite, and the audit
+counted 27,439,355,249,656 non-finite module observations including repeated
+boundaries and diagnostic replays. The evaluator's zero replacement makes this
+a diagnostic score only. C fails the inference-stability and accuracy goals;
+its training had already failed on MS1MV3 before full holdout validation.
+shared_degree2_C_result.json records the exact result and audit digest.
+
+D training job 380050 started on 16 H200 GPUs, nodes 143–144, after C's
+evaluation allocation ended. It reuses the previously staged preparation and
+A epoch-2 warm start, with all quadratics active from the first step, persistent
+MS1MV3 input bounds, frozen BN statistics, eight epochs, backbone LR .001,
+coefficient LR .0001, and head LR .005. No warmup or old optimizer momentum is
+used. The training allocation is capped at three hours; the campaign deadline
+remains 2026-09-14 18:27 UTC. About six wall-clock hours have elapsed.
+D's bounds introduce comparisons and are explicitly marked in its network and
+checkpoint metadata; this is not a purely polynomial encrypted path. The D
+policy was declared from A's internal evidence before any final IJBC result.

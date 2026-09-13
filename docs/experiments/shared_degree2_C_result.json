@@ -1,0 +1,31 @@
+{
+  "attempt": "C",
+  "strategy": {
+    "SHARED_INIT": "fit",
+    "SHARED_BN": "frozen",
+    "SHARED_CONVERSION": "6",
+    "SHARED_EPOCHS": "16",
+    "SHARED_COEFF_LR": ".00005"
+  },
+  "selected_epoch": 5,
+  "checkpoint_sha256": "04278668d2089728a7b1dd9007f81382113bb5c26ebbc008f42940d59b331f82",
+  "training_job": "379956",
+  "evaluation_job": "380032",
+  "training_failure": "Non-finite training embeddings at bound removal in epoch 6; finite guard aborted before invalid optimizer update",
+  "development": null,
+  "development_unavailable_reason": "Training failed before the first full-quadratic holdout evaluation; last completed checkpoint was from conversion epoch 5",
+  "completed_full_quadratic_training": false,
+  "ijbc": {
+    "requested_far": 0.1,
+    "tar_percent": 0.0,
+    "actual_far": 0.0,
+    "source_images": 469375,
+    "original_plus_flip_forwards": 938750,
+    "nonfinite_augmented_embedding_rows": 938647,
+    "nonfinite_module_observations": 27439355249656,
+    "audit_sha256": "306ef5cc49d02d7009a7ddf11bd8e5383d417f88c98854b6972c6ab328463735",
+    "interpretation": "Diagnostic only: existing evaluator replaces non-finite features with zero. Counts include repeated module boundaries and diagnostic replays. All 25 sites were quadratic and unbounded in inference."
+  },
+  "target_met": false,
+  "next_strategy_policy_fixed_before_ijbc": true
+}
