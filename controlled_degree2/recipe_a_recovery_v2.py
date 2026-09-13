@@ -10,6 +10,7 @@ import copy
 import itertools
 import json
 import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,12 +33,18 @@ FIXED_POLICY = ('seed', 'lr', 'target', 'guard', 'gate_ratio', 'gate_images',
                 'replay_batch_size', 'check_every', 'continuation_lr_factor')
 
 
-def joint_parameters(model):
+def joint_parameters(model, train_coefficients=False):
     model.requires_grad_(False)
     for module in model.modules():
         if isinstance(module, (nn.Conv2d, nn.BatchNorm2d)):
             for parameter in module.parameters(recurse=False):
                 parameter.requires_grad_(True)
+    if train_coefficients:
+        from controlled_degree2.shared import SharedQuadratic
+        for module in quadratic_modules(model):
+            if not isinstance(module, SharedQuadratic) or module.coeffs.shape != (1, 3):
+                raise ValueError('trainable recovery coefficients must be layer-shared')
+            module.coeffs.requires_grad_(True)
     return [(name, p) for name, p in model.named_parameters() if p.requires_grad]
 
 
@@ -67,11 +74,14 @@ def validate_state(state, original, allowed):
 
 def validate_resume(state, source, args, allowed, site_count):
     recovery = state.get('recovery', {})
-    if recovery.get('policy') != POLICY or state.get('provenance') != source['provenance']:
+    from controlled_degree2.shared_recovery_support import POLICY as SHARED_POLICY
+    expected_policy = SHARED_POLICY if getattr(args, 'shared', False) else POLICY
+    if recovery.get('policy') != expected_policy or state.get('provenance') != source['provenance']:
         raise ValueError('not a compatible A-v2 recovery checkpoint')
     if recovery.get('source_sha256') != args.source_sha256:
         raise ValueError('recovery source checksum mismatch')
-    for key in FIXED_POLICY:
+    policy_keys = FIXED_POLICY + (('accuracy_epochs', 'deadline') if getattr(args, 'shared', False) else ())
+    for key in policy_keys:
         if recovery['config'][key] != getattr(args, key):
             raise ValueError(f'resume changes policy: {key}')
     if not 1 <= recovery['site'] <= site_count or recovery['step'] < 0:
@@ -212,17 +222,27 @@ def update(model, teacher, head, images, labels, mask, replay, site, parameters,
 
 def run(args, rank, world, device):
     root = Path(args.output)
+    shared = bool(getattr(args, 'shared', False))
+    if shared:
+        from controlled_degree2 import shared_recovery_support as support
+    policy = support.POLICY if shared else POLICY
     if rank == 0:
         if not args.reuse_output:
-            snapshot_source(args.source, root)
+            if shared:
+                support.snapshot_source(args.source, root, args.source_checkpoint)
+            else:
+                snapshot_source(args.source, root)
     barrier()
     source_record = json.loads((root/'recovery_source.json').read_text())
     args.source_sha256 = source_record['source_sha256']
-    if digest(root/'source_epoch8.pt') != args.source_sha256:
+    source_path = root/source_record.get('snapshot', 'source_epoch8.pt')
+    if digest(source_path) != args.source_sha256:
         raise ValueError('source snapshot checksum mismatch')
-    payload = torch.load(root/'source_epoch8.pt', map_location='cpu', weights_only=False)
+    payload = torch.load(source_path, map_location='cpu', weights_only=False)
     prepared = torch.load(root/'prepared.pt', map_location='cpu', weights_only=False)
-    if payload.get('epoch') != 8 or payload.get('origin') != 'teacher_only_recipe_a':
+    if shared:
+        support.validate_source(payload)
+    elif payload.get('epoch') != 8 or payload.get('origin') != 'teacher_only_recipe_a':
         raise ValueError('v2 requires preserved teacher-only epoch 8')
     if payload['provenance'] != prepared['metadata'] or prepared['metadata']['config'].get('smoke'):
         raise ValueError('invalid preparation provenance')
@@ -234,10 +254,14 @@ def run(args, rank, world, device):
         raise ValueError('teacher/split checksum mismatch')
     split = np.load(root/'split.npz')
     check_split(split, prepared['active_ids'])
-    model = build_controlled_iresnet50(dropout=0, fp16=False).to(device)
+    if shared:
+        from controlled_degree2.shared import build_shared_iresnet50
+        model = build_shared_iresnet50(dropout=0, fp16=False).to(device)
+    else:
+        model = build_controlled_iresnet50(dropout=0, fp16=False).to(device)
     model.load_state_dict(payload['state_dict_backbone'], strict=True)
     sites = sitewise(model)
-    named = joint_parameters(model)
+    named = joint_parameters(model, train_coefficients=shared)
     allowed, parameters = set(n for n, p in named), tuple(p for n, p in named)
     validate_state(model.state_dict(), payload['state_dict_backbone'], allowed)
     teacher = load_teacher(config['teacher'], device).eval().requires_grad_(False)
@@ -248,6 +272,8 @@ def run(args, rank, world, device):
     continuation_config = dict(config)
     for key in ('lr', 'head_lr'):
         continuation_config[key] *= args.continuation_lr_factor
+    if shared:
+        continuation_config = support.continuation_config(continuation_config, args)
     start_site, start_step, ready, last_report = 1, 0, False, None
     cursor_replay = []
     resume = root/'recovery_last.pt' if args.reuse_output else Path(args.resume) if args.resume else None
@@ -267,17 +293,23 @@ def run(args, rank, world, device):
     sampler = DistributedSampler(split['train'], num_replicas=world, rank=rank, seed=args.seed, drop_last=True)
     batches = loader(args, split['train'], split['labels'], sampler=sampler)
     if rank == 0:
-        (root/'recovery_v2_config.json').write_text(json.dumps(dict(vars(args), policy=POLICY, sites=sites, trainable=sorted(allowed)), indent=2))
+        (root/'recovery_v2_config.json').write_text(json.dumps(dict(vars(args), policy=policy, sites=sites, trainable=sorted(allowed)), indent=2))
 
     def save(name, site, step, report, records, is_ready=False):
         if rank != 0:
             return
         validate_state(model.state_dict(), payload['state_dict_backbone'], allowed)
-        extra = dict(epoch=8, best=-1., config=continuation_config, provenance=prepared['metadata'],
+        extra = dict(epoch=-1 if shared else 8, best=-1., config=continuation_config, provenance=prepared['metadata'],
                      head=payload['head'], origin='teacher_only_recipe_a', pure_quadratic=is_ready,
                      recovery_optimizer=optimizer.state_dict(),
-                     recovery=dict(policy=POLICY, site=site, step=step, ready=is_ready,
+                     recovery=dict(policy=policy, site=site, step=step, ready=is_ready,
                                    source_sha256=args.source_sha256, config=vars(args), gate=report, replay=records))
+        if shared:
+            extra.update(network='r50_shared_d2', format='fhe-fr/shared-degree2-v1',
+                         origin='shared_sitewise_recovery', inference_input_bounds=False,
+                         fhe_requires_comparisons=False, all_activations_quadratic=True,
+                         approximation_target='pooled PReLU on inherited MS1MV3 per-layer intervals',
+                         interval='per-layer [-radius, radius]', development={'phase': 'training-only repair'})
         extra['optimizer'] = copy.deepcopy(payload['optimizer'])
         extra['optimizer']['state'] = {}
         save_checkpoint(str(root/(name+'.tmp')), model, prepared['calibration'], teacher_weights=config['teacher'], extra=extra)
@@ -301,6 +333,10 @@ def run(args, rank, world, device):
         replay_iterator = iter(replay_batches) if replay_batches is not None else None
         initial = model.conv1.weight.detach().clone() if args.smoke else None
         for step in itertools.count(offset+1):
+            if getattr(args, 'deadline', 0.) and time.time() >= args.deadline:
+                save('recovery_last.pt', site, step-1, last_report, records)
+                barrier()
+                raise TimeoutError('shared recovery campaign deadline reached')
             try:
                 images, labels, _ = next(iterator)
             except StopIteration:
@@ -384,6 +420,10 @@ def run(args, rank, world, device):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--shared', action='store_true')
+    parser.add_argument('--source-checkpoint', default='continuation_best.pt')
+    parser.add_argument('--deadline', type=float, default=0.)
+    parser.add_argument('--accuracy-epochs', type=int, default=24)
     parser.add_argument('--source', default='work_dirs/recipe_a_376833')
     parser.add_argument('--output', required=True)
     parser.add_argument('--resume')
@@ -406,6 +446,8 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--continue-training', action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
+    if args.shared and (args.deadline <= time.time() or args.accuracy_epochs <= 0):
+        parser.error('shared repair requires a future campaign deadline and positive accuracy epochs')
     if not 0 < args.target < args.guard <= args.gate_ratio or not 0 < args.continuation_lr_factor <= 1:
         parser.error('invalid boundaries/continuation rate')
     if min(args.batch_size, args.replay_batch_size, args.gate_images, args.check_every, args.save_every,

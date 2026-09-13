@@ -78,3 +78,40 @@ def test_allocation_counts_failed_jobs_and_actual_elapsed():
                         '124|RUNNING|60|s|Unknown|node|gres/gpu=1'])
     assert report['allocated_gpu_hours'] == pytest.approx((120*16+60)/3600)
     assert len(report['allocations']) == 2
+
+
+def test_shared_recovery_admission_and_unbounded_handoff():
+    from controlled_degree2.shared_recovery_support import validate_source, continuation_config
+    payload = dict(network='r50_shared_d2_bounded', head={}, optimizer={},
+                   state_dict_backbone={f'site{i}.coeffs': torch.ones(1, 3) for i in range(25)})
+    validate_source(payload)
+    payload['state_dict_backbone']['site0.coeffs'] = torch.ones(3, 3)
+    with pytest.raises(ValueError, match='75'):
+        validate_source(payload)
+    config = continuation_config(dict(inference_bound=True, warm_start='old.pt'),
+                                 SimpleNamespace(accuracy_epochs=24, deadline=1234))
+    assert not config['inference_bound'] and config['unclipped_continuation']
+    assert config['unclip_epochs'] == 0 and config['warm_start'] is None
+    assert config['deadline'] == 1234 and config['epochs'] == 24
+
+
+def test_shared_recovery_opens_only_shared_coefficients():
+    from controlled_degree2.recipe_a_recovery_v2 import joint_parameters
+    q = model()
+    named = dict(joint_parameters(q, train_coefficients=True))
+    assert '2.coeffs' in named and named['2.coeffs'].shape == (1, 3)
+    assert q[1].running_mean.requires_grad is False
+
+
+def test_shared_repair_resume_cannot_extend_campaign_deadline():
+    from controlled_degree2 import recipe_a_recovery_v2 as recovery
+    from controlled_degree2.shared_recovery_support import POLICY
+    args = SimpleNamespace(**dict.fromkeys(recovery.FIXED_POLICY, 1),
+                           shared=True, source_sha256='source', accuracy_epochs=24, deadline=1234)
+    source = dict(provenance={}, state_dict_backbone={'weight': torch.ones(1)})
+    state = dict(source, recovery=dict(policy=POLICY, source_sha256='source',
+                                      config=vars(args).copy(), site=1, step=0))
+    recovery.validate_resume(state, source, args, set(), 25)
+    args.deadline = 1235
+    with pytest.raises(ValueError, match='deadline'):
+        recovery.validate_resume(state, source, args, set(), 25)

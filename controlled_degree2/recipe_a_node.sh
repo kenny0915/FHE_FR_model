@@ -18,6 +18,10 @@ if [[ "$1" == recovery || "$1" == recovery-v2 ]]; then
     if [[ "$1" == recovery-v2 ]]; then
         recovery_module=controlled_degree2.recipe_a_recovery_v2
     fi
+    if [[ "${SHARED_RECOVERY:-0}" == 1 ]]; then
+        extra+=(--shared --source-checkpoint "${RECOVERY_CHECKPOINT:-continuation_best.pt}"
+                --deadline "${SHARED_DEADLINE:?}" --accuracy-epochs "${RECOVERY_ACCURACY_EPOCHS:-24}")
+    fi
     if [[ -n "${RECOVERY_RESUME:-}" ]]; then
         extra+=(--resume "$RECOVERY_RESUME")
     fi

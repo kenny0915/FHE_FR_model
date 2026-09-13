@@ -100,3 +100,49 @@ than requested time limits. Its Slurm start/end timestamps are cluster-local
 Asia/Taipei; collection/deadline timestamps use UTC. Code/test commit a1f1a29
 is pushed to origin/main. Six additional focused tests pass after adding the
 read-only accounting utility (26 tests total across the relevant suites).
+
+## Conditional training-data-gated repair, prepared before new IJBC results
+
+The direct run's first-batch non-finites motivate an adaptive alternative if
+the fixed curricula cannot safely remove all clamps. This reuses the existing
+sitewise finite-prefix repair machinery, now admitting the same shared D
+source with strict provenance and exactly 75 trainable polynomial coefficients.
+It is prepared, not yet submitted, and does not replace a running policy.
+Reserve remaining time (up to 24 hours including accuracy continuation, plus
+final evaluation), always within the same absolute campaign deadline.
+
+Repair Conv weights, spatial BN affines and shared coefficients jointly;
+keep BN running moments, embedding projection and classifier fixed. Training
+uses a bounded auxiliary teacher embedding/all-block hint/ArcFace objective
+and an all-site maximum range penalty targeting .9 of each original MS1MV3
+radius. A separate candidate-prefix pass stops *before* an escaping square,
+so finite prefix gradients can repair the failure without backpropagating
+through Inf/NaN. These training guards are absent from candidate deployment.
+Use the existing globally averaged conflict-aware gradient combination, SGD
+LR 1e-4, per-tensor actual-update cap 1e-4, and exact training-row/variant replay.
+Unlike the old per-channel repair, all 75 shared coefficients may adapt.
+
+Open sites in forward order only after the existing 8192-training-image
+clean/flip/lowres/shift/dark gate reports exactly 40960 rows, no non-finite
+values, and maximum normalized input ratio <=2. Recheck every 250 updates and
+save every 25. Once all 25 sites open, require a complete clean/flip MS1MV3
+training-corpus finite gate. Then run 24 epochs of ordinary *fully unclipped*
+accuracy training with fresh momentum, frozen BN, source backbone/head LRs
+scaled by .1 and coefficient LR .0001, selecting solely by the existing full
+holdout criterion. No IJBC image, failure manifest, range or score enters
+repair or handoff. The Slurm script has no automatic requeue past the deadline.
+Shared resume verifies the source, fixed repair policy, accuracy epochs and
+absolute deadline. Repaired interim checkpoints are diagnostic only until
+accuracy/finite validation and final exported IJBC checks actually pass.
+
+44 focused CPU tests passed after adding shared repair support; the final
+resume-deadline regression is checked separately. No H200 smoke or successful
+repair is claimed yet.
+
+Small export probe of gradual epoch 0 (SHA-256
+74e263232660ba2bcda70f9ff32afc7f1870537b39a135dcfbc7850d8643647a): MS1MV3
+holdout source rows 3053 and 3056, original and flip, were finite in both the
+source graph and serialized/reloaded polynomial export. Maximum embedding
+difference 2.3841857910e-6. Source rows and boundary audits are in
+work_dirs/unclipped_round_20260913/gradual/early_export_probe.json. This is
+four-forward export validation, not a model-selection or dataset-wide gate.
