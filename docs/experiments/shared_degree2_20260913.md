@@ -428,6 +428,7 @@ Subsequent D holdout checks (TAR at FAR=1e-4; all 55,460 forwards audited):
 | 4 | 0.9810491800 | 0.6654565334 | 0 |
 | 5 | 0.9812670350 | 0.6664004326 | 0 |
 | 6 | 0.9815937281 | 0.6686149836 | 0 |
+| 7 | 0.9817752838 | 0.6693773866 | 0 |
 
 Epoch 4 became the selected checkpoint after improving the internal selection
 score. Its embedding absolute maximum was 8.8295249939 and pre-clamp input /
@@ -446,3 +447,24 @@ Reserve up to four training hours plus the existing final-evaluation cap,
 always bounded by the absolute campaign deadline. No E job is submitted now.
 This policy is fixed before D IJBC is observed; an IJBC success ends the
 campaign, while a failure does not determine any E parameter or coefficient.
+
+D training 380052 completed all eight epochs. Epoch 7 was selected solely by
+the internal score above; all eight full holdout audits reported zero
+non-finite observations. Its embedding absolute maximum was 9.6122293472 and
+pre-clamp input/radius maximum was 6.8297877312. The selected model loaded
+strictly into r50_shared_d2_bounded, contained zero PReLU modules and exactly
+25 shared (1,3) coefficient tensors, and had finite saved parameters/buffers.
+Every quadratic term is nonzero and all inference bounds are active.
+
+Selected student_best.pt SHA-256:
+300dfe09bfcad28a2b5a5c2eeff359878b6bcc6cbae9d3991572f4e8113c5e6f.
+shared_degree2_D_coefficients.json records all coefficients and input bounds.
+The matching full training state is preserved in continuation_best.pt for
+the predeclared E option, SHA-256
+6495e8df88af083e1346961a7939e6c714cefbf2ff0bcbd0b4e992058bbd6324.
+The final backbone and head were verified to come from the same epoch before
+any D IJBC result was available.
+
+D final IJBC job 380135 was submitted after training completed, using the
+existing pipeline with network r50_shared_d2_bounded, all-boundary audit,
+and unrounded TAR sidecar. No model parameter is changed during evaluation.
