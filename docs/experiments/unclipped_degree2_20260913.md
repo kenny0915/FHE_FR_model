@@ -182,3 +182,9 @@ Gated repair additionally requires an isolated two-update H200 x16 smoke job
 source/head, gradients and checkpoint invariants with a 32-image training gate;
 full repair is not submitted unless Slurm completes and smoke.pt exists.
 This smoke is accounted separately and does not certify inference or accuracy.
+
+Success also requires a zero-nonfinite internal holdout report for the fixed
+checkpoint. An IJBC-only pass cannot override an observed internal failure or
+an unavailable internal audit. Twelve focused controller/export/recovery tests
+pass, including this combined success gate, before any new final metric is
+consumed. No training parameters change from these orchestration checks.

@@ -153,3 +153,11 @@ def test_failed_gated_smoke_blocks_full_allocation(tmp_path, monkeypatch):
     monkeypatch.setattr(campaign, 'submit', lambda *a, **k: pytest.fail('failed smoke must prevent allocation'))
     with pytest.raises(RuntimeError, match='smoke failed'):
         campaign.run(SimpleNamespace(root=str(tmp_path), resume=True))
+
+
+def test_test_success_cannot_override_internal_nonfinite_outputs():
+    from controlled_degree2.unclipped_campaign import qualifies
+    assert not qualifies({'target_met':True}, {'nonfinite':1})
+    assert not qualifies({'target_met':True}, {'unavailable':'failed validation'})
+    assert qualifies({'target_met':True}, {'nonfinite':0})
+    assert not qualifies({'target_met':False}, {'nonfinite':0})

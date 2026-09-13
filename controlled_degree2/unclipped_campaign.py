@@ -42,6 +42,10 @@ def result(root):
     return r
 
 
+def qualifies(evaluation, development):
+    return evaluation.get('target_met') is True and development.get('nonfinite') == 0
+
+
 def submit(script, name, variables, deadline, cap):
     env = dict(os.environ, **{k:str(v) for k,v in variables.items()})
     args = ['sbatch', '--parsable', '--job-name='+name, '--time='+remaining_limit(deadline, cap),
@@ -176,6 +180,7 @@ def run(args):
                     run['final_development'] = (json.loads(validation_result.read_text()) if validation_result.exists()
                                                 else {'unavailable': 'fixed holdout evaluation failed; see job log'})
                 run.update(result(final))
+                run['target_met'] = qualifies(run, run.get('final_development', run['development']))
             else:
                 run.update(ijbc_tar_at_far_1e4=None, target_met=False,
                            unavailable_reason='training failed before any completed checkpoint; no candidate to evaluate')
