@@ -70,3 +70,11 @@ def test_success_uses_strict_far_and_export_audit(tmp_path):
     assert result(tmp_path)['target_met']
     (tmp_path/'finite_audit.json').write_text(json.dumps(dict(nonfinite_values=1, embedding_nonfinite_rows=0)))
     assert not result(tmp_path)['target_met']
+
+
+def test_allocation_counts_failed_jobs_and_actual_elapsed():
+    from controlled_degree2.campaign_accounting import summarize
+    report = summarize(['123|FAILED|120|s|e|node|billing=128,gres/gpu=16',
+                        '124|RUNNING|60|s|Unknown|node|gres/gpu=1'])
+    assert report['allocated_gpu_hours'] == pytest.approx((120*16+60)/3600)
+    assert len(report['allocations']) == 2

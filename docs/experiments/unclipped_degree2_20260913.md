@@ -77,3 +77,26 @@ Implementation checks: 25 focused CPU tests, including coefficient projection,
 clamp curriculum, hidden nonlinearity rejection, full-backbone export,
 BatchNorm affine equivalence, warm-start provenance, and the strict FAR gate.
 Shell syntax and git whitespace checks also pass. GPU execution follows.
+
+## Execution log
+
+07:05 UTC: direct job 380601 failed at its first MS1MV3 training batch with
+non-finite embeddings, before any optimizer update or completed checkpoint.
+Elapsed allocation 148 seconds on 16 H200s. Internal student validation and
+final IJBC TAR are unavailable because it produced no trained candidate.
+The prior source is not silently substituted as a new trained model.
+
+Gradual job 380603 started at 06:55:36 UTC on nodes 018–019, 16 H200s. The
+teacher holdout reproduced clean TAR .9901615381 and lowres TAR .3457614779,
+with zero non-finite outputs. More than 2000 student updates have passed the
+training finite guards; several prefix clamps are removed, but the suffix
+still uses training-only clamps. This is not a full unclipped inference gate.
+No new IJBC result has been consumed. The fixed policies remain unchanged.
+
+Accounting snapshot at 07:05:31 UTC: .4253 elapsed wall hours, 3.3022 allocated
+GPU-hours including the failed direct job and elapsed gradual allocation.
+The live budget.json is generated from sacct ElapsedRaw and AllocTRES rather
+than requested time limits. Its Slurm start/end timestamps are cluster-local
+Asia/Taipei; collection/deadline timestamps use UTC. Code/test commit a1f1a29
+is pushed to origin/main. Six additional focused tests pass after adding the
+read-only accounting utility (26 tests total across the relevant suites).
