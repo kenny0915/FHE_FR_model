@@ -30,6 +30,17 @@ def status_command(*args):
     return subprocess.check_output(args, text=True, stderr=subprocess.PIPE, timeout=20).strip()
 
 
+def queue_state(job):
+    try:
+        return status_command('squeue', '-h', '-j', str(job), '-o', '%T')
+    except subprocess.CalledProcessError as error:
+        if 'invalid job id' in str(error.stderr).lower():
+            # A completed job may have aged out of the scheduler's cache.
+            # Still require a terminal accounting record before proceeding.
+            return ''
+        raise
+
+
 def wait_job(job, deadline):
     terminal = {'COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'OUT_OF_MEMORY',
                 'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL', 'DEADLINE', 'REVOKED', 'SPECIAL_EXIT'}
@@ -38,7 +49,7 @@ def wait_job(job, deadline):
             subprocess.run(['scancel', str(job)], check=True, timeout=20)
             raise TimeoutError(f'cancelled own job {job} at allocation deadline')
         try:
-            queued = status_command('squeue', '-h', '-j', str(job), '-o', '%T')
+            queued = queue_state(job)
             if not queued:
                 state = status_command('sacct', '-X', '-n', '-j', str(job),
                                        '--format=State%40', '--parsable2').split('|')[0].strip()

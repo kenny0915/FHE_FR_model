@@ -263,3 +263,19 @@ def test_status_failures_and_accounting_lag_do_not_end_monitoring(monkeypatch):
     assert campaign.wait_job('123', 100) == 'COMPLETED'
     assert queries == ['squeue', 'squeue', 'squeue', 'sacct', 'squeue', 'sacct']
     assert sleeps == [30, 30, 30]
+
+
+def test_completed_job_aged_out_of_queue_requires_accounting_confirmation(monkeypatch):
+    import subprocess
+    from controlled_degree2 import unclipped_campaign as campaign
+    queries = []
+    def query(*args):
+        queries.append(args[0])
+        if args[0] == 'squeue':
+            raise subprocess.CalledProcessError(1, args, stderr='slurm_load_jobs error: Invalid job id specified')
+        return 'CANCELLED by 12345'
+    monkeypatch.setattr(campaign, 'status_command', query)
+    monkeypatch.setattr(campaign.time, 'time', lambda: 0)
+    monkeypatch.setattr(campaign.time, 'sleep', lambda _: pytest.fail('terminal job is already confirmed'))
+    assert campaign.wait_job('123', 100) == 'CANCELLED by 12345'
+    assert queries == ['squeue', 'sacct']

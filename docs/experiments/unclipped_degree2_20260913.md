@@ -435,3 +435,8 @@ squeue, rather than treating accounting lag as completion. No GPU allocation
 was restarted. Nineteen focused tests passed, including transient status
 failure and delayed accounting without cancellation or duplicate submission.
 The controller is resumed against the same recorded job.
+
+Resume monitoring also recognizes an explicit invalid-job-ID response from
+squeue as a possible aged-out completed job, and requires a terminal sacct
+record before proceeding. Other query failures continue to retry. Twenty
+focused tests pass, including that aged-out-job case.
