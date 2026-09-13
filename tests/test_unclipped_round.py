@@ -181,3 +181,26 @@ def test_legacy_resume_namespace_may_omit_new_optional_flags():
     check_resume_policy(old_config, SimpleNamespace(**old_config))
     with pytest.raises(ValueError, match='lr'):
         check_resume_policy(old_config, SimpleNamespace(**(old_config | {'lr':.1})))
+
+
+def test_range_priority_preserves_range_descent_under_conflict():
+    from controlled_degree2.recipe_a_recovery_v2 import repair_gradients
+    p = nn.Parameter(torch.tensor([1., 0.]))
+    clean, tail = torch.tensor([-2., 1.]), torch.tensor([1., 0.])
+    args = SimpleNamespace(lr=.001, max_step_ratio=.001, gradient_priority='range')
+    gradients, stats = repair_gradients([p], [clean], [tail], args)
+    assert torch.dot(gradients[0], tail) > 0
+    assert torch.linalg.vector_norm(args.lr*gradients[0]) <= .00100001
+    assert stats['conflicts'] == 1
+    args.gradient_priority = 'clean'
+    gradients, _ = repair_gradients([p], [clean], [tail], args)
+    assert torch.dot(gradients[0], clean) > 0
+
+
+def test_repair_environment_declares_same_policy_for_smoke_and_training():
+    from controlled_degree2.unclipped_campaign import POLICIES, repair_variables
+    legacy = repair_variables(POLICIES['adaptive_prefix'])
+    assert legacy['RECOVERY_LR'] == .0001 and legacy['RECOVERY_GRADIENT_PRIORITY'] == 'clean'
+    proposed = repair_variables(POLICIES['range_first'])
+    assert proposed['RECOVERY_LR'] == .001 and proposed['RECOVERY_MAX_STEP_RATIO'] == .001
+    assert proposed['RECOVERY_GRADIENT_PRIORITY'] == 'range' and proposed['RECOVERY_MAX_SITE_UPDATES'] == 3000

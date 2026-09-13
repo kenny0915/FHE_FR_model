@@ -84,6 +84,9 @@ def validate_resume(state, source, args, allowed, site_count):
     for key in policy_keys:
         if recovery['config'][key] != getattr(args, key):
             raise ValueError(f'resume changes policy: {key}')
+    for key, default in (('gradient_priority', 'clean'), ('max_site_updates', 0)):
+        if recovery['config'].get(key, default) != getattr(args, key, default):
+            raise ValueError(f'resume changes policy: {key}')
     if not 1 <= recovery['site'] <= site_count or recovery['step'] < 0:
         raise ValueError('invalid recovery cursor')
     validate_state(state['state_dict_backbone'], source['state_dict_backbone'], allowed)
@@ -195,6 +198,19 @@ def global_gradients(loss, parameters, world, device, retain_graph=False):
     return result
 
 
+def repair_gradients(parameters, clean_gradients, tail_gradients, args):
+    """Choose the protected objective; all projection is training-only."""
+    priority = getattr(args, 'gradient_priority', 'clean')
+    if priority not in ('clean', 'range'):
+        raise ValueError('unknown repair gradient priority')
+    primary, secondary = ((tail_gradients, clean_gradients) if priority == 'range'
+                          else (clean_gradients, tail_gradients))
+    return combine_conflict_aware_gradients(
+        parameters, primary, secondary, learning_rate=args.lr,
+        tail_to_clean_ratio=1. if priority == 'range' else 10000.,
+        max_step_update_ratio=args.max_step_ratio)
+
+
 def update(model, teacher, head, images, labels, mask, replay, site, parameters, optimizer, args, world, device):
     optimizer.zero_grad(set_to_none=True)
     clean, broad_range, metrics = clipped_objectives(model, teacher, head, images, labels, mask, args)
@@ -210,9 +226,7 @@ def update(model, teacher, head, images, labels, mask, replay, site, parameters,
     tail_gradients = global_gradients(tail, parameters, world, device)
     # Project globally averaged objectives, so every rank makes the same
     # conflict decision. No momentum: the per-tensor cap bounds actual SGD.
-    combined, stats = combine_conflict_aware_gradients(
-        parameters, clean_gradients, tail_gradients, learning_rate=args.lr,
-        tail_to_clean_ratio=10000., max_step_update_ratio=args.max_step_ratio)
+    combined, stats = repair_gradients(parameters, clean_gradients, tail_gradients, args)
     require_finite(torch.cat([g.flatten() for g in combined]), device, 'v2 combined gradients')
     for parameter, gradient in zip(parameters, combined):
         parameter.grad = gradient
@@ -397,6 +411,10 @@ def run(args, rank, world, device):
                 save(f'site{site}.pt', site, step, last_report, records, ready)
                 barrier()
                 break
+            if getattr(args, 'max_site_updates', 0) and step >= args.max_site_updates:
+                if rank == 0:
+                    print(f'REPAIR_ALLOCATION_STOP site={site} step={step}: MS1MV3 gate failed', flush=True)
+                return
             replay_iterator = None
             replay_batches = replay_loader(args, records, split['labels'], rank, world, step)
             replay_iterator = iter(replay_batches) if replay_batches is not None else None
@@ -433,6 +451,8 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--seed', type=int, default=20260911)
     parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--gradient-priority', choices=('clean', 'range'), default='clean')
+    parser.add_argument('--max-site-updates', type=int, default=0)
     parser.add_argument('--range-weight', type=float, default=1.)
     parser.add_argument('--hint-weight', type=float, default=.3)
     parser.add_argument('--max-step-ratio', type=float, default=1e-4)
@@ -446,6 +466,8 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--continue-training', action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
+    if args.check_every <= 0 or args.max_site_updates < 0 or (args.max_site_updates and args.max_site_updates % args.check_every):
+        parser.error('max-site-updates must be zero or a nonnegative multiple of check-every')
     if args.shared and (args.deadline <= time.time() or args.accuracy_epochs <= 0):
         parser.error('shared repair requires a future campaign deadline and positive accuracy epochs')
     if not 0 < args.target < args.guard <= args.gate_ratio or not 0 < args.continuation_lr_factor <= 1:

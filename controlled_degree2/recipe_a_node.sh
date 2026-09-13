@@ -20,7 +20,10 @@ if [[ "$1" == recovery || "$1" == recovery-v2 ]]; then
     fi
     if [[ "${SHARED_RECOVERY:-0}" == 1 ]]; then
         extra+=(--shared --source-checkpoint "${RECOVERY_CHECKPOINT:-continuation_best.pt}"
-                --deadline "${SHARED_DEADLINE:?}" --accuracy-epochs "${RECOVERY_ACCURACY_EPOCHS:-24}")
+                --deadline "${SHARED_DEADLINE:?}" --accuracy-epochs "${RECOVERY_ACCURACY_EPOCHS:-24}"
+                --lr "${RECOVERY_LR:-0.0001}" --max-step-ratio "${RECOVERY_MAX_STEP_RATIO:-0.0001}"
+                --gradient-priority "${RECOVERY_GRADIENT_PRIORITY:-clean}"
+                --max-site-updates "${RECOVERY_MAX_SITE_UPDATES:-0}")
     fi
     if [[ -n "${RECOVERY_RESUME:-}" ]]; then
         extra+=(--resume "$RECOVERY_RESUME")

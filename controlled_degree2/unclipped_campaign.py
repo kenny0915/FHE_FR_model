@@ -14,10 +14,20 @@ POLICIES = {
     'gradual': dict(unclip=6, cap=0, epochs=18, lr=.0005, coeff=.00005, range_weight=5),
     'projected': dict(unclip=6, cap=.15, epochs=18, lr=.0005, coeff=.00005, range_weight=5),
     'adaptive_prefix': dict(mode='gated', accuracy_epochs=24, training_cap_hours=24),
+    'range_first': dict(mode='gated', accuracy_epochs=24, training_cap_hours=20,
+                        repair_lr=.001, max_step_ratio=.001, gradient_priority='range', max_site_updates=3000),
     'slow_projected': dict(unclip=12, cap=.3, epochs=28, lr=.0002, coeff=.00002, range_weight=10),
     'small_curvature': dict(unclip=6, cap=.05, epochs=24, lr=.001, coeff=.0001, range_weight=5),
     'slow_free': dict(unclip=12, cap=0, epochs=28, lr=.0002, coeff=.00001, range_weight=10),
 }
+
+
+def repair_variables(policy):
+    return dict(RECOVERY_ACCURACY_EPOCHS=policy['accuracy_epochs'],
+                RECOVERY_LR=policy.get('repair_lr', .0001),
+                RECOVERY_MAX_STEP_RATIO=policy.get('max_step_ratio', .0001),
+                RECOVERY_GRADIENT_PRIORITY=policy.get('gradient_priority', 'clean'),
+                RECOVERY_MAX_SITE_UPDATES=policy.get('max_site_updates', 0))
 
 
 def result(root):
@@ -81,7 +91,7 @@ def run(args):
         raise ValueError('warm-start source changed since campaign began')
     if state.get('policies') and state['policies'] != POLICIES:
         state.setdefault('policy_history', []).append(dict(at=time.time(), policies=state['policies'],
-            reason='MS1MV3 direct embedding failure and gradual epoch-2 loss failure: prioritize gated repair after projected arm; no new IJBC metric available at decision'))
+            reason='MS1MV3 prefix gates show slow range reduction with frequent gradient conflicts; add independently initialized range-priority repair; no adaptive IJBC result exists'))
     state.update(status='running', policies=POLICIES, source_sha256=source_sha, controller_pid=os.getpid())
     snapshot(path, state)
     for name, policy in POLICIES.items():
@@ -113,7 +123,7 @@ def run(args):
                     if 'smoke_job' not in run:
                         run['smoke_job'] = submit('controlled_degree2/shared_recovery.slurm', 'unclip-gated-smoke',
                             dict(RECIPE_OUTPUT=smoke_output, SHARED_DEADLINE=state['deadline'], RECIPE_SMOKE=1,
-                                 RECOVERY_SOURCE=source, RECOVERY_ACCURACY_EPOCHS=policy['accuracy_epochs']),
+                                 RECOVERY_SOURCE=source, **repair_variables(policy)),
                             state['deadline'], 20*60)
                         snapshot(path, state)
                     if 'smoke_state' not in run:
@@ -122,7 +132,7 @@ def run(args):
                     if run['smoke_state'].strip() != 'COMPLETED' or not (smoke_output/'smoke.pt').exists():
                         raise RuntimeError('shared gated GPU smoke failed; do not launch full repair')
                     variables = dict(RECIPE_OUTPUT=out, SHARED_DEADLINE=state['deadline'], RECIPE_SMOKE=0,
-                                     RECOVERY_SOURCE=source, RECOVERY_ACCURACY_EPOCHS=policy['accuracy_epochs'])
+                                     RECOVERY_SOURCE=source, **repair_variables(policy))
                     script, cap = 'controlled_degree2/shared_recovery.slurm', policy['training_cap_hours']*3600
                 else:
                     variables = dict(RECIPE_SHARED=1, RECIPE_PREPARED=1, RECIPE_SMOKE=0, RECIPE_OUTPUT=out,
@@ -152,6 +162,8 @@ def run(args):
                 run.update(checkpoint=str(selected), checkpoint_sha256=checksum, development=checkpoint['development'],
                            selection=('maximum finite MS1MV3 min(clean,lowres) TAR@1e-4' if selected.name == 'student_best.pt'
                                       else 'diagnostic last checkpoint; no valid holdout candidate'))
+                if 'recovery' in checkpoint:
+                    run['repair_cursor'] = {key: checkpoint['recovery'][key] for key in ('site', 'step', 'ready', 'gate')}
                 del checkpoint
                 final = out/'final_ijbc'
                 if 'evaluation_job' not in run:

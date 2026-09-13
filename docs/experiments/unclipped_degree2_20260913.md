@@ -257,3 +257,35 @@ non-finite rows, but neither passes the <=2 advancement criterion. The suffix
 remains a training-only bounded auxiliary computation. No all-25 unclipped
 inference claim is made. Further allocation decisions will use these MS1MV3
 measurements only; no new IJBC evaluation is used during repair.
+
+## MS-only allocation revision: range-priority repair
+
+At 08:55 UTC the adaptive arm had not opened beyond site one. Its fixed
+40,960-forward maximum ratio went from 6.8518133 initially to 6.8157592
+at 250 updates and 6.7062836 at 500. Typical batches reported conflicts
+in about 210/234 trainable tensors. The clean-priority projection can
+remove the range gradient component needed to shrink these tails. This is
+evidence about the training objective, not a capacity conclusion.
+
+Before any adaptive-arm IJBC evaluation, declare this allocation rule:
+stop adaptive_prefix if its 1,000-update gate still has max ratio >6.5
+and it remains at site one. Preserve its atomic diagnostic checkpoint
+and run the fixed internal/IJBC reports; do not use IJBC to choose the
+next arm. A new independent range_first arm starts from original D, with
+SGD LR .001 and per-tensor relative step cap .001 (both tenfold larger).
+It protects the range gradient and projects conflicting identity gradients
+off it, limiting the secondary gradient norm to the primary norm (with
+the existing tiny floor). All changes affect training only. Scalar shared
+quadratics, source intervals/target, frozen BN statistics, finite prefix
+guard 1, advancement ratio 2, gate corpus, teacher/hints and final accuracy
+schedule remain as declared. The same optimizer settings must pass its own
+16-H200 two-update smoke before production.
+
+Range-first gets at most 20 hours, additionally stopping after a failed
+3,000-update gate at any one site. Every gate/cursor is saved before that
+stop; a stopped repair is diagnostic and cannot claim all-site finiteness.
+A passing all-site/full-training gate hands off to 24 accuracy epochs.
+The common deadline remains September 15 06:40 UTC. This bounded allocation
+reserves time for the other predeclared coefficient/schedule strategies.
+The current GPU process retains its original policy while code is prepared;
+only the orchestration process was paused to load the next policy safely.
