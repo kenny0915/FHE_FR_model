@@ -13,11 +13,11 @@ POLICIES = {
     'direct': dict(unclip=0, cap=0, epochs=12, lr=.0002, coeff=.00002, range_weight=1),
     'gradual': dict(unclip=6, cap=0, epochs=18, lr=.0005, coeff=.00005, range_weight=5),
     'projected': dict(unclip=6, cap=.15, epochs=18, lr=.0005, coeff=.00005, range_weight=5),
-    'adaptive_prefix': dict(mode='gated', accuracy_epochs=24, training_cap_hours=24),
-    'range_first': dict(mode='gated', accuracy_epochs=24, training_cap_hours=20,
+    'adaptive_prefix': dict(mode='gated', accuracy_epochs=24, training_cap_hours=12),
+    'small_curvature': dict(unclip=6, cap=.05, epochs=24, lr=.001, coeff=.0001, range_weight=5),
+    'range_first': dict(mode='gated', accuracy_epochs=24, training_cap_hours=12,
                         repair_lr=.001, max_step_ratio=.001, gradient_priority='range', max_site_updates=3000),
     'slow_projected': dict(unclip=12, cap=.3, epochs=28, lr=.0002, coeff=.00002, range_weight=10),
-    'small_curvature': dict(unclip=6, cap=.05, epochs=24, lr=.001, coeff=.0001, range_weight=5),
     'slow_free': dict(unclip=12, cap=0, epochs=28, lr=.0002, coeff=.00001, range_weight=10),
 }
 
@@ -28,6 +28,22 @@ def repair_variables(policy):
                 RECOVERY_MAX_STEP_RATIO=policy.get('max_step_ratio', .0001),
                 RECOVERY_GRADIENT_PRIORITY=policy.get('gradient_priority', 'clean'),
                 RECOVERY_MAX_SITE_UPDATES=policy.get('max_site_updates', 0))
+
+
+def wait_training(run, policy, deadline):
+    # Also enforce revised allocations for jobs already submitted with a
+    # longer Slurm limit. Include smoke/queue time conservatively in this cap.
+    cutoff = min(deadline, run['started']+3600*policy.get('training_cap_hours', 6))
+    run['training_cutoff'] = cutoff
+    try:
+        return wait_job(run['training_job'], cutoff)
+    except TimeoutError:
+        if cutoff >= deadline:
+            raise
+        run['allocation_stop'] = 'own training job cancelled at per-attempt wall-time cap'
+        # scancel is asynchronous: retain the global deadline while waiting
+        # for resources to be released before submitting final evaluation.
+        return wait_job(run['training_job'], deadline)
 
 
 def result(root):
@@ -91,7 +107,7 @@ def run(args):
         raise ValueError('warm-start source changed since campaign began')
     if state.get('policies') and state['policies'] != POLICIES:
         state.setdefault('policy_history', []).append(dict(at=time.time(), policies=state['policies'],
-            reason='MS1MV3 prefix gates show slow range reduction with frequent gradient conflicts; add independently initialized range-priority repair; no adaptive IJBC result exists'))
+            reason='MS1MV3 repair still at site one after over an hour: cap gated arms at 12h and move the predeclared small-curvature arm earlier to preserve comparison time; no adaptive IJBC result exists'))
     state.update(status='running', policies=POLICIES, source_sha256=source_sha, controller_pid=os.getpid())
     snapshot(path, state)
     for name, policy in POLICIES.items():
@@ -146,7 +162,9 @@ def run(args):
                 run['training_job'] = submit(script, 'unclip-'+name, variables, state['deadline'], cap)
                 snapshot(path, state)
             if 'training_state' not in run:
-                run['training_state'] = wait_job(run['training_job'], state['deadline'])
+                run['effective_training_cap_hours'] = policy.get('training_cap_hours', 6)
+                snapshot(path, state)
+                run['training_state'] = wait_training(run, policy, state['deadline'])
                 snapshot(path, state)
             metrics = out/'metrics.jsonl'
             run['validation_history'] = [json.loads(line) for line in metrics.read_text().splitlines()] if metrics.exists() else []

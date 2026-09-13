@@ -204,3 +204,22 @@ def test_repair_environment_declares_same_policy_for_smoke_and_training():
     proposed = repair_variables(POLICIES['range_first'])
     assert proposed['RECOVERY_LR'] == .001 and proposed['RECOVERY_MAX_STEP_RATIO'] == .001
     assert proposed['RECOVERY_GRADIENT_PRIORITY'] == 'range' and proposed['RECOVERY_MAX_SITE_UPDATES'] == 3000
+
+
+def test_attempt_cap_waits_for_release_without_exhausting_campaign(monkeypatch):
+    from controlled_degree2 import unclipped_campaign as campaign
+    calls = []
+    def wait(job, deadline):
+        calls.append((job, deadline))
+        if len(calls) == 1:
+            raise TimeoutError('allocation ended; cancellation sent')
+        return 'CANCELLED'
+    monkeypatch.setattr(campaign, 'wait_job', wait)
+    run = dict(started=100, training_job='123')
+    assert campaign.wait_training(run, dict(training_cap_hours=12), 100000) == 'CANCELLED'
+    assert calls == [('123', 43300), ('123', 100000)]
+    assert run['allocation_stop'] and run['training_cutoff'] == 43300
+    calls.clear()
+    with pytest.raises(TimeoutError):
+        campaign.wait_training(run, dict(training_cap_hours=12), 200)
+    assert calls == [('123', 200)]

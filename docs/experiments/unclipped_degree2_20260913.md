@@ -314,3 +314,30 @@ log at 09:18 UTC recorded 2.6365 wall hours used, 45.3635 remaining, and
 25.4539 allocated GPU-hours, including previous failed jobs and evaluations.
 The range-priority support passed 31 focused tests and was committed/pushed
 as d6314c2 before any adaptive IJBC result.
+
+## Allocation revision at 09:55 UTC
+
+Adaptive repair is still at site one after over an hour. The latest MS-only
+gates remain finite: max ratio 4.6324229 at 2,250 updates, 4.3582635 at
+2,500, 3.8838120 at 3,000 and 3.6855350 at 3,250. This supports continued
+repair but makes the original two long gated allocations a risk to the
+planned comparison. Before any adaptive IJBC evaluation, cap each gated
+arm at 12 wall hours from attempt start, including smoke/queue time, and
+move the already-declared small_curvature arm immediately after adaptive.
+The remaining order is range_first, slow_projected, slow_free. Their model
+parameters and schedules do not change. The absolute 48-hour deadline
+always takes precedence; these are maximum allocations, not extensions.
+
+Slurm rejected the attempt to shorten running job 380900's TimeLimit with
+an unspecified error; its displayed scheduler limit remains 24 hours.
+The controller now enforces the shorter per-attempt cutoff itself, cancelling
+only its recorded training job and waiting for resource release before final
+evaluation. A per-attempt cancellation does not mark the whole campaign's
+budget exhausted. Its saved checkpoint remains a diagnostic candidate unless
+it completed the internal selection stage. This preserves time for distinct
+coefficient/schedule strategies without changing the active optimizer.
+
+After the user's interruption/continue, the original Slurm allocation stayed
+active. The local controller was restarted with --resume and the existing job
+ID; no training job was resubmitted. The event is recorded in the allocation
+log.
