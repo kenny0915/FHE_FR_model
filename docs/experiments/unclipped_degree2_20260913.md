@@ -415,3 +415,14 @@ a claim that the architecture cannot succeed. The detached controller retains
 the 12-hour maximum cap if the operator is interrupted. Final reporting uses
 the fixed saved checkpoint, and the next predeclared arm remains small_curvature.
 The allocation decision was recorded before any adaptive IJBC evaluation.
+
+The BN-adaptive comparison is now predeclared as a fixed pair: adaptive_bn
+(cap .05) followed by adaptive_bn_moderate (cap .15), independently starting
+from original D. All other settings are identical: immediate unclipping,
+synchronized training BN, 24 epochs, LR .001, coefficient LR .0001, head
+LR .0025, range weight 5, maximum six hours each, and internal-only selection.
+This compares stronger curvature bounding with retaining more quadratic
+curvature, motivated by the prior MS-only stability/accuracy tradeoff. Neither
+new BN arm has started, and no adaptive-repair IJBC result exists. Parameters
+will not be revised from the first BN arm's test score. The common budget and
+early-success stop override remaining queued arms.
