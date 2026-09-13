@@ -161,3 +161,23 @@ def test_test_success_cannot_override_internal_nonfinite_outputs():
     assert not qualifies({'target_met':True}, {'unavailable':'failed validation'})
     assert qualifies({'target_met':True}, {'nonfinite':0})
     assert not qualifies({'target_met':False}, {'nonfinite':0})
+
+
+def test_selected_training_state_survives_later_checkpoint_replacement(tmp_path):
+    from controlled_degree2.recipe_a import preserve_training_selection
+    (tmp_path/'last.pt').write_bytes(b'selected backbone plus matching head and optimizer')
+    preserve_training_selection(tmp_path)
+    (tmp_path/'next.pt').write_bytes(b'later lower-scoring epoch')
+    (tmp_path/'next.pt').replace(tmp_path/'last.pt')
+    assert (tmp_path/'continuation_best.pt').read_bytes() == b'selected backbone plus matching head and optimizer'
+    # Even an external in-place write of last.pt cannot alter the independent snapshot.
+    (tmp_path/'last.pt').write_bytes(b'rewritten later epoch')
+    assert (tmp_path/'continuation_best.pt').read_bytes() == b'selected backbone plus matching head and optimizer'
+
+
+def test_legacy_resume_namespace_may_omit_new_optional_flags():
+    from controlled_degree2.recipe_a import check_resume_policy
+    old_config = dict(seed=1, epochs=20, lr=.001)
+    check_resume_policy(old_config, SimpleNamespace(**old_config))
+    with pytest.raises(ValueError, match='lr'):
+        check_resume_policy(old_config, SimpleNamespace(**(old_config | {'lr':.1})))

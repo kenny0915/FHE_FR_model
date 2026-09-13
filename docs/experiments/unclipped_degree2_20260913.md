@@ -209,3 +209,23 @@ predeclared cap .15, six-epoch clamp curriculum, 18 total epochs, backbone LR
 parameter was changed in response to the gradual candidate's IJBC result.
 The training-data-gated fallback was already prepared and prioritized before
 that result existed. Its GPU smoke remains required before full repair.
+
+## Projected training outcome (before its final metric)
+
+Projected training job 380734 failed after 24m08s in epoch 2, shortly after
+opening site ten. As in the free-coefficient arm, the loss finite guard failed
+before an optimizer update. It had progressed beyond the free arm's ninth-site
+failure, but neither completed the curriculum. Its fixed epoch-1 diagnostic
+checkpoint has SHA-256
+f55ea7cc2b510e2a7d21911859c51f829a83d01d1055d41959530cdb0bd35c07;
+final IJBC job 380792 is still running. No metric from that job has been used.
+The prepared gated repair and its smoke prerequisite retain their parameters.
+
+Future unclipped accuracy training now also writes continuation_best.pt as an
+independent atomic copy of the complete selected training state. It contains
+its own matching backbone, head and optimizer; later last.pt replacement or
+in-place writes cannot alter that snapshot. This supports an internal-only
+continuation without mismatching checkpoint epochs. Legacy recovery namespaces
+that predate the new optional flags remain accepted by the resume-policy
+check. Twenty-nine focused recipe/recovery/campaign tests passed after these
+changes. The two already-failed training runs are not changed retroactively.

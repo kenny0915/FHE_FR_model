@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -37,6 +38,14 @@ def digest(path):
         for block in iter(lambda: stream.read(8 * 1024 * 1024), b''):
             h.update(block)
     return h.hexdigest()
+
+
+def preserve_training_selection(root):
+    """Self-contained selected backbone/head/optimizer for later MS-only work."""
+    root = Path(root)
+    temporary = root/'continuation_best.tmp.pt'
+    shutil.copyfile(root/'last.pt', temporary)
+    os.replace(temporary, root/'continuation_best.pt')
 
 
 def identity_split(labels, seed=20260911, fraction=0.02):
@@ -422,6 +431,18 @@ def load_shared_warm_start(student, head, path, provenance):
     return dict(path=str(Path(path).resolve()), sha256=digest(path), epoch=source['epoch'])
 
 
+def check_resume_policy(config, args):
+    # Legacy recovery constructs its namespace from the original checkpoint;
+    # newly added optional flags can be absent on both sides.
+    current = vars(args)
+    for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr',
+                'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr',
+                'batchnorm_mode', 'inference_bound', 'all_quadratic_start',
+                'unclipped_continuation', 'unclip_epochs', 'curvature_cap'):
+        if config.get(key, current.get(key)) != current.get(key):
+            raise ValueError(f'resume changes fixed training policy: {key}')
+
+
 def train(args, rank, world, device):
     root = Path(args.output)
     prepared = torch.load(root/'prepared.pt', map_location='cpu', weights_only=False)
@@ -470,9 +491,7 @@ def train(args, rank, world, device):
         state = torch.load(args.resume, map_location='cpu', weights_only=False)
         if state['provenance'] != prepared['metadata']:
             raise ValueError('resume checkpoint has different preparation provenance')
-        for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr', 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr', 'batchnorm_mode', 'inference_bound', 'all_quadratic_start', 'unclipped_continuation', 'unclip_epochs', 'curvature_cap'):
-            if state['config'].get(key, vars(args)[key]) != vars(args)[key]:
-                raise ValueError(f'resume changes fixed training policy: {key}')
+        check_resume_policy(state['config'], args)
         student.load_state_dict(state['state_dict_backbone'], strict=True)
         head.load_state_dict(state['head'])
         optimizer.load_state_dict(state['optimizer'])
@@ -584,6 +603,8 @@ def train(args, rank, world, device):
                 save_checkpoint(str(root/'student_best.tmp.pt'), student, prepared['calibration'], teacher_weights=args.teacher,
                                 extra={k:v for k,v in extra.items() if k not in ('head', 'optimizer')})
                 os.replace(root/'student_best.tmp.pt', root/'student_best.pt')
+                if getattr(args, 'unclipped_continuation', False):
+                    preserve_training_selection(root)
             with open(root/'metrics.jsonl', 'a') as stream:
                 stream.write(json.dumps(dict(epoch=epoch, **result))+'\n')
             print(f'EPOCH_COMPLETE {epoch}: {result}', flush=True)
