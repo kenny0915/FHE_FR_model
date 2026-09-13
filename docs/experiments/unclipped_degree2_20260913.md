@@ -289,3 +289,28 @@ The common deadline remains September 15 06:40 UTC. This bounded allocation
 reserves time for the other predeclared coefficient/schedule strategies.
 The current GPU process retains its original policy while code is prepared;
 only the orchestration process was paused to load the next policy safely.
+
+## Adaptive repair through 2,000 updates
+
+The declared 1,000-update stop condition did not trigger: max ratio was
+6.1189036, below 6.5, with zero non-finite prefix observations. The current
+arm therefore continues with its original clean-priority policy; the
+range-priority fallback has not started. Training-only gate progression:
+
+| Site-one updates | Maximum input/radius ratio | Non-finite prefix observations |
+| ---: | ---: | ---: |
+| 750 | 6.4239192 | 0 |
+| 1,000 | 6.1189036 | 0 |
+| 1,250 | 5.8189092 | 0 |
+| 1,500 | 5.5155158 | 0 |
+| 1,750 | 5.2136583 | 0 |
+| 2,000 | 4.9199185 | 0 |
+
+Each row covers the same 40,960 training forwards and five variants. None
+yet meets the <=2 advancement threshold. These are training diagnostics,
+not held-out verification accuracy or full-network finiteness certification.
+No adaptive checkpoint has been selected or evaluated on IJBC. The budget
+log at 09:18 UTC recorded 2.6365 wall hours used, 45.3635 remaining, and
+25.4539 allocated GPU-hours, including previous failed jobs and evaluations.
+The range-priority support passed 31 focused tests and was committed/pushed
+as d6314c2 before any adaptive IJBC result.
