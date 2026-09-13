@@ -513,3 +513,16 @@ repair candidate's IJBC score. All BN trials remain unstarted at declaration;
 their checkpoint selection remains the same fixed internal-only rule.
 The current small-curvature job is unchanged, and the global budget and
 early-success stop override the expanded queue.
+
+## Small-curvature training failure before its final metric
+
+Job 381251 failed after 1,459 seconds (24m19s), in epoch 2 shortly after
+opening site ten. The training-loss finite guard failed before an optimizer
+update, as in the earlier .15-cap trial. Lowering the cap to .05 under this
+arm's declared settings did not prevent that failure. Epochs 0 and 1
+completed, but the six-epoch curriculum did not. The fixed epoch-1
+diagnostic last.pt has SHA-256
+3c9cd1961a507e374203301b3ab7acbb96fa60dff261412cdb3a69e0c643cc21.
+IJBC job 381275 is running; its metric has not been consumed. The next arm
+remains the source-preserving adaptive_bn_free control declared before this
+failure, with no parameter revision from a test score.
