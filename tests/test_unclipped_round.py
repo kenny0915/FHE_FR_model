@@ -243,3 +243,23 @@ def test_attempt_cap_waits_for_release_without_exhausting_campaign(monkeypatch):
     with pytest.raises(TimeoutError):
         campaign.wait_training(run, dict(training_cap_hours=12), 200)
     assert calls == [('123', 200)]
+
+
+def test_status_failures_and_accounting_lag_do_not_end_monitoring(monkeypatch):
+    import subprocess
+    from controlled_degree2 import unclipped_campaign as campaign
+    responses = iter([subprocess.CalledProcessError(1, 'squeue'), 'RUNNING', '', '', '', 'COMPLETED'])
+    queries, sleeps = [], []
+    def query(*args):
+        queries.append(args[0])
+        value = next(responses)
+        if isinstance(value, Exception):
+            raise value
+        return value
+    monkeypatch.setattr(campaign, 'status_command', query)
+    monkeypatch.setattr(campaign.time, 'time', lambda: 0)
+    monkeypatch.setattr(campaign.time, 'sleep', sleeps.append)
+    monkeypatch.setattr(campaign.subprocess, 'run', lambda *a, **k: pytest.fail('status error must not cancel or submit jobs'))
+    assert campaign.wait_job('123', 100) == 'COMPLETED'
+    assert queries == ['squeue', 'squeue', 'squeue', 'sacct', 'squeue', 'sacct']
+    assert sleeps == [30, 30, 30]

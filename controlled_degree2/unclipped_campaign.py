@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
-from controlled_degree2.shared_campaign import command, snapshot, wait_job, remaining_limit
+from controlled_degree2.shared_campaign import snapshot, remaining_limit
 from controlled_degree2.recipe_a import digest
 
 POLICIES = {
@@ -24,6 +24,31 @@ POLICIES = {
     'slow_projected': dict(unclip=12, cap=.3, epochs=28, lr=.0002, coeff=.00002, range_weight=10),
     'slow_free': dict(unclip=12, cap=0, epochs=28, lr=.0002, coeff=.00001, range_weight=10),
 }
+
+
+def status_command(*args):
+    return subprocess.check_output(args, text=True, stderr=subprocess.PIPE, timeout=20).strip()
+
+
+def wait_job(job, deadline):
+    terminal = {'COMPLETED', 'FAILED', 'CANCELLED', 'TIMEOUT', 'OUT_OF_MEMORY',
+                'NODE_FAIL', 'PREEMPTED', 'BOOT_FAIL', 'DEADLINE', 'REVOKED', 'SPECIAL_EXIT'}
+    while True:
+        if time.time() >= deadline:
+            subprocess.run(['scancel', str(job)], check=True, timeout=20)
+            raise TimeoutError(f'cancelled own job {job} at allocation deadline')
+        try:
+            queued = status_command('squeue', '-h', '-j', str(job), '-o', '%T')
+            if not queued:
+                state = status_command('sacct', '-X', '-n', '-j', str(job),
+                                       '--format=State%40', '--parsable2').split('|')[0].strip()
+                if state and state.split()[0] in terminal:
+                    return state
+                # Accounting can lag behind squeue; an empty or nonterminal
+                # response never permits another allocation to start.
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            print(f'STATUS_RETRY job={job} reason={type(error).__name__}', flush=True)
+        time.sleep(30)
 
 
 def repair_variables(policy):

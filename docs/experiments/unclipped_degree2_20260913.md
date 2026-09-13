@@ -426,3 +426,12 @@ curvature, motivated by the prior MS-only stability/accuracy tradeoff. Neither
 new BN arm has started, and no adaptive-repair IJBC result exists. Parameters
 will not be revised from the first BN arm's test score. The common budget and
 early-success stop override remaining queued arms.
+
+A transient squeue query failure stopped the detached controller while Slurm
+job 380900 remained RUNNING. The coordinator now retries failed/timed-out
+status reads, with 20-second query timeouts and 30-second retry intervals.
+It also waits for a terminal accounting state after a job disappears from
+squeue, rather than treating accounting lag as completion. No GPU allocation
+was restarted. Nineteen focused tests passed, including transient status
+failure and delayed accounting without cancellation or duplicate submission.
+The controller is resumed against the same recorded job.
