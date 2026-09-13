@@ -496,3 +496,20 @@ LR .0001, head LR .0025 and range weight 5. Its first training updates are
 finite. No parameter changed in response to the preceding IJBC result.
 Versioned result JSON files encode non-finite diagnostic ratios as strings
 so they remain valid standard JSON; internal run artifacts are unchanged.
+
+## Source-preserving BN control declared before BN trials
+
+Add adaptive_bn_free immediately after small_curvature and before the
+unchanged .05/.15 BN pair. This is an independent original-D warm-start
+control: immediate unclipping, no coefficient projection, synchronized
+training BN, backbone LR .0002, coefficient LR .00002, head LR .0025 and
+range weight 1. These rates/range weight match the original direct arm;
+only BN behavior changes for the initial update, followed by up to 24 epochs
+and a maximum six-hour allocation. This isolates adaptive statistics from
+coefficient projection more directly. The motivation is the direct arm's
+first-batch MS failure and the source's dimensionless curvature .66–.77,
+which the .05/.15 bounds would substantially change. It does not use the
+repair candidate's IJBC score. All BN trials remain unstarted at declaration;
+their checkpoint selection remains the same fixed internal-only rule.
+The current small-curvature job is unchanged, and the global budget and
+early-success stop override the expanded queue.

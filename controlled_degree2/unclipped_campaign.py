@@ -15,6 +15,8 @@ POLICIES = {
     'projected': dict(unclip=6, cap=.15, epochs=18, lr=.0005, coeff=.00005, range_weight=5),
     'adaptive_prefix': dict(mode='gated', accuracy_epochs=24, training_cap_hours=12),
     'small_curvature': dict(unclip=6, cap=.05, epochs=24, lr=.001, coeff=.0001, range_weight=5),
+    'adaptive_bn_free': dict(unclip=0, cap=0, epochs=24, lr=.0002, coeff=.00002,
+                             range_weight=1, bn='train'),
     'adaptive_bn': dict(unclip=0, cap=.05, epochs=24, lr=.001, coeff=.0001,
                         range_weight=5, bn='train'),
     'adaptive_bn_moderate': dict(unclip=0, cap=.15, epochs=24, lr=.001, coeff=.0001,
@@ -147,7 +149,7 @@ def run(args):
         raise ValueError('warm-start source changed since campaign began')
     if state.get('policies') and state['policies'] != POLICIES:
         state.setdefault('policy_history', []).append(dict(at=time.time(), policies=state['policies'],
-            reason='Predeclare paired BN-adaptive caps .05/.15 to compare bounding with curvature retention, given prior MS-only stable-but-low-accuracy BN evidence; neither new BN arm nor adaptive repair has an IJBC result'))
+            reason='Add BN-adaptive control preserving source coefficients and direct-arm learning rates, based on direct MS first-batch failure and source coefficient scale inspection; no IJBC score sets this policy'))
     state.update(status='running', policies=POLICIES, source_sha256=source_sha, controller_pid=os.getpid())
     snapshot(path, state)
     for name, policy in POLICIES.items():
