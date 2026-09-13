@@ -288,6 +288,9 @@ def apply_phase(student, epoch, args):
     for module in quadratic_modules(student):
         group = 0 if module.name == 'prelu' else int(module.name[5])
         module.alpha, module.clip, module.clip_eval = alphas[group], clipped, inference_bound
+    if getattr(args, 'unclipped_continuation', False):
+        from controlled_degree2.unclipped_policy import apply_unclipping
+        clipped = apply_unclipping(student, epoch, args.unclip_epochs)
     # Use pretrained running statistics throughout; affine weights can adapt.
     for module in student.modules():
         if isinstance(module, nn.modules.batchnorm._BatchNorm) and getattr(args, 'batchnorm_mode', 'frozen') == 'frozen':
@@ -443,6 +446,9 @@ def train(args, rank, world, device):
     warm_start_info = {}
     if getattr(args, 'warm_start', None):
         warm_start_info = load_shared_warm_start(student, head, args.warm_start, prepared['metadata'])
+    if getattr(args, 'unclipped_continuation', False):
+        from controlled_degree2.unclipped_policy import project_coefficients
+        project_coefficients(student, args.curvature_cap)
     mapping = torch.full((len(prepared['centers']),), -1, dtype=torch.long, device=device)
     mapping[active.to(device)] = torch.arange(len(active), device=device)
     student_hints, teacher_hints, elements = {}, {}, {}
@@ -464,7 +470,7 @@ def train(args, rank, world, device):
         state = torch.load(args.resume, map_location='cpu', weights_only=False)
         if state['provenance'] != prepared['metadata']:
             raise ValueError('resume checkpoint has different preparation provenance')
-        for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr', 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr', 'batchnorm_mode', 'inference_bound', 'all_quadratic_start'):
+        for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr', 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr', 'batchnorm_mode', 'inference_bound', 'all_quadratic_start', 'unclipped_continuation', 'unclip_epochs', 'curvature_cap'):
             if state['config'].get(key, vars(args)[key]) != vars(args)[key]:
                 raise ValueError(f'resume changes fixed training policy: {key}')
         student.load_state_dict(state['state_dict_backbone'], strict=True)
@@ -537,6 +543,8 @@ def train(args, rank, world, device):
                 raise FloatingPointError('non-finite gradients; aborting without optimizer update')
             clip_grad_norm_stable(parameters, 5., error_if_nonfinite=True)
             optimizer.step()
+            if getattr(args, 'unclipped_continuation', False):
+                project_coefficients(student, args.curvature_cap)
             replay.update(images, labels, mask, modules)
             if rank == 0 and step % 25 == 0:
                 print(f'epoch={epoch} step={step}/{steps} loss={loss.item():.4f} arc={classification.item():.4f} kd={kd.item():.4f} range={boundary.item():.4f} alpha={alphas} clipped={clipped}', flush=True)
@@ -553,6 +561,8 @@ def train(args, rank, world, device):
                 barrier()
                 return
         full = getattr(args, 'all_quadratic_start', False) or epoch >= args.head_warmup+args.conversion_epochs
+        if getattr(args, 'unclipped_continuation', False):
+            full = epoch >= args.unclip_epochs
         result = validate(student, args, rank, world, device, split) if full else {'phase': 'conversion'}
         improved = full and result['nonfinite'] == 0 and result['tar_1e4'] > best
         if improved:
@@ -617,9 +627,17 @@ def parse_args():
     p.add_argument('--inference-bound', action='store_true', help='keep calibrated input clamps in inference; requires comparisons')
     p.add_argument('--all-quadratic-start', action='store_true')
     p.add_argument('--warm-start', help='reuse shared backbone/head with a new optimizer and policy')
+    p.add_argument('--unclipped-continuation', action='store_true')
+    p.add_argument('--unclip-epochs', type=float, default=0.)
+    p.add_argument('--curvature-cap', type=float, default=0.)
     p.add_argument('--resume')
     p.add_argument('--smoke', action='store_true', help='isolated 64-identity preparation and two optimizer steps')
     args = p.parse_args()
+    if args.unclipped_continuation:
+        if not args.shared or not args.all_quadratic_start or args.inference_bound:
+            p.error('unclipped continuation requires shared, all-quadratic, unbounded inference')
+        if not 0 <= args.unclip_epochs < args.epochs or not math.isfinite(args.curvature_cap) or args.curvature_cap < 0:
+            p.error('invalid unclipping duration or coefficient cap')
     if args.all_quadratic_start and args.head_warmup != 0:
         p.error('all-quadratic start requires zero head warmup')
     if (args.inference_bound or args.warm_start or args.all_quadratic_start) and not args.shared:

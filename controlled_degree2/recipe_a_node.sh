@@ -53,6 +53,10 @@ fi
 if [[ -n "${SHARED_WARM_START:-}" ]]; then
     extra+=(--warm-start "$SHARED_WARM_START")
 fi
+if [[ "${UNCLIPPED_CONTINUATION:-0}" == 1 ]]; then
+    extra+=(--unclipped-continuation --unclip-epochs "${UNCLIP_EPOCHS:-0}"
+            --curvature-cap "${CURVATURE_CAP:-0}" --range-weight "${RANGE_WEIGHT:-1}")
+fi
 if [[ "$RECIPE_SMOKE" == 1 ]]; then
     extra+=(--smoke --workers 1 --calibration-images 128)
 fi

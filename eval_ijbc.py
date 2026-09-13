@@ -94,6 +94,7 @@ parser.add_argument(
     ),
 )
 
+parser.add_argument('--polynomial-export', default=None, help='export and evaluate an audited add/multiply shared-quadratic backbone; JSON certificate path')
 parser.add_argument('--finite-audit', default=None, help='JSON audit of all module inputs/outputs; single visible GPU required')
 args = parser.parse_args()
 finite_audits = []
@@ -170,6 +171,14 @@ class Embedding(object):
                     'SimpleGate blends were provided for a model without '
                     'SimpleGate scheduling')
             resnet.set_simple_gate_blends(blends)
+        if args.polynomial_export:
+            from controlled_degree2.polynomial_export import export_graph
+            resnet, certificate = export_graph(resnet.eval())
+            certificate_path = Path(args.polynomial_export)
+            certificate_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(resnet.cpu(), certificate_path.with_suffix('.pt'))
+            resnet.cuda()
+            certificate_path.write_text(json.dumps(certificate, indent=2))
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()

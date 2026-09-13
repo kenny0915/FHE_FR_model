@@ -15,6 +15,9 @@ test -f "${CHECKPOINT}"
 mkdir -p "${RESULT_DIR}"
 export CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=12 PYTHONUNBUFFERED=1
 audit_args=()
+if [[ "${POLYNOMIAL_EXPORT:-0}" == 1 ]]; then
+  audit_args+=(--polynomial-export "${RESULT_DIR}/polynomial_certificate.json")
+fi
 if [[ "${FINITE_AUDIT:-0}" == 1 ]]; then
   audit_args+=(--finite-audit "${RESULT_DIR}/finite_audit.json")
 fi
