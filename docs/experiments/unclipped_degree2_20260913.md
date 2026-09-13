@@ -558,3 +558,16 @@ record is retained. This fills a missing comparison, not a response to an
 IJBC metric; no BN candidate has received final IJBC evaluation at this
 decision. The retry is capped at six hours and the common deadline still
 wins. The running job's policy and allocation are unchanged.
+
+## BN-adaptive .05-cap first completed epoch
+
+Job 382326 completed all 2,477 epoch-zero updates with fully unclipped
+training. The first MS1MV3 inference audit reports zero non-finite values,
+embedding absolute maximum 6.15058756, and maximum activation/radius ratio
+6.41755819. Clean TAR is 26.97041333% and low-resolution TAR 4.27663811%
+at the fixed sampled FAR=1e-4 protocol. This is initial numerical stability,
+not accuracy success or IJBC certification. The predeclared training schedule
+continues; no final test evaluation has been requested for this active arm.
+The controller remains detached and resumes the existing job after a policy
+reload, with no duplicate GPU allocation. The retry-policy change passed
+20 focused tests; code and experiment records are pushed through dc34a7c.
