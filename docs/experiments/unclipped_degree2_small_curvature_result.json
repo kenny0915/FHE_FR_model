@@ -1,0 +1,69 @@
+{
+  "name": "small_curvature",
+  "policy": {
+    "unclip": 6,
+    "cap": 0.05,
+    "epochs": 24,
+    "lr": 0.001,
+    "coeff": 0.0001,
+    "range_weight": 5
+  },
+  "started": 1789300917.614601,
+  "output": "/work/u8798807/FHE_FR_model/work_dirs/unclipped_round_20260913/small_curvature",
+  "training_job": "381251",
+  "effective_training_cap_hours": 6,
+  "training_cutoff": 1789322517.614601,
+  "training_state": "FAILED",
+  "validation_history": [
+    {
+      "epoch": 0,
+      "phase": "conversion"
+    },
+    {
+      "epoch": 1,
+      "phase": "conversion"
+    }
+  ],
+  "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/unclipped_round_20260913/small_curvature/last.pt",
+  "checkpoint_sha256": "3c9cd1961a507e374203301b3ab7acbb96fa60dff261412cdb3a69e0c643cc21",
+  "development": {
+    "phase": "conversion"
+  },
+  "selection": "diagnostic last checkpoint; no valid holdout candidate",
+  "evaluation_job": "381275",
+  "evaluation_state": "COMPLETED",
+  "development_job": "381329",
+  "development_state": "COMPLETED",
+  "final_development": {
+    "nonfinite": 0,
+    "embedding_absmax": 22.6795597076416,
+    "activation_max_ratio": 18.401662826538086,
+    "clean": {
+      "tar_1e4": 0.15770557522773743,
+      "threshold": 0.7241603136062622,
+      "empirical_far": 9.999999747378752e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "lowres": {
+      "tar_1e4": 0.05260482802987099,
+      "threshold": 0.782406747341156,
+      "empirical_far": 9.950000094249845e-05,
+      "negative_pairs": 2000000,
+      "positive_pairs": 27545
+    },
+    "tar_1e4": 0.05260482802987099,
+    "checkpoint_sha256": "3c9cd1961a507e374203301b3ab7acbb96fa60dff261412cdb3a69e0c643cc21",
+    "epoch": 1,
+    "source_images": 11092,
+    "forwards": 55460,
+    "selection": "report only; checkpoint already fixed before final evaluations"
+  },
+  "ijbc_tar_at_far_1e4": 26.76279592984609,
+  "nonfinite_values": 0,
+  "pure_polynomial": true,
+  "target_met": false,
+  "actual_far": 9.981500015474203e-05,
+  "embedding_nonfinite_rows": 0,
+  "finished": 1789303875.8276157
+}

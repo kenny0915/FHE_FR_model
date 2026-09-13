@@ -526,3 +526,27 @@ diagnostic last.pt has SHA-256
 IJBC job 381275 is running; its metric has not been consumed. The next arm
 remains the source-preserving adaptive_bn_free control declared before this
 failure, with no parameter revision from a test score.
+
+
+## Resumed campaign, September 14 Taipei time
+
+The small-curvature fixed diagnostic checkpoint finished final evaluation:
+26.76279592984609% IJBC TAR at requested FAR=1e-4 (actual
+0.00009981500015474203), zero audited non-finite values and zero bad
+embedding rows. The MS1MV3 holdout likewise had zero non-finite values,
+but clean TAR was 15.77056% and low-resolution TAR 5.26048%. This candidate
+is numerically finite on the audited datasets but falls far short of the
+accuracy target. Its full polynomial conversion curriculum never finished;
+these results do not establish a degree-two capacity ceiling.
+
+The interrupted controller was resumed under the unchanged September 15
+06:40 UTC deadline. Cancelled BN-control job 381343 had no saved training
+checkpoint and therefore has no candidate metric. The next predeclared
+BN-adaptive .05-cap strategy was submitted as job 382326, capped at six
+hours and using 16 H200 GPUs. No hyperparameter was changed from IJBC
+feedback. Subsequent policies and the immediate qualifying-success stop
+remain in force. Allocation decisions are appended to the existing ledger.
+
+Validation before resumption: 34 focused tests passed in
+`test_unclipped_round.py`, `test_shared_degree2.py`, and
+`test_shared_campaign.py` (four PyTorch deprecation warnings).
