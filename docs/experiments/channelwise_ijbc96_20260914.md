@@ -363,3 +363,11 @@ costly, only same-batch-validated repair policy prematurely. It resumes the
 same preserved original epoch-4 checkpoint in a fresh directory and retains
 full IJB-C coverage as the final criterion. An explicit resume-policy
 revision is required and recorded for this change.
+
+
+No-stress ablation **383627** is RUNNING on 16 H200s, output
+`work_dirs/channelwise_ijbc96_nostress_20260914`, code `86258c5`.
+Allocation cap is 4h15m; original absolute deadline 1789385375 is retained.
+Initial resumed epoch-5 step-0 loss is 7.7510, KD 0.1225, range 0.0088,
+with clipping false. All 19 recipe/campaign tests passed. This initial
+finite update does not establish stability through later conversion.
