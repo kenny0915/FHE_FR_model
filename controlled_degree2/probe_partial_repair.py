@@ -27,8 +27,9 @@ def main():
     p.add_argument('--guard', type=float, default=4.)
     p.add_argument('--target', type=float, default=2.)
     p.add_argument('--lr', type=float, default=.01)
+    p.add_argument('--teacher-weight', type=float, default=0.)
     args = p.parse_args()
-    if args.steps <= 0 or args.lr <= 0 or not 0 < args.target < args.guard:
+    if args.steps <= 0 or args.lr <= 0 or args.teacher_weight < 0 or not 0 < args.target < args.guard:
         p.error('require positive steps/LR and 0 < target < guard')
     root = Path(args.output)
     root.mkdir(exist_ok=False)
@@ -59,6 +60,7 @@ def main():
         original = model(images)
         original_valid = torch.isfinite(original).all(1) & torch.isfinite(original.norm(dim=1))
     del teacher
+    fidelity_rows = original_valid.nonzero().flatten()
     def audit():
         with torch.no_grad():
             out = model(images)
@@ -81,6 +83,16 @@ def main():
             break
         if not torch.isfinite(loss):
             raise FloatingPointError('nonfinite repair loss')
+        if args.teacher_weight:
+            # A separate finite identity batch anchors the shared BN affines.
+            # The failing row remains present in the prefix-repair objective.
+            selected = fidelity_rows[(torch.arange(min(32, len(fidelity_rows)), device=images.device)
+                                      + step*32) % len(fidelity_rows)]
+            good = model(images[selected])
+            if not torch.isfinite(good).all() or not torch.isfinite(good.norm(dim=1)).all():
+                raise FloatingPointError('repair destabilized fidelity rows')
+            kd = (1-torch.nn.functional.cosine_similarity(good, target[selected])).mean()
+            loss = torch.log1p(loss/(args.guard**2)) + args.teacher_weight*kd
         loss.backward()
         clip_grad_norm_stable(params, 1., error_if_nonfinite=True)
         optimizer.step()
