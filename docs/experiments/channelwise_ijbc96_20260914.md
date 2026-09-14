@@ -1422,3 +1422,8 @@ arm, not continuation from the new best checkpoint. The existing tested CLI
 and Slurm wrapper support this parameter; no training code changes are needed.
 One H200 / 45 minutes includes full exported TAR, graph and finite validation.
 Main training remains stopped, and the queue was confirmed empty beforehand.
+
+Submitted **386290**, `channelwise-template-tail01-20260915`, one H200 /
+45 minutes, MST114196. Output `work_dirs/channelwise_template_tail01_20260915`.
+Recipe HEAD at submission **c79af46**; threshold implementation **e85962a**.
+Only `CHANNEL_TAIL_THRESHOLD=0.1` differs from the .20 arm's fitting settings.
