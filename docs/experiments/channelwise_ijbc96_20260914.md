@@ -852,3 +852,12 @@ repair now demonstrably fixes numerical failures at some accuracy cost.
 The pending head-only full evaluation will inform the next decision. Existing
 main training and evaluation remain separate; no IJB-calibrated weights have
 been fed back into MS1MV3 main training.
+
+A verified machine-readable source chain is preserved in
+[channelwise_ijbc96_calibration_chain.json](channelwise_ijbc96_calibration_chain.json).
+It contains the nine actual calibration stages from the immutable main epoch-14
+checkpoint to the random-head candidate, their full configurations, completed
+step counts, replay-manifest hashes, and checkpoint hashes. Each predecessor
+hash was recomputed from disk and matched its successor's recorded source;
+all stages use the original PReLU teacher hash and preparation provenance.
+This records the successful lineage, excluding discarded smoke/diagnostic runs.

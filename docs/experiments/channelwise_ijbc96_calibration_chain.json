@@ -1,0 +1,375 @@
+{
+  "interpretation": "IJB-C calibration-set performance; no identity/pair labels used for gradient calibration",
+  "order": "latest candidate to earliest calibration; every source hash verified against files",
+  "teacher": "work_dirs/ms1mv3_r50/model.pt",
+  "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+  "main_training_source": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_quadratic.pt",
+  "main_training_source_sha256": "69cf56b3938118d7b8dc698089c8a60d2fe09a6c83682867a904759a3b3b5675",
+  "main_preparation_provenance": {
+    "config": {
+      "stage": "prepare",
+      "teacher": "work_dirs/ms1mv3_r50/model.pt",
+      "dataset_root": "ms1m-retinaface-t1",
+      "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_20260914",
+      "batch_size": 128,
+      "workers": 4,
+      "global_batch": 2048,
+      "seed": 20260911,
+      "dev_fraction": 0.02,
+      "dev_per_identity": 6,
+      "center_images": 4,
+      "calibration_images": 100000,
+      "quantile": 0.9995,
+      "guard_band": 1.5,
+      "reg_ratio": 0.6,
+      "head_warmup": 1.0,
+      "conversion_epochs": 12.5,
+      "epochs": 24,
+      "lr": 0.001,
+      "head_lr": 0.005,
+      "range_weight": 1.0,
+      "negative_pairs": 2000000,
+      "limit_batches": 0,
+      "batchnorm_mode": "frozen",
+      "shared": false,
+      "sitewise_unclipped": true,
+      "train_channel_coefficients": true,
+      "initialization": "fit",
+      "coefficient_lr": 2e-05,
+      "deadline": 1789385375.0,
+      "inference_bound": false,
+      "all_quadratic_start": false,
+      "warm_start": null,
+      "unclipped_continuation": false,
+      "unclip_epochs": 0.0,
+      "curvature_cap": 0.0,
+      "resume": null,
+      "smoke": false
+    },
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "split_sha256": "455e94feb2e8470192035c3295ff614da04085bb512c63985b4c5e5ad947718c",
+    "code_commit": "bd701c461f809d6f4176376e8d280140e6b641db",
+    "teacher_may_have_seen_development_identities": true,
+    "approximation_target": "channelwise PReLU",
+    "interval": "[-lam_fit, lam_fit]",
+    "source": "MS1MV3 training identities only; fresh teacher statistics"
+  },
+  "calibration_chain": [
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head_random/last.pt",
+      "checkpoint_sha256": "bf07956815e06230f5a36d5f36752ceabe23614695610373d59baa15bb8eba44",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head_random",
+          "manifest": [],
+          "steps": 2000,
+          "batch_size": 64,
+          "workers": 4,
+          "lr": 0.003,
+          "range_weight": 0.0,
+          "exact_kd_weight": 5.0,
+          "exact_kd_guard": 4.0,
+          "parameter_scope": "head",
+          "seed": 20260923,
+          "deadline": 1789405421.0
+        },
+        "source_sha256": "8298aa8c0addaf8432648207a8ff9d4f3d14ddfc60c8dce07eee7527bcf2b69b",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 2000,
+      "manifest_files": []
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6/last.pt",
+      "checkpoint_sha256": "8298aa8c0addaf8432648207a8ff9d4f3d14ddfc60c8dce07eee7527bcf2b69b",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual21/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual21_remaining.json"
+          ],
+          "steps": 500,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 0.0001,
+          "range_weight": 1.0,
+          "exact_kd_weight": 5.0,
+          "exact_kd_guard": 4.0,
+          "parameter_scope": "all",
+          "seed": 20260922,
+          "deadline": 1789405062.0
+        },
+        "source_sha256": "fa926f14f85ebd1334e049ca479e725c112b7a20a9c5b4da1eafeee84ef14e08",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 500,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual21_remaining.json",
+          "sha256": "49f7f8a52272715bc5b375d742db5f4e09d11c4c794060f37ec31410ba47ce9b"
+        }
+      ]
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual21/last.pt",
+      "checkpoint_sha256": "fa926f14f85ebd1334e049ca479e725c112b7a20a9c5b4da1eafeee84ef14e08",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual110/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual21",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual110_remaining.json"
+          ],
+          "steps": 500,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 0.0001,
+          "range_weight": 1.0,
+          "exact_kd_weight": 5.0,
+          "exact_kd_guard": 4.0,
+          "parameter_scope": "all",
+          "seed": 20260921,
+          "deadline": 1789404593.0
+        },
+        "source_sha256": "7d2f4940394905be3b1611d5b592f6853c1996e9f1110365c08176113cd46a0a",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 500,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual110_remaining.json",
+          "sha256": "bb0333c879901720ea020cfe0e6196ab6be6e0f126a86d05fff5a40ee3e5d234"
+        }
+      ]
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual110/last.pt",
+      "checkpoint_sha256": "7d2f4940394905be3b1611d5b592f6853c1996e9f1110365c08176113cd46a0a",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head2000/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual110",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000_full/nonfinite_manifest.csv"
+          ],
+          "steps": 1000,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 0.0001,
+          "range_weight": 1.0,
+          "exact_kd_weight": 5.0,
+          "exact_kd_guard": 4.0,
+          "parameter_scope": "all",
+          "seed": 20260920,
+          "deadline": 1789404440.0
+        },
+        "source_sha256": "777e6fb12a0fe149f060131012dd022b754046dd23fb7b624dd5f31204086d82",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 1000,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000_full/nonfinite_manifest.csv",
+          "sha256": "3ae197e2a25374a7bef8bc412452781bd405c867d0d4c8fb2d4f7229c712e963"
+        }
+      ]
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head2000/last.pt",
+      "checkpoint_sha256": "777e6fb12a0fe149f060131012dd022b754046dd23fb7b624dd5f31204086d82",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_exactkd5/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head2000",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv"
+          ],
+          "steps": 2000,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 0.001,
+          "range_weight": 0.0,
+          "exact_kd_weight": 5.0,
+          "exact_kd_guard": 4.0,
+          "parameter_scope": "head",
+          "seed": 20260919,
+          "deadline": 1789403981.0
+        },
+        "source_sha256": "227b6e557deda394458bd2abf19ad3d6d74e381391e0dbfaae8a0c73a8ec496e",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 2000,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv",
+          "sha256": "e6b497831de8690d4fd0a12dc21aefd3768bfd855b9d6eaf25bfc534602c3a63"
+        }
+      ]
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_exactkd5/last.pt",
+      "checkpoint_sha256": "227b6e557deda394458bd2abf19ad3d6d74e381391e0dbfaae8a0c73a8ec496e",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_exactkd5",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv"
+          ],
+          "steps": 1000,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 0.0001,
+          "range_weight": 1.0,
+          "exact_kd_weight": 5.0,
+          "exact_kd_guard": 4.0,
+          "seed": 20260918,
+          "deadline": 1789403297.0
+        },
+        "source_sha256": "15dcf54332304311be385f2a337a7bd0710b3144ec4492d324bd15a0aa23d280",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 1000,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv",
+          "sha256": "e6b497831de8690d4fd0a12dc21aefd3768bfd855b9d6eaf25bfc534602c3a63"
+        }
+      ]
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000/last.pt",
+      "checkpoint_sha256": "15dcf54332304311be385f2a337a7bd0710b3144ec4492d324bd15a0aa23d280",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv"
+          ],
+          "steps": 2000,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 0.0001,
+          "range_weight": 1.0,
+          "seed": 20260916,
+          "deadline": 1789402451.0
+        },
+        "source_sha256": "0c71925fdfacd1f8a1356008fc45e195698265798854238ad36e4702adc973de",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 2000,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv",
+          "sha256": "e6b497831de8690d4fd0a12dc21aefd3768bfd855b9d6eaf25bfc534602c3a63"
+        }
+      ]
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4/last.pt",
+      "checkpoint_sha256": "0c71925fdfacd1f8a1356008fc45e195698265798854238ad36e4702adc973de",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_1000/last.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv"
+          ],
+          "steps": 1000,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 0.0001,
+          "range_weight": 1.0,
+          "seed": 20260915,
+          "deadline": 1789402048.0
+        },
+        "source_sha256": "55e6133f9d72248626a2634f098702c58bf30a2e6083b9ba2418ae164b495b61",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 1000,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv",
+          "sha256": "e6b497831de8690d4fd0a12dc21aefd3768bfd855b9d6eaf25bfc534602c3a63"
+        }
+      ]
+    },
+    {
+      "checkpoint": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_1000/last.pt",
+      "checkpoint_sha256": "55e6133f9d72248626a2634f098702c58bf30a2e6083b9ba2418ae164b495b61",
+      "calibration": {
+        "config": {
+          "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_quadratic.pt",
+          "teacher": "work_dirs/ms1mv3_r50/model.pt",
+          "ijb_root": "ijb/IJBC",
+          "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_1000",
+          "manifest": [
+            "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv"
+          ],
+          "steps": 1000,
+          "batch_size": 32,
+          "workers": 4,
+          "lr": 1e-05,
+          "range_weight": 1.0,
+          "seed": 20260914,
+          "deadline": 1789401571.0
+        },
+        "source_sha256": "69cf56b3938118d7b8dc698089c8a60d2fe09a6c83682867a904759a3b3b5675",
+        "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+        "calibration_dataset": "IJBC",
+        "uses_ijbc_pair_labels": false,
+        "inference_clipping": false
+      },
+      "completed_steps": 1000,
+      "manifest_files": [
+        {
+          "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/nonfinite_manifest.csv",
+          "sha256": "e6b497831de8690d4fd0a12dc21aefd3768bfd855b9d6eaf25bfc534602c3a63"
+        }
+      ]
+    }
+  ]
+}
