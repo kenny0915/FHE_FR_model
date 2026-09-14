@@ -133,3 +133,25 @@ selected checkpoint fails before image inference. This is the first
 uncalibrated candidate assessment; any subsequent IJB-C-guided adjustments
 and selection will be recorded as calibration-set work. Current training
 is still in head warmup; no final student verification metric exists yet.
+
+## First unbounded conversion milestone
+
+Job 383299 completed head-warmup epoch 0 and saved `last.pt`. A CPU state
+audit found all backbone tensors finite, 25 coefficient tensors and 17,664
+coefficient values; provenance matches the original PReLU teacher. The
+checkpoint correctly records `pure_quadratic=false` during conversion.
+
+Fresh per-channel fit radii span .05–2.76513457. Many stem channels hit the
+.05 floor because their teacher BN weights/activation magnitudes are nearly
+zero (median observed stem maximum approximately 1.42e-14). Their large
+recorded relative fit error is not a network-wide relative error: the
+histogram has a 1e-5 lower edge and the target energy is nearly zero. Preserve
+this initial policy and monitor actual distillation/range behavior instead
+of changing radii based on that ratio alone. Details are saved in
+`fresh_calibration_summary.json` and `epoch0_state_audit.json` under the run.
+
+At epoch 1, step 1375/2477, the stem is fully quadratic and the first
+residual-block activation has blend .110214. Training remains unclipped;
+loss 8.4183, KD .0724, range .0133, and completed updates remain finite.
+This verifies the first transition, not a full-network finite gate or final
+accuracy. Training is still RUNNING; evaluation 383314 remains dependent.
