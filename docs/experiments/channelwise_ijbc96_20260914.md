@@ -1733,3 +1733,21 @@ used only to measure ROC, not to fit weights. No new GPU job is submitted.
 This rules out a simple selection-metric substitution as a supported next
 step; further work must improve the learned representation or provide more
 relevant calibration supervision, with its use clearly documented.
+
+### Explicit supervised calibration loss prepared
+
+The original no-pair-label gradient policy is extended for a new, explicitly
+supervised calibration path under the user-authorized use of IJB-C calibration.
+Results from this path must record `uses_ijbc_pair_labels=true` and remain
+calibration-set performance. Historical unlabeled experiments retain their
+original interpretation. No labeled fitting has run yet.
+
+Added a helper that retains only official pairs whose two endpoints are in
+the fitting template partition, canonicalizes duplicate unordered pairs and
+rejects conflicting labels. Added class-balanced squared hinge cosine loss
+with positive/negative margins .4/.2. This supplies genuine/impostor separation
+supervision instead of only matching teacher scores; margins are training-only
+and introduce no new inference operation. No negative mining is implicit.
+Tests verify partition exclusion, duplicate/conflict handling, exact loss,
+gradient direction and class balancing. Integration into the calibration
+runner, provenance and bounded GPU fitting remain to be completed.
