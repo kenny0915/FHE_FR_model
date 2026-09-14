@@ -4,8 +4,9 @@ Status: best fully finite fresh-campaign IJB-C calibration-set TAR is
 95.79690136524007%, from exact-path cosine-only head calibration, with zero
 nonfinite intermediate values and embeddings. The higher historical diagnostic
 95.9145% has 104 nonfinite embeddings and is ineligible. The 96% target remains
-unmet. Main training is stopped; the paired magnitude-loss arm is running in
-one-GPU job 385638, followed by verified original-PReLU baseline job 385651.
+unmet. Main training is stopped. The paired magnitude-loss arm completed at
+95.69974945032469%, also fully finite, and did not improve TAR. One-GPU ablation
+385638 has finished; verified original-PReLU baseline job 385651 is next.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -969,3 +970,25 @@ evidence of statistical significance. Result interpretation remains IJB-C
 calibration-set performance. The same-source, same-seed MSE-weight-1 arm has
 started in the existing allocation; its full result is pending. No extra
 training job was submitted.
+
+### Magnitude-loss arm completed: hypothesis not supported
+
+The paired MSE-weight-1 arm completed all 2,000 updates and full exported
+IJB-C evaluation: **95.69974945032469% TAR**, actual FAR
+**9.930345627182214e-5**, with **zero** nonfinite intermediate values and
+embeddings over all 469,375 images / 938,750 orientations. Every acceptance
+check except TAR passes. Candidate SHA
+`279fba06c2ff3545662b23f62efca3feeaef1ea1f726fb691e2d471bcde33db6`.
+See [channelwise_ijbc96_exact_mse_result.json](channelwise_ijbc96_exact_mse_result.json).
+
+The two arms' saved configurations differ only in output path and MSE weight;
+source/teacher hashes and sampling seed match. The MSE arm is lower by
+0.09715191491538 percentage points than exact cosine alone. This specific
+controlled experiment does not support adding relative embedding MSE at
+weight 1 with these settings. It does not establish that every possible
+magnitude-related method is ineffective. Both remain IJB-C calibration-set
+results, with no identity/pair labels used for gradient training.
+
+Job 385638 finished both arms within its one-hour limit, without a passing
+96% model. No further training was launched. Dependent original-PReLU
+baseline job 385651 has been released to the scheduler.
