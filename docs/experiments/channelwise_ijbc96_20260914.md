@@ -155,3 +155,20 @@ residual-block activation has blend .110214. Training remains unclipped;
 loss 8.4183, KD .0724, range .0133, and completed updates remain finite.
 This verifies the first transition, not a full-network finite gate or final
 accuracy. Training is still RUNNING; evaluation 383314 remains dependent.
+
+## Stem and Layer1 completed
+
+At epoch 3, step 425/2477, the first four activation sites have alpha=1
+and `layer2.0.prelu` has alpha=.343157. Training remains unclipped and
+finite (loss 8.1790, KD .1162, range .0104).
+
+Preserved the preceding atomic epoch-2 checkpoint as
+`epoch2_conversion.pt` before `last.pt` can be replaced. Its integrity audit
+(`epoch2_state_audit.json`) confirms all backbone tensors finite and all
+237 BN running buffers bitwise identical to the original teacher. Exactly
+the four opened sites have changed quadratic coefficients; every unopened
+site's coefficients still equal its fresh fit. Maximum coefficient changes
+are .001754 (stem), .000389, .000302 and .000634 (Layer1 sites).
+The snapshot is a conversion checkpoint, explicitly `pure_quadratic=false`,
+and is not an accepted full-poly or IJB-C candidate. Job 383299 continues;
+383314 is still waiting on its successful completion.
