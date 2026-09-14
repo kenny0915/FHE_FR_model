@@ -1,0 +1,17 @@
+{
+  "fit_source_images": {
+    "cached_images": 32768,
+    "represented_templates": 12105,
+    "complete_templates": 200,
+    "complete_multi_image_templates": 13,
+    "images_in_complete_templates": 213
+  },
+  "validation_source_images": {
+    "cached_images": 8192,
+    "represented_templates": 5502,
+    "complete_templates": 55,
+    "complete_multi_image_templates": 1,
+    "images_in_complete_templates": 56
+  },
+  "templates_present_in_both_splits": 4348
+}

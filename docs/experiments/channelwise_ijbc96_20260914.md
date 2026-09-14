@@ -1249,3 +1249,20 @@ This is a subset proxy diagnosis, not full template aggregation or TAR.
 Further work should evaluate template-level geometry (with correct detector,
 media and bias weighting) or a low-FAR-tail objective before new GPU fitting.
 No inference or training code changes accompany this diagnosis.
+
+### Existing cache cannot support representative complete-template validation
+
+A CPU join of `ijb/IJBC/meta/ijbc_face_tid_mid.txt` with the retained
+`channelwise_linear_head_20260915/split.npz` finds 200 complete fitting
+templates (13 multi-image) and only 55 complete validation templates
+(one multi-image). They cover 213 and 56 images respectively. Although the
+source-image sets are disjoint as documented, 4,348 template IDs occur in
+both partitions. This is not a violation of the original image-split claim;
+it prevents treating that cache split as template-disjoint validation.
+See [channelwise_ijbc96_template_cache_coverage.json](channelwise_ijbc96_template_cache_coverage.json).
+
+Do not report aggregation over partially cached templates as full-template
+validation. A template-level follow-up must split by template ID, include all
+source images of selected templates, and retain detector/media weighting.
+The existing cache remains valid for its original image-level diagnostics.
+No GPU work was submitted during this coverage audit.
