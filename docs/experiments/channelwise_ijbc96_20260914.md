@@ -923,3 +923,14 @@ path and `CHANNEL_OUTPUT` as
 `/work/u8798807/FHE_FR_model/work_dirs/channelwise_exact_head_20260915`.
 Training source commit is **ccd4551**; logs are `channelwise-385638.out/.err`.
 No MS1MV3 main training or other GPU allocation is running concurrently.
+
+Job 385638 started on 25a-hgpn110. Its 25-update exact-path / MSE-weight-1
+GPU smoke completed. Direct CPU comparison of the saved candidate with the
+immutable source found changes only in `fc.weight`, `fc.bias`,
+`features.weight`, and `features.bias`; every other state tensor was identical.
+All saved state tensors were finite, original provenance was identical, and
+the candidate retained `pure_quadratic=True`. Machine-readable verification
+is `work_dirs/channelwise_exact_head_20260915/smoke_verification.json`.
+The independent cosine-only 2,000-update arm is now running; early logged
+batches select all 64 rows for exact-path KD. These checks do not replace a
+full IJB-C accuracy/numerical evaluation.
