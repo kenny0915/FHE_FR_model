@@ -1,0 +1,1317 @@
+{
+  "result_directory": "work_dirs/channelwise_template_tail01_20260915/ijbc_full",
+  "slurm_job": "386290",
+  "elapsed": "00:20:31",
+  "acceptance": {
+    "target_met": false,
+    "checks": {
+      "tar": false,
+      "requested_roc_point": true,
+      "full_ijbc": true,
+      "finite": true,
+      "graph": true,
+      "checkpoint": true
+    },
+    "tar_percent": 95.84292069335788,
+    "actual_far": 9.994288612547199e-05,
+    "requested_far": 0.0001,
+    "checkpoint_sha256": "8dc5c18901a3c77824ba6de53273067f83d3ad9868065f249c7f7d10c4ff72bd",
+    "interpretation": "IJB-C calibration-set performance; not untouched test accuracy"
+  },
+  "polynomial_certificate": {
+    "pure_polynomial": true,
+    "quadratic_sites": 25,
+    "coefficients": 17664,
+    "coefficient_mode": "channelwise",
+    "operations": [
+      "addition",
+      "multiplication",
+      "affine convolution/linear",
+      "reshape"
+    ],
+    "batchnorm": "fixed scale/offset constants",
+    "inference_clipping": false,
+    "scope": "image-to-embedding backbone before plaintext normalization/scoring",
+    "checkpoint_sha256": "8dc5c18901a3c77824ba6de53273067f83d3ad9868065f249c7f7d10c4ff72bd"
+  },
+  "finite_audit_summary": {
+    "nonfinite_values": 0,
+    "embedding_nonfinite_rows": 0,
+    "batches": [
+      {
+        "nonfinite_values": 0,
+        "boundaries": {
+          ".input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0,
+            "observed_rows": 937984
+          },
+          "conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0,
+            "observed_rows": 937984
+          },
+          "conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.4306249618530273,
+            "observed_rows": 937984
+          },
+          "layer1.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 9.463621139526367,
+            "observed_rows": 937984
+          },
+          "layer1.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.2697954177856445,
+            "observed_rows": 937984
+          },
+          "layer1.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 6.465522289276123,
+            "observed_rows": 937984
+          },
+          "layer1.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.5595014095306396,
+            "observed_rows": 937984
+          },
+          "layer1.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.518798828125,
+            "observed_rows": 937984
+          },
+          "layer1.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.9541943073272705,
+            "observed_rows": 937984
+          },
+          "layer1.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 5.242729187011719,
+            "observed_rows": 937984
+          },
+          "layer1.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.832628011703491,
+            "observed_rows": 937984
+          },
+          "layer1.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 6.065981388092041,
+            "observed_rows": 937984
+          },
+          "layer1.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.8978075981140137,
+            "observed_rows": 937984
+          },
+          "layer1.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.4059107303619385,
+            "observed_rows": 937984
+          },
+          "layer1.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.8788748979568481,
+            "observed_rows": 937984
+          },
+          "layer1.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 5.39699649810791,
+            "observed_rows": 937984
+          },
+          "layer1.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.5845439434051514,
+            "observed_rows": 937984
+          },
+          "layer2.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 6.001597881317139,
+            "observed_rows": 937984
+          },
+          "layer2.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.0527291297912598,
+            "observed_rows": 937984
+          },
+          "layer2.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 4.069088935852051,
+            "observed_rows": 937984
+          },
+          "layer2.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.5339597463607788,
+            "observed_rows": 937984
+          },
+          "layer2.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 6.5226616859436035,
+            "observed_rows": 937984
+          },
+          "layer2.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.3594591617584229,
+            "observed_rows": 937984
+          },
+          "layer2.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.4542453289031982,
+            "observed_rows": 937984
+          },
+          "layer2.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.485315203666687,
+            "observed_rows": 937984
+          },
+          "layer2.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.8096957206726074,
+            "observed_rows": 937984
+          },
+          "layer2.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5238912105560303,
+            "observed_rows": 937984
+          },
+          "layer2.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.5279945135116577,
+            "observed_rows": 937984
+          },
+          "layer2.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8919888138771057,
+            "observed_rows": 937984
+          },
+          "layer2.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.0357677936553955,
+            "observed_rows": 937984
+          },
+          "layer2.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.32314974069595337,
+            "observed_rows": 937984
+          },
+          "layer2.3.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.7144700288772583,
+            "observed_rows": 937984
+          },
+          "layer2.3.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.004846453666687,
+            "observed_rows": 937984
+          },
+          "layer2.3.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.1517577171325684,
+            "observed_rows": 937984
+          },
+          "layer2.3.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8696827292442322,
+            "observed_rows": 937984
+          },
+          "layer3.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.2776951789855957,
+            "observed_rows": 937984
+          },
+          "layer3.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.3619837760925293,
+            "observed_rows": 937984
+          },
+          "layer3.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 7.930624961853027,
+            "observed_rows": 937984
+          },
+          "layer3.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.3958067893981934,
+            "observed_rows": 937984
+          },
+          "layer3.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 4.1376824378967285,
+            "observed_rows": 937984
+          },
+          "layer3.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.9392493367195129,
+            "observed_rows": 937984
+          },
+          "layer3.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.4972338676452637,
+            "observed_rows": 937984
+          },
+          "layer3.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5383551716804504,
+            "observed_rows": 937984
+          },
+          "layer3.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.0597636699676514,
+            "observed_rows": 937984
+          },
+          "layer3.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.21574632823467255,
+            "observed_rows": 937984
+          },
+          "layer3.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.2327758073806763,
+            "observed_rows": 937984
+          },
+          "layer3.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0189027786254883,
+            "observed_rows": 937984
+          },
+          "layer3.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.8681957721710205,
+            "observed_rows": 937984
+          },
+          "layer3.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.2404841035604477,
+            "observed_rows": 937984
+          },
+          "layer3.3.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.3852182626724243,
+            "observed_rows": 937984
+          },
+          "layer3.3.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.7198474407196045,
+            "observed_rows": 937984
+          },
+          "layer3.3.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.556471109390259,
+            "observed_rows": 937984
+          },
+          "layer3.3.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6425726413726807,
+            "observed_rows": 937984
+          },
+          "layer3.4.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.9159471988677979,
+            "observed_rows": 937984
+          },
+          "layer3.4.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.7456088662147522,
+            "observed_rows": 937984
+          },
+          "layer3.4.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.1274259090423584,
+            "observed_rows": 937984
+          },
+          "layer3.4.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5450928211212158,
+            "observed_rows": 937984
+          },
+          "layer3.5.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.8778818845748901,
+            "observed_rows": 937984
+          },
+          "layer3.5.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.03032386302948,
+            "observed_rows": 937984
+          },
+          "layer3.5.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 6.368714332580566,
+            "observed_rows": 937984
+          },
+          "layer3.5.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.0602235794067383,
+            "observed_rows": 937984
+          },
+          "layer3.6.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.723024606704712,
+            "observed_rows": 937984
+          },
+          "layer3.6.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8660851716995239,
+            "observed_rows": 937984
+          },
+          "layer3.6.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.485369920730591,
+            "observed_rows": 937984
+          },
+          "layer3.6.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5251963138580322,
+            "observed_rows": 937984
+          },
+          "layer3.7.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.642555832862854,
+            "observed_rows": 937984
+          },
+          "layer3.7.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6634383201599121,
+            "observed_rows": 937984
+          },
+          "layer3.7.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.751616358757019,
+            "observed_rows": 937984
+          },
+          "layer3.7.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8386281132698059,
+            "observed_rows": 937984
+          },
+          "layer3.8.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.828763484954834,
+            "observed_rows": 937984
+          },
+          "layer3.8.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8204739689826965,
+            "observed_rows": 937984
+          },
+          "layer3.8.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 4.17634916305542,
+            "observed_rows": 937984
+          },
+          "layer3.8.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8105254173278809,
+            "observed_rows": 937984
+          },
+          "layer3.9.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.0616276264190674,
+            "observed_rows": 937984
+          },
+          "layer3.9.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.654662549495697,
+            "observed_rows": 937984
+          },
+          "layer3.9.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.6535847187042236,
+            "observed_rows": 937984
+          },
+          "layer3.9.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.22356489300727844,
+            "observed_rows": 937984
+          },
+          "layer3.10.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.1019692420959473,
+            "observed_rows": 937984
+          },
+          "layer3.10.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6593217849731445,
+            "observed_rows": 937984
+          },
+          "layer3.10.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.800408363342285,
+            "observed_rows": 937984
+          },
+          "layer3.10.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.4880657494068146,
+            "observed_rows": 937984
+          },
+          "layer3.11.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.5833145380020142,
+            "observed_rows": 937984
+          },
+          "layer3.11.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6941753029823303,
+            "observed_rows": 937984
+          },
+          "layer3.11.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.2723445892333984,
+            "observed_rows": 937984
+          },
+          "layer3.11.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5224012732505798,
+            "observed_rows": 937984
+          },
+          "layer3.12.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.0389187335968018,
+            "observed_rows": 937984
+          },
+          "layer3.12.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.7030011415481567,
+            "observed_rows": 937984
+          },
+          "layer3.12.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.83683180809021,
+            "observed_rows": 937984
+          },
+          "layer3.12.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.7677587270736694,
+            "observed_rows": 937984
+          },
+          "layer3.13.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.321291208267212,
+            "observed_rows": 937984
+          },
+          "layer3.13.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6744344830513,
+            "observed_rows": 937984
+          },
+          "layer3.13.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.5970842838287354,
+            "observed_rows": 937984
+          },
+          "layer3.13.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5083508491516113,
+            "observed_rows": 937984
+          },
+          "layer4.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.9750518798828125,
+            "observed_rows": 937984
+          },
+          "layer4.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1426429748535156,
+            "observed_rows": 937984
+          },
+          "layer4.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.305366039276123,
+            "observed_rows": 937984
+          },
+          "layer4.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.569021463394165,
+            "observed_rows": 937984
+          },
+          "layer4.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 12.222901344299316,
+            "observed_rows": 937984
+          },
+          "layer4.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.9360172748565674,
+            "observed_rows": 937984
+          },
+          "layer4.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.49440336227417,
+            "observed_rows": 937984
+          },
+          "layer4.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1190743446350098,
+            "observed_rows": 937984
+          },
+          "layer4.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.3635294437408447,
+            "observed_rows": 937984
+          },
+          "layer4.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.4567801058292389,
+            "observed_rows": 937984
+          },
+          "layer4.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.12479305267334,
+            "observed_rows": 937984
+          },
+          "layer4.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.7582335472106934,
+            "observed_rows": 937984
+          },
+          "layer4.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 6.030503273010254,
+            "observed_rows": 937984
+          },
+          "layer4.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.4632251560688019,
+            "observed_rows": 937984
+          },
+          "dropout.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.070852518081665,
+            "observed_rows": 937984
+          },
+          "dropout.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.070852518081665,
+            "observed_rows": 937984
+          },
+          "fc.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.070852518081665,
+            "observed_rows": 937984
+          },
+          "fc.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.9416917562484741,
+            "observed_rows": 937984
+          },
+          ".output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 5.937414646148682,
+            "observed_rows": 937984
+          }
+        }
+      },
+      {
+        "nonfinite_values": 0,
+        "boundaries": {
+          ".input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0,
+            "observed_rows": 766
+          },
+          "conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0,
+            "observed_rows": 766
+          },
+          "conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.3582043647766113,
+            "observed_rows": 766
+          },
+          "layer1.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 5.222789764404297,
+            "observed_rows": 766
+          },
+          "layer1.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.7590439319610596,
+            "observed_rows": 766
+          },
+          "layer1.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.2382993698120117,
+            "observed_rows": 766
+          },
+          "layer1.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8987626433372498,
+            "observed_rows": 766
+          },
+          "layer1.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.8281593322753906,
+            "observed_rows": 766
+          },
+          "layer1.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.4453350901603699,
+            "observed_rows": 766
+          },
+          "layer1.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.0878818035125732,
+            "observed_rows": 766
+          },
+          "layer1.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0873607397079468,
+            "observed_rows": 766
+          },
+          "layer1.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.986344814300537,
+            "observed_rows": 766
+          },
+          "layer1.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.7600913643836975,
+            "observed_rows": 766
+          },
+          "layer1.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.6709444522857666,
+            "observed_rows": 766
+          },
+          "layer1.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1953548192977905,
+            "observed_rows": 766
+          },
+          "layer1.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.3089879751205444,
+            "observed_rows": 766
+          },
+          "layer1.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.3365090489387512,
+            "observed_rows": 766
+          },
+          "layer2.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.82985782623291,
+            "observed_rows": 766
+          },
+          "layer2.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.4045947790145874,
+            "observed_rows": 766
+          },
+          "layer2.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.7649240493774414,
+            "observed_rows": 766
+          },
+          "layer2.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.7926619052886963,
+            "observed_rows": 766
+          },
+          "layer2.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 3.13912296295166,
+            "observed_rows": 766
+          },
+          "layer2.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.154913306236267,
+            "observed_rows": 766
+          },
+          "layer2.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.491786241531372,
+            "observed_rows": 766
+          },
+          "layer2.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.9716069102287292,
+            "observed_rows": 766
+          },
+          "layer2.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1006087064743042,
+            "observed_rows": 766
+          },
+          "layer2.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.254989892244339,
+            "observed_rows": 766
+          },
+          "layer2.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0360506772994995,
+            "observed_rows": 766
+          },
+          "layer2.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5306594371795654,
+            "observed_rows": 766
+          },
+          "layer2.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.3690403699874878,
+            "observed_rows": 766
+          },
+          "layer2.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.2243817299604416,
+            "observed_rows": 766
+          },
+          "layer2.3.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.2584847211837769,
+            "observed_rows": 766
+          },
+          "layer2.3.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5928918719291687,
+            "observed_rows": 766
+          },
+          "layer2.3.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.5930911302566528,
+            "observed_rows": 766
+          },
+          "layer2.3.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6066464781761169,
+            "observed_rows": 766
+          },
+          "layer3.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.1020896434783936,
+            "observed_rows": 766
+          },
+          "layer3.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.4543802738189697,
+            "observed_rows": 766
+          },
+          "layer3.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.2625908851623535,
+            "observed_rows": 766
+          },
+          "layer3.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1887407302856445,
+            "observed_rows": 766
+          },
+          "layer3.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.6503727436065674,
+            "observed_rows": 766
+          },
+          "layer3.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5384188294410706,
+            "observed_rows": 766
+          },
+          "layer3.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0469486713409424,
+            "observed_rows": 766
+          },
+          "layer3.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.42429617047309875,
+            "observed_rows": 766
+          },
+          "layer3.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.4698505401611328,
+            "observed_rows": 766
+          },
+          "layer3.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.18822936713695526,
+            "observed_rows": 766
+          },
+          "layer3.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8866923451423645,
+            "observed_rows": 766
+          },
+          "layer3.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.9503479599952698,
+            "observed_rows": 766
+          },
+          "layer3.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.0449455976486206,
+            "observed_rows": 766
+          },
+          "layer3.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.20311680436134338,
+            "observed_rows": 766
+          },
+          "layer3.3.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.05565345287323,
+            "observed_rows": 766
+          },
+          "layer3.3.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5059540271759033,
+            "observed_rows": 766
+          },
+          "layer3.3.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.3937875032424927,
+            "observed_rows": 766
+          },
+          "layer3.3.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.34219861030578613,
+            "observed_rows": 766
+          },
+          "layer3.4.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1004438400268555,
+            "observed_rows": 766
+          },
+          "layer3.4.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6466033458709717,
+            "observed_rows": 766
+          },
+          "layer3.4.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.325821042060852,
+            "observed_rows": 766
+          },
+          "layer3.4.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.29485568404197693,
+            "observed_rows": 766
+          },
+          "layer3.5.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1878515481948853,
+            "observed_rows": 766
+          },
+          "layer3.5.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6808009147644043,
+            "observed_rows": 766
+          },
+          "layer3.5.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1578583717346191,
+            "observed_rows": 766
+          },
+          "layer3.5.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.3965115547180176,
+            "observed_rows": 766
+          },
+          "layer3.6.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.4628201723098755,
+            "observed_rows": 766
+          },
+          "layer3.6.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5960035920143127,
+            "observed_rows": 766
+          },
+          "layer3.6.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.223253607749939,
+            "observed_rows": 766
+          },
+          "layer3.6.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.31389111280441284,
+            "observed_rows": 766
+          },
+          "layer3.7.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.4812215566635132,
+            "observed_rows": 766
+          },
+          "layer3.7.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.44989442825317383,
+            "observed_rows": 766
+          },
+          "layer3.7.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8750840425491333,
+            "observed_rows": 766
+          },
+          "layer3.7.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.36853235960006714,
+            "observed_rows": 766
+          },
+          "layer3.8.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1513557434082031,
+            "observed_rows": 766
+          },
+          "layer3.8.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.4362337291240692,
+            "observed_rows": 766
+          },
+          "layer3.8.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.107741117477417,
+            "observed_rows": 766
+          },
+          "layer3.8.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.29503780603408813,
+            "observed_rows": 766
+          },
+          "layer3.9.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8369256258010864,
+            "observed_rows": 766
+          },
+          "layer3.9.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.560776948928833,
+            "observed_rows": 766
+          },
+          "layer3.9.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.910353660583496,
+            "observed_rows": 766
+          },
+          "layer3.9.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.16416743397712708,
+            "observed_rows": 766
+          },
+          "layer3.10.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.8876407146453857,
+            "observed_rows": 766
+          },
+          "layer3.10.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5354324579238892,
+            "observed_rows": 766
+          },
+          "layer3.10.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.4008479118347168,
+            "observed_rows": 766
+          },
+          "layer3.10.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.17834128439426422,
+            "observed_rows": 766
+          },
+          "layer3.11.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.9060136675834656,
+            "observed_rows": 766
+          },
+          "layer3.11.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.5672211050987244,
+            "observed_rows": 766
+          },
+          "layer3.11.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.2611522674560547,
+            "observed_rows": 766
+          },
+          "layer3.11.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.18438869714736938,
+            "observed_rows": 766
+          },
+          "layer3.12.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.969680905342102,
+            "observed_rows": 766
+          },
+          "layer3.12.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.534827709197998,
+            "observed_rows": 766
+          },
+          "layer3.12.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.5753326416015625,
+            "observed_rows": 766
+          },
+          "layer3.12.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.2083955854177475,
+            "observed_rows": 766
+          },
+          "layer3.13.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.3236676454544067,
+            "observed_rows": 766
+          },
+          "layer3.13.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.44588834047317505,
+            "observed_rows": 766
+          },
+          "layer3.13.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.2006046772003174,
+            "observed_rows": 766
+          },
+          "layer3.13.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.2764265835285187,
+            "observed_rows": 766
+          },
+          "layer4.0.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.2722797393798828,
+            "observed_rows": 766
+          },
+          "layer4.0.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6942896246910095,
+            "observed_rows": 766
+          },
+          "layer4.0.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.9947879314422607,
+            "observed_rows": 766
+          },
+          "layer4.0.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.40287914872169495,
+            "observed_rows": 766
+          },
+          "layer4.0.downsample.0.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 9.78341007232666,
+            "observed_rows": 766
+          },
+          "layer4.0.downsample.0.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.2517629861831665,
+            "observed_rows": 766
+          },
+          "layer4.1.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1164182424545288,
+            "observed_rows": 766
+          },
+          "layer4.1.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6681418418884277,
+            "observed_rows": 766
+          },
+          "layer4.1.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.262629508972168,
+            "observed_rows": 766
+          },
+          "layer4.1.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.3154973089694977,
+            "observed_rows": 766
+          },
+          "layer4.2.conv1.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.6304272413253784,
+            "observed_rows": 766
+          },
+          "layer4.2.conv1.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1339229345321655,
+            "observed_rows": 766
+          },
+          "layer4.2.conv2.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 1.1296632289886475,
+            "observed_rows": 766
+          },
+          "layer4.2.conv2.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.16742773354053497,
+            "observed_rows": 766
+          },
+          "dropout.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6086949706077576,
+            "observed_rows": 766
+          },
+          "dropout.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6086949706077576,
+            "observed_rows": 766
+          },
+          "fc.input[0]": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.6086949706077576,
+            "observed_rows": 766
+          },
+          "fc.output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 0.43341052532196045,
+            "observed_rows": 766
+          },
+          ".output": {
+            "nonfinite_values": 0,
+            "finite_absmax": 2.67392897605896,
+            "observed_rows": 766
+          }
+        }
+      }
+    ],
+    "source_images": 469375,
+    "augmented_embeddings": 938750,
+    "target": "IJBC",
+    "audited_input_rows": 938750,
+    "audited_output_rows": 938750,
+    "scope": "all module inputs and outputs, original and flip, including remainder"
+  },
+  "calibration": {
+    "config": {
+      "cache_root": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_template_cache_20260915",
+      "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_template_tail01_20260915",
+      "steps": 2000,
+      "lr": 0.0001,
+      "seed": 20260926,
+      "tail_threshold": 0.1
+    },
+    "source_sha256": "e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d",
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "split_sha256": "01389115a7386d1d7109cb4b5df2fcb82c6107baa8cc18c3b8071fbe782f348a",
+    "cache_sha256": "c5be8c7fed98899685544f11e7622017830307d95102953b03700c4491d54075",
+    "uses_ijbc_pair_labels": false,
+    "cache_layout": "complete_template_barycenters",
+    "inference_clipping": false,
+    "tail_threshold": 0.1,
+    "point_anchor_weight": 0.01,
+    "identity_penalty": 0.001
+  },
+  "selection": {
+    "baseline": {
+      "all_mse": 0.0005966859753243625,
+      "tail_mse": 0.0010832539992406964
+    },
+    "validation": [
+      {
+        "step": 100,
+        "all_mse": 0.0005535765667445958,
+        "tail_mse": 0.0009818339021876454
+      },
+      {
+        "step": 200,
+        "all_mse": 0.0005499620456248522,
+        "tail_mse": 0.0009464230388402939
+      },
+      {
+        "step": 300,
+        "all_mse": 0.0005548331537283957,
+        "tail_mse": 0.0009339399402961135
+      },
+      {
+        "step": 400,
+        "all_mse": 0.000560354208573699,
+        "tail_mse": 0.0009289266308769584
+      },
+      {
+        "step": 500,
+        "all_mse": 0.0005681543843820691,
+        "tail_mse": 0.0009290224406868219
+      },
+      {
+        "step": 600,
+        "all_mse": 0.0005752771976403892,
+        "tail_mse": 0.0009306013234890997
+      },
+      {
+        "step": 700,
+        "all_mse": 0.0005800345097668469,
+        "tail_mse": 0.000928158697206527
+      },
+      {
+        "step": 800,
+        "all_mse": 0.0005854108021594584,
+        "tail_mse": 0.0009284501429647207
+      },
+      {
+        "step": 900,
+        "all_mse": 0.0005907277227379382,
+        "tail_mse": 0.0009292404865846038
+      },
+      {
+        "step": 1000,
+        "all_mse": 0.0005969572812318802,
+        "tail_mse": 0.0009337093215435743
+      },
+      {
+        "step": 1100,
+        "all_mse": 0.0005994936218485236,
+        "tail_mse": 0.0009370642947033048
+      },
+      {
+        "step": 1200,
+        "all_mse": 0.0006027148338034749,
+        "tail_mse": 0.0009341295808553696
+      },
+      {
+        "step": 1300,
+        "all_mse": 0.0006073181284591556,
+        "tail_mse": 0.0009374634828418493
+      },
+      {
+        "step": 1400,
+        "all_mse": 0.0006086857174523175,
+        "tail_mse": 0.0009350737673230469
+      },
+      {
+        "step": 1500,
+        "all_mse": 0.0006110278773121536,
+        "tail_mse": 0.0009411282953806221
+      },
+      {
+        "step": 1600,
+        "all_mse": 0.0006145053775981069,
+        "tail_mse": 0.0009429547935724258
+      },
+      {
+        "step": 1700,
+        "all_mse": 0.0006155700539238751,
+        "tail_mse": 0.0009446603944525123
+      },
+      {
+        "step": 1800,
+        "all_mse": 0.0006179239135235548,
+        "tail_mse": 0.0009438032866455615
+      },
+      {
+        "step": 1900,
+        "all_mse": 0.0006196688045747578,
+        "tail_mse": 0.000945008359849453
+      },
+      {
+        "step": 2000,
+        "all_mse": 0.0006223536911420524,
+        "tail_mse": 0.0009468335192650557
+      }
+    ],
+    "improved": true,
+    "selected_step": 300,
+    "selection": "held-out cross-template all-pair MSE plus fixed high-similarity-pair MSE",
+    "head_fold_probe_rows": 16,
+    "head_fold_max_abs_error": 1.7881393432617188e-07
+  },
+  "report_sha256": {
+    "finite_audit.json": "3e88b8cc6ffbef172bf6c57faab37c448b0fa07b85e241535b8a15391002ddb7",
+    "acceptance.json": "8291420dc845538f5988fa37bf387e32dfd3f92bbc5b41ace5e9afe1807e7c8a",
+    "ijbc_tar_at_far_raw.json": "b9b9a4848c939f39a4c6d8a42b4e25f3d6821f4a3a4f68296982f94ad325a5ea"
+  }
+}

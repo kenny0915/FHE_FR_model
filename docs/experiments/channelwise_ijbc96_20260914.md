@@ -1427,3 +1427,24 @@ Submitted **386290**, `channelwise-template-tail01-20260915`, one H200 /
 45 minutes, MST114196. Output `work_dirs/channelwise_template_tail01_20260915`.
 Recipe HEAD at submission **c79af46**; threshold implementation **e85962a**.
 Only `CHANNEL_TAIL_THRESHOLD=0.1` differs from the .20 arm's fitting settings.
+
+### Fixed-tail .10 full result: no improvement; stop threshold sweeps
+
+Job **386290** finished full evaluation in **20m31s**. Conservative TAR is
+**95.84292069335788%**, actual FAR **9.994288612547199e-5**. All 469,375 source
+images / 938,750 original-and-flip rows, including remainder, have zero
+nonfinite module-boundary values and embeddings. The certificate confirms
+25 channelwise pure quadratics / 17,664 coefficients with no inference clipping.
+Evaluated checkpoint SHA independently recomputed:
+`8dc5c18901a3c77824ba6de53273067f83d3ad9868065f249c7f7d10c4ff72bd`.
+See [channelwise_ijbc96_template_tail01_result.json](channelwise_ijbc96_template_tail01_result.json).
+
+This accepts 18,744 genuine pairs, 21 fewer than the retained .20 best
+(18,765). Only TAR fails acceptance; Slurm FAILED is not a runtime crash.
+The .10/.20/.30 comparison does not support further broadening the fixed
+tail. Stop adding similar threshold trials and keep main training stopped.
+The best remains 95.95029912563277%, ten accepts short of 96%; the goal is
+not achieved. Any further experiment needs a reviewed change in method
+supported by diagnostics, rather than more training time or threshold sweeps.
+All scores are IJB-C calibration-set performance; no verification-pair or
+identity labels were used for gradient fitting in these trials.
