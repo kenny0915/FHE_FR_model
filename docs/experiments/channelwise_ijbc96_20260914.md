@@ -503,3 +503,22 @@ lookup also lists mst113064, but no work was charged to that other project.
 The saved absolute deadline must be refreshed if it expires before credits
 are restored. This is an external resource dependency; no full-conversion
 IJB-C result or 96% achievement is claimed.
+
+
+### Credits restored and continuation launched
+
+The user reported replenishing credits. On September 14 at 20:48 Taipei,
+`sbatch --test-only` passed for MST114196. Source epoch-6 SHA-256 was checked
+again and matched the preserved value. The expired deadline was replaced by
+1789406337 (a new 4.5-hour training window). Corrected continuation **384727**
+is RUNNING on 16 H200s, output
+`work_dirs/channelwise_ijbc96_guarded_resume_20260914`. It entered epoch 7;
+step 25 loss was finite at 8.1956, with 1,996 full rows and 52 repair rows.
+This verifies that the resumed training and repair path execute, not that the
+previous uncaptured routing failure is conclusively fixed.
+
+Full IJB-C evaluation **384733** is PENDING with `afterany:384727`, requiring
+this run's newly produced `student_best.pt`. It snapshots the checkpoint,
+exports the channelwise polynomial graph and audits all original/flip rows
+before conservative FAR acceptance. No fresh IJB-C score is available yet.
+The prior credit-rejected submission is retained in `resume_provenance.json`.
