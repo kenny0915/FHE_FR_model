@@ -1620,3 +1620,19 @@ Submitted extraction **386617**, `channelwise-template-cache-expanded`,
 one H200 / 30 minutes, MST114196, recipe **43018e7**. Output
 `work_dirs/channelwise_template_cache_expanded_20260915`. This job only
 extracts the enlarged cache; no calibration/evaluation dependency submitted.
+
+### Expanded cache verified; population fitting planned
+
+Extraction **386617** completed in **3m24s**. Independently verified source,
+teacher, metadata, split and cache SHA values. Cache shapes are 4,096/2,048
+by 512, template IDs are disjoint and match the saved split, features are
+finite and bias weights positive. Cache SHA:
+`bbea6466eaf5e79209f797fc2b1fd3609511f636d7e92bd27ae75f6b74fc60df`.
+[Verification record](channelwise_ijbc96_expanded_cache_result.json).
+
+Fit this expanded cache using full-template population updates, .20 threshold,
+2,000 steps, LR 1e-4 and unchanged anchor/regularization. Validation includes
+all cross-block pairs under implementation af8b62f. Same 95.8838% source as
+the smaller-cache control; no labels in gradient fitting. One H200 / 45 minutes
+includes full exported IJB-C acceptance after held-out proxy selection.
+Main training remains stopped; this tests expanded coverage, not longer training.

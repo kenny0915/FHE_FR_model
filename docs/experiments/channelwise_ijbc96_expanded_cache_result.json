@@ -1,0 +1,36 @@
+{
+  "job": "386617",
+  "elapsed": "00:03:24",
+  "config": {
+    "config": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_pair_geometry_20260915/ijbc_full/evaluated_checkpoint.pt",
+      "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_template_cache_expanded_20260915",
+      "teacher": "work_dirs/ms1mv3_r50/model.pt",
+      "ijb_root": "ijb/IJBC",
+      "fit_templates": 4096,
+      "validation_templates": 2048,
+      "seed": 20260927,
+      "batch_size": 256
+    },
+    "source_sha256": "e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d",
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "split_sha256": "5540c41268d6b331dc109ea07afc22a00d8476761aba9218625387f8694830b6",
+    "metadata_sha256": {
+      "ijb/IJBC/meta/ijbc_face_tid_mid.txt": "e08875c5760bf82af5fcb31bca12e0a49a2ff0f9070671c526a88cf5dff0f5d8",
+      "ijb/IJBC/meta/ijbc_name_5pts_score.txt": "5a03bbb8676db5045c6ecd8afe240047e2ccf613ce0839ba420ae4ea95960c9b"
+    },
+    "cache_layout": "complete_template_barycenters",
+    "uses_ijbc_pair_labels": false,
+    "inference_clipping": false,
+    "approximation": "unchanged per-channel PReLU target and lam_fit interval",
+    "interpretation": "IJB-C calibration-set performance, not untouched test accuracy",
+    "cache_sha256": "bbea6466eaf5e79209f797fc2b1fd3609511f636d7e92bd27ae75f6b74fc60df"
+  },
+  "split_counts": {
+    "fit_templates": 4096,
+    "validation_templates": 2048,
+    "fit_source_images": 82363,
+    "validation_source_images": 40697
+  },
+  "verified": "source/teacher/metadata/split/cache hashes; disjoint template IDs; shapes; finite features; positive finite bias weights"
+}
