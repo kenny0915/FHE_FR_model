@@ -1676,3 +1676,17 @@ regularization before another fit, rather than reducing the anchor merely
 to improve fitting loss. These are local surrogate gradients, not proof of
 TAR improvement or predictions of Adam steps. No optimization or GPU job
 was run for this diagnostic; the verified best remains 95.96563890167204%.
+
+### Stronger teacher-anchor controlled comparison
+
+Expose `--point-anchor-weight` (default .01) and
+`CHANNEL_POINT_ANCHOR_WEIGHT`; reject negative/nonfinite weights and record
+the actual value in calibration provenance. Test .03 once against .01 on
+the verified expanded cache: same 95.8838% source, seed, .20 tail threshold,
+2,000 full-population updates, LR 1e-4, identity penalty and all-pair
+held-out selection. This follows the competing-gradient diagnostic, not
+a claim that a threefold weight is optimal. No pair labels enter fitting.
+
+All 36 relevant tests pass, shell syntax and whitespace checks pass. One
+H200 / 45 minutes includes full exported IJB-C acceptance. Main training
+remains stopped. Preserve the current best regardless of this comparison.

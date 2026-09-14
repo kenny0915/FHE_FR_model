@@ -1,6 +1,7 @@
 """Unlabeled teacher pair-geometry alignment using a verified embedding cache."""
 import argparse
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -98,6 +99,7 @@ def main():
     p.add_argument('--lr', type=float, default=1e-4)
     p.add_argument('--seed', type=int, default=20260926)
     p.add_argument('--tail-threshold', type=float, default=.3)
+    p.add_argument('--point-anchor-weight', type=float, default=.01)
     p.add_argument('--full-template-batch', action='store_true',
                    help='Use every fitting template per update (maximum 4096), without sampling')
     args = p.parse_args()
@@ -105,6 +107,8 @@ def main():
         p.error('positive steps and learning rate required')
     if not -1 <= args.tail_threshold <= 1:
         p.error('tail threshold must be within [-1, 1]')
+    if not math.isfinite(args.point_anchor_weight) or args.point_anchor_weight < 0:
+        p.error('point anchor weight must be finite and nonnegative')
     torch.set_num_threads(2)
     torch.manual_seed(args.seed)
     device = torch.device('cuda')
@@ -164,7 +168,7 @@ def main():
         geometry, _ = pair_geometry_loss(output,sy,sx,ids[rows],args.tail_threshold)
         anchor = (1-F.cosine_similarity(output,sy)).mean()
         penalty = ((matrix-identity).square().sum()+bias.square().sum())/dim
-        loss = geometry+.01*anchor+.001*penalty
+        loss = geometry+args.point_anchor_weight*anchor+.001*penalty
         if not torch.isfinite(loss):
             raise FloatingPointError('non-finite geometry loss')
         optimizer.zero_grad(set_to_none=True)
@@ -191,7 +195,8 @@ def main():
                   cache_sha256=digest(cache_path),uses_ijbc_pair_labels=False,
                   validation_pair_scope='all unordered distinct-source pairs including cross-block pairs',
                   cache_layout=config.get('cache_layout','paired_image_orientations'),
-                  inference_clipping=False,tail_threshold=args.tail_threshold,point_anchor_weight=.01,identity_penalty=.001)
+                  inference_clipping=False,tail_threshold=args.tail_threshold,
+                  point_anchor_weight=args.point_anchor_weight,identity_penalty=.001)
     (root/'calibration_config.json').write_text(json.dumps(record,indent=2))
     if best is None:
         print('NO_IMPROVEMENT',flush=True)
