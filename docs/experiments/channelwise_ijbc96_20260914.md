@@ -1520,3 +1520,8 @@ selection as 386239; only template sampling is removed. Start from the
 95.8838% source used by that control, not from the selected .20 mapping.
 One H200 / 45 minutes includes full exported accuracy, graph and finite
 checks. This changes the optimization method rather than sweeping thresholds.
+
+Submitted **386548**, `channelwise-template-population`, one H200 / 45 minutes,
+MST114196, recipe HEAD **54f02fe**, implementation **45e0496**. Output
+`work_dirs/channelwise_template_population_20260915`; full-template mode is
+enabled, threshold .20 and 2,000 updates. Main backbone training stays stopped.
