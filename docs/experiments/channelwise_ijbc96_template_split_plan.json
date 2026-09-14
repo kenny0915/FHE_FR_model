@@ -1,0 +1,8 @@
+{
+  "fit_templates": 2048,
+  "validation_templates": 512,
+  "fit_source_images": 40031,
+  "validation_source_images": 10623,
+  "seed": 20260927,
+  "source_images_total": 469375
+}

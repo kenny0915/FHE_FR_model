@@ -1266,3 +1266,24 @@ validation. A template-level follow-up must split by template ID, include all
 source images of selected templates, and retain detector/media weighting.
 The existing cache remains valid for its original image-level diagnostics.
 No GPU work was submitted during this coverage audit.
+
+### Complete-template aggregation implementation
+
+Added `controlled_degree2/template_geometry.py`: seeded disjoint template
+selection retains every source row of selected IDs; raw original/flip sums
+receive detector weights, average within (template, media), then sum per
+template. It also returns bias weights so per-orientation affine mapping
+commutes exactly as `T @ A.T + bias_weight[:, None] * b`. The bias weight
+includes two views and detector/media averaging; it is not generally one.
+This module is offline calibration only and adds no encrypted-path operation.
+Normalization remains the subsequent plaintext scoring step. PReLU targets,
+fit intervals and all spatial quadratic coefficients are unchanged.
+
+Three new tests verify complete/disjoint deterministic splits, explicit media
+aggregation including media IDs shared across templates, nonuniform detector
+scores, affine commutation, gradients and invalid inputs. All 28 combined
+template/pair/linear/campaign tests pass. A seed-20260927 split of 2,048 fitting
+and 512 validation templates covers 40,031 and 10,623 complete source images.
+See [channelwise_ijbc96_template_split_plan.json](channelwise_ijbc96_template_split_plan.json).
+Cache extraction and template-level fitting still need integration; no GPU
+job is launched by this helper implementation.
