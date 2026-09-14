@@ -8,7 +8,8 @@ unmet. Main training is stopped. The paired magnitude-loss arm completed at
 95.69974945032469%, also fully finite, and did not improve TAR. One-GPU ablation
 385638 has finished. Original-PReLU baseline 385651 is verified at 96.5537%
 and zero nonfinite. Linear-alignment test 385889 finished at 95.7662%, fully
-finite but below its source. No GPU jobs are currently running.
+finite but below its source. One-H200 pair-geometry test 385987 is running
+full evaluation; its 45-minute allocation does not resume main training.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1135,3 +1136,16 @@ The one-H200 job has a 45-minute limit. All 25 campaign/linear/pair tests pass,
 including rotational invariance of pair similarity, exclusion of same-image
 views, finite high-similarity gradients, detached fixed targets/selection,
 and empty-tail behavior. Slurm syntax and whitespace checks also pass.
+
+Submitted as **385987**, job name `channelwise-pair-geometry-20260915`,
+on 25a-hgpn027, one H200 / 45 minutes. Implementation commit **912b062**
+is pushed. Output: `work_dirs/channelwise_pair_geometry_20260915`.
+Scheduler and advancing logs confirm this same job; no duplicate submission.
+All 2,000 updates completed. Selected step 1,800 reduces held-out fixed-tail
+MSE from .005631924723275006 to .0023044342669891194; all-pair MSE changes
+from .0010700081911636516 to .0011048127271351404. The affine fold probe
+passes with maximum absolute error 1.7462298274040222e-7. Full IJB-C evaluation
+is underway; these proxy improvements do not establish a TAR improvement.
+The existing repair recipe has insufficient evidence to justify extending
+the stopped 16-GPU main run. Retain the fully finite best checkpoint and
+finish this bounded evaluation before judging this distinct loss hypothesis.
