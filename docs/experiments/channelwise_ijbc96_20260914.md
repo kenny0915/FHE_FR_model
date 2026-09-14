@@ -543,3 +543,22 @@ The exported certificate confirms pure polynomial inference, no clipping,
 This proves the structural requirement for this snapshot, not finite
 inference or target accuracy. Full results remain pending and will guide
 whether/how the permitted IJB-C calibration is needed.
+
+
+### Calibration adapter checked on a real all-quadratic candidate
+
+Epoch 15 unrestricted development validation still fails, with aggregate
+nonfinite count 849160683 versus epoch 14's 712020353. These counts combine
+boundary values and bad embedding rows; they are not image counts or TAR.
+The epoch-14 full IJB-C evaluation continues toward a source-level manifest.
+
+In parallel, calibration smoke step **384727.3** completed 25 updates in
+27 seconds on another already allocated H200. It used an isolated epoch-14
+copy, 800 sampled IJB-C orientations, original teacher KD, the bounded
+auxiliary training branch and unbounded finite-prefix repair. Saved inference
+has no clipping; all fixed buffers were checked unchanged and gradients/
+updated parameters finite. Step-25 KD 0.101471, prefix 0.180486, total loss
+0.606596. Output `ijbc_calibration_smoke` under the resumed run; command/logs
+`calibration_smoke_step.json/.out/.err`. This validates the real calibration
+pipeline, not full-inference finiteness or accuracy. Production calibration
+will use the completed IJB-C failure manifest and requires a new full audit.
