@@ -58,3 +58,48 @@ def test_resume_rejects_changed_channel_policy():
     args = SimpleNamespace(sitewise_unclipped=True, train_channel_coefficients=True)
     with pytest.raises(ValueError, match='sitewise_unclipped'):
         check_resume_policy(dict(sitewise_unclipped=False), args)
+
+
+def test_ijbc_calibration_updates_finite_prefix_and_restores_unclipped_graph():
+    from controlled_degree2.calibrate_ijbc_channelwise import calibration_loss, parameters_for_calibration
+    from controlled_degree2.recipe_a_recovery_v2 import sitewise
+
+    class Toy(nn.Module):
+        def __init__(self, polynomial):
+            super().__init__()
+            self.conv = nn.Conv2d(2, 2, 1)
+            self.bn = nn.BatchNorm2d(2)
+            self.prelu = DirectQuadratic(2, lam_fit=.25, name='prelu') if polynomial else nn.PReLU(2)
+
+        def forward(self, x):
+            return self.prelu(self.bn(self.conv(x))).mean((2, 3))
+
+    torch.manual_seed(4)
+    model, teacher = Toy(True).eval(), Toy(False).eval().requires_grad_(False)
+    sitewise(model)
+    params = parameters_for_calibration(model)
+    bn_before = model.bn.running_var.clone()
+    loss, metrics = calibration_loss(model, teacher, torch.randn(4, 2, 4, 4)*5)
+    loss.backward()
+    assert metrics['prefix'] > 0
+    assert all(p.grad is not None and torch.isfinite(p.grad).all() for p in params)
+    assert model.prelu.coeffs.grad.abs().sum() > 0
+    assert not model.prelu.clip_eval and not model.prelu.clip
+    assert all(not m._forward_hooks and not m._forward_pre_hooks for m in model.modules())
+    torch.testing.assert_close(model.bn.running_var, bn_before, rtol=0, atol=0)
+
+
+def test_acceptance_rejects_rounding_partial_audit_and_wrong_checkpoint():
+    from controlled_degree2.channelwise_acceptance import assess
+    raw = [dict(points={'0.0001': dict(tar_percent=96., actual_far=.0000999)})]
+    audit = dict(target='IJBC', source_images=469375, augmented_embeddings=938750,
+                 nonfinite_values=0, embedding_nonfinite_rows=0)
+    certificate = dict(pure_polynomial=True, inference_clipping=False, quadratic_sites=25,
+                       coefficient_mode='channelwise', coefficients=17664, checkpoint_sha256='abc')
+    assert assess(raw, audit, certificate, 'abc')['target_met']
+    raw[0]['points']['0.0001']['tar_percent'] = 95.9999
+    assert not assess(raw, audit, certificate, 'abc')['target_met']
+    raw[0]['points']['0.0001']['tar_percent'] = 96.
+    for key, value in (('augmented_embeddings', 938748), ('nonfinite_values', 1)):
+        assert not assess(raw, dict(audit, **{key:value}), certificate, 'abc')['target_met']
+    assert not assess(raw, audit, certificate, 'different')['target_met']

@@ -1,6 +1,7 @@
 # coding: utf-8
 
 import csv
+import hashlib
 import json
 import os
 import pickle
@@ -175,6 +176,11 @@ class Embedding(object):
         if args.polynomial_export:
             from controlled_degree2.polynomial_export import export_graph
             resnet, certificate = export_graph(resnet.eval(), coefficient_mode=args.polynomial_coefficient_mode)
+            checkpoint_hash = hashlib.sha256()
+            with open(prefix, 'rb') as checkpoint_file:
+                for chunk in iter(lambda: checkpoint_file.read(8 * 1024 * 1024), b''):
+                    checkpoint_hash.update(chunk)
+            certificate['checkpoint_sha256'] = checkpoint_hash.hexdigest()
             certificate_path = Path(args.polynomial_export)
             certificate_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save(resnet.cpu(), certificate_path.with_suffix('.pt'))
@@ -413,6 +419,7 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
             audit.close()
         summary = dict(nonfinite_values=sum(a['nonfinite_values'] for a in audits),
                        embedding_nonfinite_rows=nonfinite_rows, batches=audits,
+                       source_images=len(files), augmented_embeddings=2*len(files), target=args.target,
                        scope='all module inputs and outputs, original and flip, including remainder')
         os.makedirs(os.path.dirname(os.path.abspath(args.finite_audit)), exist_ok=True)
         with open(args.finite_audit, 'w') as stream:

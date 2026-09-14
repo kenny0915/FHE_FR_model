@@ -1,6 +1,6 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: implementation and CPU validation; accuracy target not achieved.
+Status: CPU validation and 16-H200 smoke passed; accuracy target not achieved.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -47,8 +47,14 @@ do not silently continue training with sanitized features.
 After a reproducible converted candidate exists, use IJB-C orientations to
 mine finite tails and numerical failures, and distill original teacher
 embeddings while repairing the earliest unsafe polynomial inputs. The
-existing HerPN-specific calibrator cannot directly consume this model;
-a channelwise adapter and its tests remain required before this stage.
+existing HerPN-specific calibrator cannot directly consume this model.
+`calibrate_ijbc_channelwise.py` provides a separate one-GPU adapter: teacher
+cosine/block distillation on a temporarily bounded auxiliary graph and an
+unclipped finite-prefix loss, with optional original/flip failure replay.
+BN moments and range buffers stay fixed; spatial Conv/BN affine and quadratic
+coefficients train. No labels are read. Saved checkpoints are diagnostic until
+full evaluation; this adapter has CPU gradient/restoration tests but still
+requires a real-candidate GPU smoke before production calibration.
 Track accuracy and numerical stability separately. Reaching a finite gate
 on MS1MV3 alone is not evidence of a finite IJB-C gate.
 
@@ -74,9 +80,19 @@ using a separate small calibration and two distributed updates. It cannot
 establish full-conversion convergence. Production requires `CHANNEL_SMOKE=0`,
 an explicitly supplied `CHANNEL_DEADLINE` and appropriate Slurm time limit.
 No full training runs on the login host. Resource instructions were updated
-in AGENTS.md during preparation to specify 16 H200s; time budget is pending.
+in AGENTS.md during preparation to specify 16 H200s. The initial production
+attempt has a six-hour cap; further allocations require checking actual
+progress and the user's resource preferences, not automatic blind restarts.
 
-64 focused CPU tests passed for initial channelwise policy/export and legacy
-recipe/controlled/shared behavior. Final evaluator wiring and launch scripts
-are undergoing additional checks. Existing unrelated worktree files and the
+66 focused CPU tests passed for channelwise policy/export/calibration/acceptance
+and legacy recipe/controlled/shared behavior. Shell syntax, Python compilation
+and git whitespace checks passed. `channelwise_acceptance.py` rejects rounded
+threshold hits, partial image coverage, non-finite boundaries/embeddings and
+checkpoint hash mismatches. Existing unrelated worktree files and the
 concurrent AGENTS.md edit are not included in implementation commits.
+
+GPU smoke job 383290 completed in 98 seconds with Slurm exit 0. Fresh isolated
+calibration succeeded; 16 ranks x 128 images completed two updates with
+unclipped stem conversion. First loss 3.4841; maximum stem weight change
+.000553. This proves execution only, not full conversion or accuracy.
+Initial implementation commit 0324a53 was pushed to origin/main.
