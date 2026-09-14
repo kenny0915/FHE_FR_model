@@ -25,14 +25,19 @@ from controlled_degree2.recipe_a_recovery_v2 import sitewise
 from utils.utils_optimizer import clip_grad_norm_stable
 
 
-def parameters_for_calibration(model):
+def parameters_for_calibration(model, scope='spatial'):
+    if scope not in ('spatial', 'all', 'head'):
+        raise ValueError('unknown calibration parameter scope')
     model.requires_grad_(False)
     for module in model.modules():
-        if isinstance(module, (nn.Conv2d, nn.BatchNorm2d)):
+        spatial = scope != 'head' and isinstance(module, (nn.Conv2d, nn.BatchNorm2d))
+        head = scope != 'spatial' and isinstance(module, (nn.Linear, nn.BatchNorm1d))
+        if spatial or head:
             for parameter in module.parameters(recurse=False):
                 parameter.requires_grad_(True)
-    for module in quadratic_modules(model):
-        module.coeffs.requires_grad_(True)
+    if scope != 'head':
+        for module in quadratic_modules(model):
+            module.coeffs.requires_grad_(True)
     return [p for p in model.parameters() if p.requires_grad]
 
 
@@ -133,6 +138,8 @@ def main():
     parser.add_argument('--range-weight', type=float, default=1.)
     parser.add_argument('--exact-kd-weight', type=float, default=0.)
     parser.add_argument('--exact-kd-guard', type=float, default=4.)
+    parser.add_argument('--parameter-scope', choices=('spatial', 'all', 'head'), default='spatial',
+                        help='train spatial layers/quadratics, all backbone parameters, or final linear/BN head')
     parser.add_argument('--seed', type=int, default=20260914)
     parser.add_argument('--deadline', type=float, required=True)
     args = parser.parse_args()
@@ -155,7 +162,7 @@ def main():
     sitewise(model)
     if len(model._recovery_sites) != 25:
         raise ValueError('expected all 25 activation sites')
-    parameters = parameters_for_calibration(model)
+    parameters = parameters_for_calibration(model, args.parameter_scope)
     optimizer = torch.optim.SGD(parameters, lr=args.lr)
     fixed_buffers = {n: t.clone() for n, t in model.named_buffers()}
     from utils.utils_ijbc_replay import (

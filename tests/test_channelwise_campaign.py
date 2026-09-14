@@ -112,6 +112,25 @@ def test_exact_calibration_kd_excludes_overflow_before_autograd():
         exact_teacher_loss(model, images, target)
 
 
+def test_head_calibration_changes_only_output_affines_and_keeps_buffers():
+    from controlled_degree2.calibrate_ijbc_channelwise import parameters_for_calibration
+    model = nn.Sequential(nn.Conv2d(2, 2, 1), nn.BatchNorm2d(2), DirectQuadratic(2),
+                          nn.Flatten(1), nn.Linear(8, 3), nn.BatchNorm1d(3)).eval()
+    params = parameters_for_calibration(model, 'head')
+    before = {n: t.clone() for n, t in model.state_dict().items()}
+    optimizer = torch.optim.SGD(params, lr=.01)
+    model(torch.randn(4, 2, 2, 2)).square().mean().backward()
+    assert all(torch.isfinite(p.grad).all() for p in params)
+    optimizer.step()
+    changed = {n for n, t in model.state_dict().items() if not torch.equal(t, before[n])}
+    assert changed and changed <= {'4.weight', '4.bias', '5.weight', '5.bias'}
+    assert not model[2].coeffs.requires_grad and not model[0].weight.requires_grad
+    parameters_for_calibration(model, 'all')
+    assert model[2].coeffs.requires_grad and model[0].weight.requires_grad and model[4].weight.requires_grad
+    parameters_for_calibration(model)
+    assert model[2].coeffs.requires_grad and not model[4].weight.requires_grad
+
+
 def test_acceptance_rejects_rounding_partial_audit_and_wrong_checkpoint():
     from controlled_degree2.channelwise_acceptance import assess
     point = dict(tar_percent=96., actual_far=.0000999)

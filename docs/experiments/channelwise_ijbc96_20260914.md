@@ -688,3 +688,23 @@ Probe **384727.11** also checked the preserved epoch-16 main-training checkpoint
 hash `57299d130e28e82d3d1d640f9644c007a1f737360646d92b67844cc778881934`.
 It has 351/512 old-manifest and 9/512 random failures, random teacher cosine
 .89974. Main training continues; these subset results alone select no winner.
+
+### Output-head adaptation option and historical PReLU reference
+
+The adapter adds `--parameter-scope spatial|all|head`; default `spatial`
+preserves preceding runs. `all` also updates final FC/BatchNorm1d affines,
+while `head` freezes the spatial backbone and all polynomial coefficients.
+BN moments remain fixed in every mode. This permits testing whether adapting
+the final linear map recovers agreement after numerical repair changed its
+input distribution. CPU tests verify an actual head-only SGD update changes
+only output affine parameters and leaves body/buffers unchanged; all 16 campaign
+tests pass. No GPU/head-only accuracy result exists yet.
+
+Historical PReLU scores `work_dirs/ms1mv3_r50/ijbc_result/ms1mv3_r50/ijbc.npy`
+were reanalyzed over 15,658,489 pairs using the same conservative FAR rule:
+TAR **96.55877691%**, actual FAR **9.8919798e-5**. Score SHA:
+`f1ee38cd9e59dedb9a49ccf9b2404a0317e77acb80fd4e5941d3cb2ecc266524`.
+This existing score artifact lacks original checkpoint/evaluation metadata;
+it is a historical reference, not a newly provenance-verified teacher run.
+Command and report: `historical_prelu_reanalysis_step.json` and
+`historical_prelu_reanalysis.json` under the current run.
