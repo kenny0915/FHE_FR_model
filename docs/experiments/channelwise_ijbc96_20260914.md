@@ -172,3 +172,19 @@ are .001754 (stem), .000389, .000302 and .000634 (Layer1 sites).
 The snapshot is a conversion checkpoint, explicitly `pure_quadratic=false`,
 and is not an accepted full-poly or IJB-C candidate. Job 383299 continues;
 383314 is still waiting on its successful completion.
+
+## Layer2 completed; Layer3 conversion underway
+
+Job 383299 reached epoch 5 with the first eight activation sites fully
+quadratic and no training clipping. At step 775/2477, `layer3.0.prelu` has
+alpha=.625757; loss 7.8935, KD .1293 and range .0106 remain finite. Accounting
+confirms RUNNING; dependent IJB-C job 383314 remains PENDING.
+
+Preserved `epoch4_conversion.pt` as an immutable link to the completed
+epoch-4 checkpoint. `epoch4_state_audit.json` confirms all backbone tensors
+finite and all 237 BN running buffers unchanged. Exactly the stem, three
+Layer1 sites and four Layer2 sites have updated coefficients; Layer3/Layer4
+coefficients still match their fresh fits in this snapshot. The largest
+coefficient change is .002835 at `layer2.2.prelu`. This is still a conversion
+snapshot with `pure_quadratic=false`, not a full-network finite/accuracy gate.
+No student IJB-C score has been produced and no test metric changed this run.
