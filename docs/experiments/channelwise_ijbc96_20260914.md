@@ -708,3 +708,23 @@ This existing score artifact lacks original checkpoint/evaluation metadata;
 it is a historical reference, not a newly provenance-verified teacher run.
 Command and report: `historical_prelu_reanalysis_step.json` and
 `historical_prelu_reanalysis.json` under the current run.
+
+### Exact-KD result and output-head calibration
+
+Exact-KD step **384727.14** completed 1,000 updates in 7m55s. Candidate hash
+`227b6e557deda394458bd2abf19ad3d6d74e381391e0dbfaae8a0c73a8ec496e`.
+Probe **384727.16** finds **2/512** old-manifest and **1/512** random nonfinite
+embeddings. On the same 503 initially valid random rows, teacher cosine
+recovers from the pre-exact-KD .87757 to **.89309** (original .89672).
+This supports the exact-inference loss, but is not a full TAR/finite result.
+Reports `calibration_exactkd5_probe.json` / `calibration_exactkd5_probe_step.*`.
+
+Output-head-only GPU smoke **384727.17** completed 25 updates in 19 seconds:
+LR 1e-3, exact KD weight 5, range weight 0. All finite-gradient/parameter and
+fixed-buffer checks passed. The spatial backbone and polynomial coefficients
+are frozen. Production **384727.18** starts from the completed exact-KD
+candidate (not the smoke) for 2,000 head-only steps with these settings and
+seed 20260919, output `ijbc_calibration_epoch14_head2000`; command/logs
+`calibration_head2000_step.*`. It can adapt output geometry, but cannot repair
+an overflowing frozen spatial backbone. The pending full-scan failure manifest
+will guide any subsequent joint numerical repair.
