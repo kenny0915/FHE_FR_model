@@ -584,3 +584,9 @@ Next calibration uses the immutable epoch-14 checkpoint and the complete
 failure manifest: 1,000 steps, batch 32 (half random IJB-C orientations,
 half manifest replay), LR 1e-5, original teacher KD and finite-prefix loss.
 Saved inference remains unclipped; a new full IJB-C audit is required.
+
+Production calibration is now running as step **384727.4**, sharing one
+already allocated H200 on node 026 with a 40-minute deadline. Output
+`ijbc_calibration_epoch14_1000`; command/logs `calibration1000_step.json/.out/.err`.
+The first 75 updates completed with finite recorded losses; acceptance still
+requires the saved unclipped model and a new full evaluation.
