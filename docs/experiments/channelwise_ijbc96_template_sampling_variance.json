@@ -1,0 +1,29 @@
+{
+  "seed": 20260928,
+  "draws": 1024,
+  "batch_templates": 256,
+  "threshold": 0.2,
+  "sampling": "uniform templates with replacement; upper triangle; same-template pairs excluded",
+  "uses_pair_labels": false,
+  "cache_sha256": "c5be8c7fed98899685544f11e7622017830307d95102953b03700c4491d54075",
+  "source_population_tail_mse": 0.001578307943418622,
+  "tail_count": {
+    "mean": 66.318359375,
+    "std": 10.44551168743149,
+    "min": 40.0,
+    "p05": 50.0,
+    "median": 66.0,
+    "p95": 83.0,
+    "max": 107.0
+  },
+  "batch_tail_mse": {
+    "mean": 0.001564229242546844,
+    "std": 0.0003932664526307272,
+    "min": 0.000699319876730442,
+    "p05": 0.001019202871248126,
+    "median": 0.0015215923776850104,
+    "p95": 0.0022515085409395394,
+    "max": 0.003545682644471526
+  },
+  "zero_tail_batches": 0
+}

@@ -1466,3 +1466,23 @@ contains only 230 pairs, .30 only 54. These counts motivate inspecting
 sampling variance and validation coverage before another training recipe;
 they do not establish that changing sampling will improve TAR. No pair labels
 or GPU training were used for this diagnostic. No new GPU job is submitted.
+
+### Measured template minibatch sampling variance
+
+A CPU-only diagnostic draws 1,024 batches of 256 fitting templates with
+replacement (seed 20260928), using the exact .20 teacher/source mask and
+excluding same-template pairs. Mean tail count is 66.32, standard deviation
+10.45, range 40-107, and no batch has an empty tail. Source tail MSE has
+mean .00156423 versus full-population .00157831; batch standard deviation
+is .00039327, with 5th/95th percentiles .00101920/.00225151.
+See [channelwise_ijbc96_template_sampling_variance.json](channelwise_ijbc96_template_sampling_variance.json).
+
+Thus empty-tail updates do not explain the .20 result in this sample. The
+loss fluctuates appreciably, but this alone does not prove optimizer failure
+or justify longer training. A method change worth implementing for a bounded
+comparison is exact full-cache pair geometry on the 2,048 fitting templates:
+retain the .20 population objective, teacher anchor and regularizer, but remove
+template minibatch sampling. This is distinct from another threshold sweep.
+Its gradient equivalence to the existing population loss and memory/runtime
+need verification before any full GPU experiment. No GPU job was submitted
+for this diagnostic and the best verified TAR remains 95.95029912563277%.
