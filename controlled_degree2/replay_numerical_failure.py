@@ -25,6 +25,7 @@ def hint_arithmetic(student, teacher, mask):
         reports[name] = dict(
             nonfinite_rows=int((~torch.isfinite(per_row)).sum()),
             nonfinite_active_rows=int((~torch.isfinite(per_row[mask])).sum()),
+            nonfinite_row_indices=(~torch.isfinite(per_row)).nonzero().flatten().tolist(),
             legacy_masked_mean=scalar((per_row*mask.to(dtype)).sum()/mask.sum().clamp_min(1)),
             active_mean=scalar(per_row[mask].mean()) if bool(mask.any()) else 0.,
         )
@@ -63,6 +64,9 @@ def main():
             excess = (x.to(dtype).abs()/module.lam_reg.to(dtype).reshape(1, -1, 1, 1)-1).clamp_min(0)
             values[name] = dict(mean_square=scalar(excess.square().mean()),
                                 legacy_sum_then_scale=scalar(excess.square().sum()/x.shape[0]/x[0].numel()))
+        ratios = (x.double().abs()/module.lam_fit.double().reshape(1, -1, 1, 1)).flatten(1).amax(1)
+        row = int(ratios.argmax())
+        values['largest_fit_ratio'] = dict(row=row, ratio=scalar(ratios[row]), identity_loss_enabled=bool(mask[row]))
         ranges[module.name] = values
     handles += [m.register_forward_pre_hook(observe) for m in modules]
     model.train()
