@@ -1330,3 +1330,21 @@ prepared. No dependent fitting job is submitted before the completed cache
 is validated. Planned first template fit uses the default 2,000 updates,
 fixed teacher/source high-similarity membership and held-out template proxy;
 no identity or verification-pair labels enter its gradient objective.
+
+### Template cache verified; first template fit submitted
+
+Extraction **386128** completed in 1m48s. Independently verified source,
+teacher, split, metadata and cache SHA values; complete-template IDs/shapes,
+positive weights and disjointness checks pass. Cache SHA:
+`c5be8c7fed98899685544f11e7622017830307d95102953b03700c4491d54075`.
+See [channelwise_ijbc96_template_cache_result.json](channelwise_ijbc96_template_cache_result.json).
+
+Submitted **386141**, `channelwise-template-geometry-20260915`, one H200 /
+45 minutes, MST114196, using implementation **0861032**. Input is the verified
+`work_dirs/channelwise_template_cache_20260915`, output
+`work_dirs/channelwise_template_geometry_20260915`. The 2,000-update affine
+fit starts from the 95.8838% source, uses full template barycenters, and selects
+by held-out template pair geometry. Only FC parameters may change. Full
+exported IJB-C TAR/finite/graph acceptance follows if the proxy improves.
+No identity/pair labels are used for gradient fitting. Main training stays
+stopped; the queue was empty before this single fitting submission.
