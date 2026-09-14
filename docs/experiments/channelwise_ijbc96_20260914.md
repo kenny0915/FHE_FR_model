@@ -291,3 +291,23 @@ raw point; acceptance requires this explicit constrained point. A regression
 case where nearest-point TAR is 96.1% above the requested FAR but the valid
 TAR is only 95.5% now fails acceptance. All 12 campaign tests pass. This
 changes evaluation/acceptance only; active training 383545 is unaffected.
+
+
+### No-pathology run still fails on an identity row
+
+383545 FAILED after 4m29s, epoch 5 step 845. The exact state and all rank
+batches are in `work_dirs/channelwise_ijbc96_nopath_20260914/numerical_failure_e5_s845`.
+Rank 15 row 25 is an identity-loss-enabled augmented image (all 128 masks
+true); input values remain in [-1,1]. Replay **383564** completed and
+confirmed the same row dominates ratios from stem 3.22 through layer1.0
+6.90, layer1.2 9.70, layer2.0 38.72, layer2.3 6.17e10 and layer3.0 5.74e20.
+There are 512 nonfinite embedding values. Removing pathological augmentation
+alone is insufficient; no fully quadratic student or IJB-C metric resulted.
+
+A bounded diagnostic now tests detached, finite-prefix BN-affine repair
+on the captured row, preserving the actual partial PReLU/quadratic phase
+and adding no clipping. It stops before an escaping quadratic and trains
+only its existing upstream BN affine. This is numerical evidence only:
+no resumable checkpoint or accuracy improvement is claimed. Initial guard
+4 and target 2 are multiples of each saved PReLU fit interval radius;
+the original approximation target and interval themselves are unchanged.

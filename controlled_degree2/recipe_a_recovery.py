@@ -65,7 +65,8 @@ class PrefixEscape(Exception):
         self.name, self.penalty, self.ratios = name, penalty, ratios
 
 
-def finite_prefix_loss(model, images, open_groups, guard=1., target=.9, detach_bn=True):
+def finite_prefix_loss(model, images, open_groups, guard=1., target=.9, detach_bn=True,
+                       preserve_phase=False):
     """Stop *before* evaluating the first escaping quadratic.
 
     BN inputs are detached in this probe only, so the penalty can update the
@@ -93,13 +94,14 @@ def finite_prefix_loss(model, images, open_groups, guard=1., target=.9, detach_b
             raise PrefixEscape(module.name, penalty, ratios)
 
     try:
-        configure(model, open_groups)
+        if not preserve_phase:
+            configure(model, open_groups)
         for module in model.modules():
             if detach_bn and isinstance(module, nn.modules.batchnorm._BatchNorm):
                 handles.append(module.register_forward_pre_hook(
                     lambda m, inputs: (inputs[0].detach(),)))
         for module in quadratic_modules(model):
-            if activation_group(model, module) < open_groups:
+            if (module.alpha > 0 if preserve_phase else activation_group(model, module) < open_groups):
                 handles.append(module.register_forward_pre_hook(check))
         try:
             result = model(images)
@@ -123,13 +125,15 @@ def stage_passes(report):
     return report['rows'] > 0 and report['nonfinite'] == 0
 
 
-def finite_prefix_batch_loss(model, images, open_groups, guard=1., target=.9, detach_bn=True):
+def finite_prefix_batch_loss(model, images, open_groups, guard=1., target=.9, detach_bn=True,
+                             preserve_phase=False):
     """Retry safe rows so one escaping row cannot starve deeper affines."""
     total = images.new_zeros((), dtype=torch.float64)
     remaining = images
     first_site, first_ratios = None, images.new_zeros(len(images))
     while len(remaining):
-        loss, site, ratios = finite_prefix_loss(model, remaining, open_groups, guard, target, detach_bn)
+        loss, site, ratios = finite_prefix_loss(model, remaining, open_groups, guard, target,
+                                               detach_bn, preserve_phase=preserve_phase)
         total = total + loss * (len(remaining) / len(images))
         if first_site is None:
             first_site, first_ratios = site, ratios

@@ -27,6 +27,25 @@ class Toy(nn.Module):
         return self.layer1[0].prelu(self.layer1[0].bn2(x))
 
 
+def test_partial_phase_repair_preserves_blend_and_unopened_prelu():
+    model = Toy().train()
+    affine_parameters(model)
+    model.bn1.eval()
+    model.layer1[0].bn2.eval()
+    model.prelu.alpha = .5
+    model.layer1[0].prelu.alpha = 0.
+    for q in (model.prelu, model.layer1[0].prelu):
+        q.clip = q.clip_eval = False
+    loss, site, _ = finite_prefix_loss(model, torch.full((2, 1, 2, 2), 4.),
+                                       25, preserve_phase=True)
+    assert site == 'prelu' and torch.isfinite(loss)
+    loss.backward()
+    assert model.bn1.weight.grad is not None
+    assert model.prelu.alpha == .5 and model.layer1[0].prelu.alpha == 0.
+    assert not model.prelu.clip and not model.prelu.clip_eval
+    assert model.prelu.training and not model.bn1.training
+
+
 def test_stops_before_overflow_and_restores_graph_flags():
     model = Toy()
     parameters = affine_parameters(model)
