@@ -649,3 +649,15 @@ and fixed-buffer checks passed. Saved inference remains unclipped. Output
 `ijbc_calibration_exactkd_smoke`, command/logs `calibration_exactkd_smoke_step.*`.
 It is a pipeline validation, not a measured accuracy improvement. All 15
 campaign tests passed before the smoke; implementation commit `afecffd`.
+
+### First calibration: complete IJB-C result
+
+Full evaluation **384727.5** completed with conservative TAR **95.63839035%**
+at actual FAR **9.6170250e-5**, versus uncalibrated epoch 14's 95.53612517%.
+Nonfinite augmented embeddings decreased **9,712 -> 7,931** (18.3% reduction).
+This is still a diagnostic score with nonfinite handling, not a passing model.
+The corrected audit observes exactly **938,750 input and output rows** across
+all 469,375 source images; full coverage, graph and checkpoint identity pass.
+Accuracy and finiteness fail; `acceptance.json` records `target_met=false`.
+Artifacts are under `ijbc_calibration_epoch14_1000_full`; evaluated hash is
+`55e6133f9d72248626a2634f098702c58bf30a2e6083b9ba2418ae164b495b61`.
