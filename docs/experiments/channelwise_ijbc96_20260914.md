@@ -1066,3 +1066,18 @@ checkpoint at
 Output root: `work_dirs/channelwise_linear_head_20260915`; logs
 `channelwise-385889.out/.err`. Implementation commit **ee25c16**. No main
 training or other GPU allocation is running concurrently.
+
+Job 385889 started on 25a-hgpn008 and completed feature extraction/fitting.
+All seven ridge candidates improved held-out teacher cosine relative to the
+source; selected ridge **0.1**, cosine loss **0.10448507823786159 ->
+0.10047134168892996**. The real 64-orientation FC-fold check passed with
+maximum absolute error **1.5818240992615529e-6**. State comparison permits
+only FC weight/bias changes; the exported graph certificate confirms 25
+channelwise quadratics, 17,664 coefficients, pure polynomial inference and
+no clipping. Candidate SHA
+`a7a8e6d3d98b46b02ddec3934160f3233ed2a5763737e1116be3edcdcf3c5b58`.
+Full IJB-C evaluation is running in `channelwise_linear_head_20260915/ijbc_full`;
+selection evidence is `selection.json` in that run root. No full accuracy or
+zero-nonfinite claim is made for this candidate yet. One delayed squeue RPC
+was re-polled; sacct and advancing evaluation logs confirmed the same job
+remained live, and no duplicate job was launched.
