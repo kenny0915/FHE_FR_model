@@ -992,3 +992,35 @@ results, with no identity/pair labels used for gradient training.
 Job 385638 finished both arms within its one-hour limit, without a passing
 96% model. No further training was launched. Dependent original-PReLU
 baseline job 385651 has been released to the scheduler.
+
+### Original PReLU baseline verified (job 385651)
+
+The immutable original PReLU baseline completed in 29m19s. Conservative
+TAR is **96.55366364984404%**, actual FAR **9.847219746207733e-5**,
+with **zero** nonfinite intermediate values and embeddings over all 469,375
+source images / 938,750 original and flip orientations. Its checkpoint hash
+was recomputed after evaluation and still matches the original teacher hash.
+See [channelwise_ijbc96_verified_prelu_result.json](channelwise_ijbc96_verified_prelu_result.json).
+
+The displayed nearest-ROC score is 96.5587769085238%, but that row's actual
+FAR is 0.00010000682911083698, slightly above the requested cap. Therefore the
+strict same-protocol comparison uses **96.55366364984404%**, not the rounded
+96.56% display. The best fully finite quadratic candidate trails this baseline
+by **0.75676228460397 percentage points** and trails the 96% goal by
+**0.20309863475993 points**. PReLU is a comparison model, not an eligible
+polynomial solution. All submitted training and evaluation jobs are now
+terminal; no 96% polynomial result is claimed.
+
+The full saved pair scores were independently reanalysed with their common
+label file and each model's own conservative ROC threshold. There are
+19,557 genuine and 15,638,932 impostor pairs. Exact cosine accepts 18,735
+genuine pairs, compared with 18,732 for its residual-six source and 18,716
+for the MSE arm. Thus the small cosine gain is **three genuine pairs**, and
+reaching 96% requires at least 18,775 genuine accepts: **40 more**, while
+respecting the impostor FAR cap. The verified teacher accepts 18,883. Across
+their respective thresholds, 162 genuine pairs are accepted by teacher and
+rejected by student, 14 show the reverse, and 660 are rejected by both.
+See [channelwise_ijbc96_pair_diagnostics.json](channelwise_ijbc96_pair_diagnostics.json).
+These are diagnostic analyses of evaluation labels, not a change to the
+no-label gradient-training policy. They identify a recognition-quality gap;
+full numerical stability of the eligible candidates is already established.

@@ -1,0 +1,52 @@
+{
+  "pairs": 15658489,
+  "genuine_pairs": 19557,
+  "impostor_pairs": 15638932,
+  "label_path": "ijb/IJBC/meta/ijbc_template_pair_label.txt",
+  "models": {
+    "prelu": {
+      "score_path": "work_dirs/channelwise_prelu_verified_20260915/ijbc_full/original_prelu/ijbc.npy",
+      "threshold": 0.267762704546643,
+      "tar_percent": 96.55366364984404,
+      "actual_far": 9.847219746207733e-05,
+      "true_accepts": 18883,
+      "false_accepts": 1540,
+      "false_rejects": 674
+    },
+    "exact_cosine": {
+      "score_path": "work_dirs/channelwise_exact_head_20260915/mse0/ijbc_full/exact_head_mse0/ijbc.npy",
+      "threshold": 0.28994953184803096,
+      "tar_percent": 95.79690136524006,
+      "actual_far": 9.898374134499722e-05,
+      "true_accepts": 18735,
+      "false_accepts": 1548,
+      "false_rejects": 822
+    },
+    "exact_mse": {
+      "score_path": "work_dirs/channelwise_exact_head_20260915/mse1/ijbc_full/exact_head_mse1/ijbc.npy",
+      "threshold": 0.29650570642912805,
+      "tar_percent": 95.69974945032469,
+      "actual_far": 9.930345627182214e-05,
+      "true_accepts": 18716,
+      "false_accepts": 1553,
+      "false_rejects": 841
+    },
+    "residual6": {
+      "score_path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6_full/channelwise_residual6/ijbc.npy",
+      "threshold": 0.2941705266701596,
+      "tar_percent": 95.78156158920079,
+      "actual_far": 9.911162731572719e-05,
+      "true_accepts": 18732,
+      "false_accepts": 1550,
+      "false_rejects": 825
+    }
+  },
+  "target_true_accepts": 18775,
+  "additional_true_accepts_needed": 40,
+  "genuine_disagreement": {
+    "teacher_accept_student_reject": 162,
+    "student_accept_teacher_reject": 14,
+    "both_reject": 660
+  },
+  "interpretation": "Each model uses its own conservative FAR<=1e-4 threshold; diagnostic label analysis only, no labels used in gradient training."
+}
