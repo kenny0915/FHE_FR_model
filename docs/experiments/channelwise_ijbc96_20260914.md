@@ -886,3 +886,32 @@ continuation was submitted. The best eligible result of this recipe remains
 **95.7815615892008% / zero nonfinite**, an IJB-C calibration-set result.
 The broader 96% objective remains unmet; stopping this recipe does not
 redefine or satisfy that objective.
+
+### New bounded hypothesis: exact-path head calibration and feature magnitude
+
+The original recipe remains stopped. Inspection of the unchanged IJB-C
+protocol confirms that original/flip embeddings are summed without per-image
+L2 normalization (`use_norm_score`), then weighted by detector confidence
+before media/template aggregation. Earlier head calibration used cosine KD,
+which does not constrain embedding magnitude, and combined a temporarily
+clipped auxiliary graph with the exact unclipped graph. Better small-probe
+cosine did not predict better full TAR.
+
+A distinct one-H200, one-hour maximum ablation is prepared in
+`controlled_degree2/channelwise_exact_head.slurm`. Both arms start the fully
+finite residual-six source, freeze spatial layers and polynomial coefficients,
+and optimize only final Linear/BN1d affines on the exact unclipped graph.
+Arm 0 uses cosine KD; arm 1 adds embedding squared error divided by the batch
+mean teacher squared norm. Same seed 20260924, 2,000 steps, batch 64, LR .003,
+exact KD weight 1, guard 4, range and auxiliary weights zero. A separate
+25-update smoke runs first. Each arm gets a full exported IJB-C audit; numerical
+or extraction failures abort, and a verified passing arm stops further work.
+No labels are used for gradients, no inference operations are added, BN/range
+buffers remain fixed, and approximation targets/intervals remain unchanged.
+This is a hypothesis test, not evidence that 96% is attainable.
+
+The adapter defaults preserve all earlier runs. New tests establish a nonzero
+magnitude-correcting gradient when cosine already matches, frozen polynomial
+parameters, no auxiliary clipping in exact-only mode, and finite connected
+zero gradients when all rows are excluded for a frozen-body head. All 18
+campaign tests pass; the new Slurm script also passes `bash -n`.

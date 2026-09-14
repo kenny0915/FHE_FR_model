@@ -265,3 +265,46 @@ def test_audit_diagnostic_replays_do_not_inflate_coverage():
     assert result['boundaries']['.output']['observed_rows'] == 3
     assert result['nonfinite_values'] == 2
     audit.close()
+
+
+def test_exact_mse_restores_magnitude_when_cosine_already_matches():
+    from controlled_degree2.calibrate_ijbc_channelwise import exact_teacher_loss
+    q = DirectQuadratic(2).eval().requires_grad_(False)
+    head = nn.Linear(2, 2, bias=False)
+    with torch.no_grad():
+        head.weight.copy_(torch.eye(2))
+    model = nn.Sequential(q, nn.Flatten(1), head).eval()
+    images = torch.tensor([[[[.3]], [[.7]]], [[[.6]], [[.2]]]])
+    target = 2*model(images).detach()
+    cosine, rows = exact_teacher_loss(model, images, target)
+    loss, _ = exact_teacher_loss(model, images, target, mse_weight=1.)
+    assert rows == 2
+    torch.testing.assert_close(cosine, torch.zeros_like(cosine), atol=1e-6, rtol=0)
+    torch.testing.assert_close(loss, torch.tensor(.25), atol=1e-6, rtol=0)
+    loss.backward()
+    assert torch.isfinite(head.weight.grad).all() and head.weight.grad.abs().sum() > 0
+    assert q.coeffs.grad is None
+
+
+def test_exact_only_head_never_uses_auxiliary_clipping_and_handles_empty_batch():
+    from controlled_degree2.calibrate_ijbc_channelwise import calibration_loss, exact_teacher_loss
+    q = DirectQuadratic(2).eval().requires_grad_(False)
+    model = nn.Sequential(q, nn.Flatten(1), nn.Linear(2, 2)).eval()
+    model._recovery_sites = [q.name]
+    teacher = nn.Sequential(nn.Flatten(1), nn.Linear(2, 2)).eval().requires_grad_(False)
+    flags = []
+    handle = q.register_forward_pre_hook(lambda m, i: flags.append(m.clip or m.clip_eval))
+    loss, metrics = calibration_loss(model, teacher, torch.ones(3, 2, 1, 1)*.2,
+                                    auxiliary_weight=0, range_weight=0,
+                                    exact_kd_weight=1, exact_mse_weight=1)
+    loss.backward()
+    assert flags and not any(flags) and metrics['exact_rows'] == 3
+    handle.remove()
+    model.zero_grad(set_to_none=True)
+    empty, rows = exact_teacher_loss(model, torch.full((1, 2, 1, 1), 1e25), torch.ones(1, 2))
+    empty.backward()
+    assert rows == 0 and empty == 0
+    assert torch.isfinite(model[2].weight.grad).all() and not model[2].weight.grad.any()
+    with pytest.raises(ValueError, match='zero range weight'):
+        calibration_loss(model, teacher, torch.ones(1, 2, 1, 1), auxiliary_weight=0,
+                         exact_kd_weight=1)

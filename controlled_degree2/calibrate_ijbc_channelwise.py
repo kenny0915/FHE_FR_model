@@ -41,13 +41,15 @@ def parameters_for_calibration(model, scope='spatial'):
     return [p for p in model.parameters() if p.requires_grad]
 
 
-def exact_teacher_loss(model, images, target, guard=4.):
+def exact_teacher_loss(model, images, target, guard=4., mse_weight=0.):
     """Distill the actual unclipped graph on numerically safe rows only.
 
     Probe without autograd, then rerun the selected images. Masking a loss
     after an overflowing forward would still propagate NaN gradients.
     """
     sites = list(quadratic_modules(model))
+    if not torch.isfinite(target).all():
+        raise FloatingPointError('non-finite exact-KD teacher embedding')
     if any(module.training for module in model.modules()) or any(q.clip_eval for q in sites):
         raise ValueError('exact KD requires evaluation mode and unclipped activations')
     safe = torch.ones(len(images), dtype=torch.bool, device=images.device)
@@ -69,19 +71,36 @@ def exact_teacher_loss(model, images, target, guard=4.):
             handle.remove()
     rows = int(safe.sum())
     if not rows:
-        return next(quadratic_modules(model)).coeffs.sum()*0, 0
+        return next(p for p in model.parameters() if p.requires_grad).sum()*0, 0
     output = model(images[safe])
     norms = output.norm(dim=1)
     if not torch.isfinite(output).all() or not torch.isfinite(norms).all() or (norms <= 0).any():
         raise FloatingPointError('non-finite exact-KD selected-row rerun')
     loss = (1-F.cosine_similarity(output, target[safe], dim=1)).mean()
+    if mse_weight:
+        # Preserve teacher magnitude as well as direction: the unchanged IJB-C
+        # protocol retains embedding norms during template aggregation.
+        relative_mse = (output-target[safe]).square().sum(1).mean()
+        relative_mse = relative_mse/target[safe].square().sum(1).mean().clamp_min(1e-12)
+        loss = loss + mse_weight*relative_mse
     return loss*rows/len(images), rows
 
 
 def calibration_loss(model, teacher, images, guard=.9, range_weight=1.,
-                     exact_kd_weight=0., exact_kd_guard=4.):
+                     exact_kd_weight=0., exact_kd_guard=4., auxiliary_weight=1.,
+                     exact_mse_weight=0.):
     """Bounded auxiliary KD plus exact-unclipped-prefix repair gradients."""
     sites = list(quadratic_modules(model))
+    if auxiliary_weight == 0:
+        if range_weight != 0 or exact_kd_weight <= 0:
+            raise ValueError('exact-only calibration requires zero range weight and positive exact KD')
+        configure(model, len(sites))
+        with torch.no_grad():
+            target = teacher(images)
+        exact, rows = exact_teacher_loss(model, images, target, exact_kd_guard, exact_mse_weight)
+        loss = exact_kd_weight*exact
+        return loss, dict(kd=0., prefix=0., loss=float(loss.detach()),
+                          exact_kd=float(exact.detach()), exact_rows=rows)
     penalties, student_hints, teacher_hints, handles = [], {}, {}, []
 
     def observe(module, inputs):
@@ -117,9 +136,9 @@ def calibration_loss(model, teacher, images, guard=.9, range_weight=1.,
         configure(model, len(sites))
     prefix, _, _ = finite_prefix_batch_loss(model, images, len(sites), guard=1.,
                                            target=guard, detach_bn=False)
-    exact, exact_rows = (exact_teacher_loss(model, images, target, exact_kd_guard)
+    exact, exact_rows = (exact_teacher_loss(model, images, target, exact_kd_guard, exact_mse_weight)
                          if exact_kd_weight else (images.new_zeros(()), 0))
-    loss = auxiliary + range_weight*prefix + exact_kd_weight*exact
+    loss = auxiliary_weight*auxiliary + range_weight*prefix + exact_kd_weight*exact
     return loss, dict(kd=float(kd.detach()), prefix=float(prefix.detach()), loss=float(loss.detach()),
                       exact_kd=float(exact.detach()), exact_rows=exact_rows)
 
@@ -138,6 +157,8 @@ def main():
     parser.add_argument('--range-weight', type=float, default=1.)
     parser.add_argument('--exact-kd-weight', type=float, default=0.)
     parser.add_argument('--exact-kd-guard', type=float, default=4.)
+    parser.add_argument('--auxiliary-weight', type=float, choices=(0., 1.), default=1.)
+    parser.add_argument('--exact-mse-weight', type=float, default=0.)
     parser.add_argument('--parameter-scope', choices=('spatial', 'all', 'head'), default='spatial',
                         help='train spatial layers/quadratics, all backbone parameters, or final linear/BN head')
     parser.add_argument('--seed', type=int, default=20260914)
@@ -147,6 +168,11 @@ def main():
         parser.error('positive sizes/LR and nonnegative range weight required')
     if args.exact_kd_weight < 0 or args.exact_kd_guard <= 0:
         parser.error('nonnegative exact KD weight and positive guard required')
+    if args.exact_mse_weight < 0 or not np.isfinite(args.exact_mse_weight):
+        parser.error('finite nonnegative exact MSE weight required')
+    if args.auxiliary_weight == 0 and (args.parameter_scope != 'head'
+            or args.range_weight != 0 or args.exact_kd_weight <= 0):
+        parser.error('exact-only mode requires head scope, zero range weight and positive exact KD')
     if int(os.environ.get('WORLD_SIZE', '1')) != 1:
         parser.error('this calibration adapter runs on one GPU')
     torch.set_num_threads(2)
@@ -194,7 +220,9 @@ def main():
         optimizer.zero_grad(set_to_none=True)
         loss, metrics = calibration_loss(model, teacher, images.to(device), range_weight=args.range_weight,
                                          exact_kd_weight=args.exact_kd_weight,
-                                         exact_kd_guard=args.exact_kd_guard)
+                                         exact_kd_guard=args.exact_kd_guard,
+                                         auxiliary_weight=args.auxiliary_weight,
+                                         exact_mse_weight=args.exact_mse_weight)
         if not torch.isfinite(loss):
             raise FloatingPointError('non-finite calibration loss')
         loss.backward()
