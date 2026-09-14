@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import torch
 
-from controlled_degree2.model import load_controlled_checkpoint, quadratic_modules
+from controlled_degree2.model import load_controlled_checkpoint, load_teacher, quadratic_modules
 from controlled_degree2.recipe_a import apply_phase, digest
 from controlled_degree2.recipe_a_recovery import affine_parameters, finite_prefix_loss
 from utils.utils_optimizer import clip_grad_norm_stable
@@ -50,11 +50,27 @@ def main():
     frozen = {n: t.detach().clone() for n, t in model.state_dict().items()
               if n not in {n for n, p in model.named_parameters() if p.requires_grad}}
     optimizer = torch.optim.SGD(params, lr=args.lr)
+    teacher_path = source['config']['teacher']
+    if digest(teacher_path) != source['provenance']['teacher_sha256']:
+        raise ValueError('teacher provenance mismatch')
+    teacher = load_teacher(teacher_path, torch.device('cuda')).eval().requires_grad_(False)
+    with torch.no_grad():
+        target = teacher(images)
+        original = model(images)
+        original_valid = torch.isfinite(original).all(1) & torch.isfinite(original.norm(dim=1))
+    del teacher
     def audit():
         with torch.no_grad():
             out = model(images)
+            valid = torch.isfinite(out).all(1) & torch.isfinite(out.norm(dim=1))
+            common = valid & original_valid
+            cosine = torch.nn.functional.cosine_similarity
             return dict(nonfinite_rows=int((~torch.isfinite(out).all(1)).sum()),
-                        nonfinite_norm_rows=int((~torch.isfinite(out.norm(dim=1))).sum()))
+                        nonfinite_norm_rows=int((~torch.isfinite(out.norm(dim=1))).sum()),
+                        teacher_comparison_rows=int(valid.sum()),
+                        teacher_cosine=float(cosine(out[valid], target[valid]).mean()) if valid.any() else None,
+                        original_valid_teacher_cosine=float(cosine(out[common], target[common]).mean()) if common.any() else None,
+                        original_valid_embedding_cosine=float(cosine(out[common], original[common]).mean()) if common.any() else None)
     report = dict(config=vars(args), source_sha256=digest(args.state), before=audit(), steps=[])
     for step in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
