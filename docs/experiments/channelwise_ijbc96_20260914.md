@@ -1615,3 +1615,8 @@ preflight and whitespace checks pass; extraction/aggregation implementation
 is unchanged and covered by the existing template tests. Submit extraction
 only on one H200 / 30 minutes. Verify resulting hashes and template shapes
 before any fit; main backbone training stays stopped.
+
+Submitted extraction **386617**, `channelwise-template-cache-expanded`,
+one H200 / 30 minutes, MST114196, recipe **43018e7**. Output
+`work_dirs/channelwise_template_cache_expanded_20260915`. This job only
+extracts the enlarged cache; no calibration/evaluation dependency submitted.
