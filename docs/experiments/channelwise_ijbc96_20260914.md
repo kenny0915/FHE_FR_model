@@ -1208,3 +1208,23 @@ nonfinite, 23 genuine accepts short of 96%. No further duration extension
 is submitted. Retain the 2,000-step candidate and analyze the low-FAR proxy
 mismatch before choosing a different intervention. Both results are IJB-C
 calibration-set performance, not untouched test accuracy.
+
+### Low-FAR pair turnover diagnostic
+
+CPU analysis of the existing complete score arrays reproduces the recorded
+true/false accepts at each model's own conservative threshold. Exact cosine
+to 2,000-step geometry gains 36 genuine pairs and loses 19 (net +17);
+it newly accepts 309 impostor pairs and rejects 312. Extending to 8,000 steps
+gains 19 genuine pairs and loses 23 (net -4), with 220 new false accepts and
+206 newly rejected impostors. The best geometry model rejects 155 genuine
+pairs accepted by PReLU, while accepting 24 that PReLU rejects; 650 are
+rejected by both. See
+[channelwise_ijbc96_geometry_pair_diagnostics.json](channelwise_ijbc96_geometry_pair_diagnostics.json).
+
+These comparisons use each model's own threshold, not a shared raw-score
+threshold. They show pair turnover despite a better average geometry proxy;
+they do not identify a causal mechanism or establish statistical significance.
+Labels are used only for this diagnostic, not gradient fitting. A next
+analysis should check the mismatch between single-orientation calibration
+cosines and the actual original/flip, media/template aggregation protocol
+before allocating another full run. Main training stays stopped.
