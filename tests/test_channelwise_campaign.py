@@ -146,3 +146,17 @@ def test_failure_capture_preserves_exact_batch_and_preupdate_weights(tmp_path):
     torch.testing.assert_close(state['state_dict_backbone']['0.coeffs'], before, rtol=0, atol=0)
     torch.testing.assert_close(q.coeffs, before, rtol=0, atol=0)
     assert state['diagnostic_only'] and not state['pure_quadratic']
+
+
+def test_loss_diagnostics_distinguish_masked_overflow_from_active_overflow():
+    from controlled_degree2.replay_numerical_failure import hint_arithmetic
+    student = torch.tensor([[1., 1.], [1e25, 1e25]])
+    teacher = torch.ones_like(student)
+    report = hint_arithmetic(student, teacher, torch.tensor([True, False]))
+    assert report['fp32']['legacy_masked_mean'] == 'nan'
+    assert report['fp32']['active_mean'] == 0
+    assert report['fp32']['nonfinite_active_rows'] == 0
+    active = hint_arithmetic(student, teacher, torch.tensor([True, True]))
+    assert active['fp32']['nonfinite_active_rows'] == 1
+    assert active['fp64']['nonfinite_active_rows'] == 0
+    assert isinstance(active['fp64']['active_mean'], float)

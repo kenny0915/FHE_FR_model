@@ -198,8 +198,9 @@ optimizer update. This does not identify which loss component overflowed;
 no failed batch was captured by the original trainer. Do not infer an
 embedding overflow or a particular layer from the last finite log alone.
 
-The Slurm allocation lingered after the worker failure. It and dependent
-evaluation 383314 are explicitly cancelled; no IJB-C result exists.
+The Slurm allocation lingered after the worker failure. Cancellation of it
+and dependent evaluation 383314 was requested, but the scheduler RPC timed
+out; cancellation has not been confirmed. No IJB-C result exists.
 `--capture-numerical-failure` now saves the exact augmented per-rank batches,
 component/stage/activation diagnostics and rank-0 pre-update backbone/head/
 optimizer state before numerical abort, with no sanitization or skipped update.
@@ -214,3 +215,25 @@ Only failure capture is added. The transient training-tail replay cache is
 rebuilt on resume, so this is not a bit-exact replay of the failed epoch.
 The purpose is to capture a concrete numerical failure, or establish that
 the resumed trajectory progresses, before selecting a numerical repair.
+
+The diagnostic output directory is
+`work_dirs/channelwise_ijbc96_diag_20260914`; original preparation and split
+are preserved there. Source checkpoint SHA-256:
+`fee1837a8d8934741dd256f67e235eeeff91ca97902906a889ce501e6872f5bb`.
+The first `sbatch` request used `afterany:383299` so no diagnostic allocation
+could overlap the lingering original allocation. Submission also returned a
+socket timeout. Repeated accounting searches for the unique diagnostic job
+name initially found no job. A later accounting query identified **383449**,
+submitted at 14:29:37 Taipei time and PENDING: the timed-out mutation was
+accepted. No duplicate was submitted. The original allocation/cancellation
+state was subsequently reconciled: 383299 is FAILED (exit 1, 59m56s) and
+383314 is CANCELLED. Diagnostic 383449 started at 14:32:00 Taipei time on
+25a-hgpn153–154, using 16 H200s and the declared 20-minute cap.
+
+`replay_numerical_failure.py` will replay a captured state/batch on one GPU
+without updates. It reports forward-boundary finiteness, embedding norm
+overflow, per-stage FP32 versus FP64 errors, active versus masked errors,
+and range-loss mean versus sum-then-scale arithmetic. A CPU test demonstrates
+the masked `0*Inf` NaN distinction and active FP32 square overflow; it does
+not establish the cause of the real failed run. This replay has not yet run
+on a captured real failure; diagnostic job 383449 is waiting to start.
