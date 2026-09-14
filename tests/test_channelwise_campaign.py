@@ -89,6 +89,29 @@ def test_ijbc_calibration_updates_finite_prefix_and_restores_unclipped_graph():
     torch.testing.assert_close(model.bn.running_var, bn_before, rtol=0, atol=0)
 
 
+def test_exact_calibration_kd_excludes_overflow_before_autograd():
+    from controlled_degree2.calibrate_ijbc_channelwise import exact_teacher_loss
+    q = DirectQuadratic(2, lam_fit=1.).eval()
+    q.coeffs.requires_grad_(True)
+    model = nn.Sequential(q, nn.Flatten(1)).eval()
+    images = torch.tensor([[[[.5]], [[.3]]], [[[1e25]], [[1e25]]]])
+    target = torch.tensor([[1., -1.], [1., 1.]])
+    loss, rows = exact_teacher_loss(model, images, target)
+    expected = (1-torch.nn.functional.cosine_similarity(model(images[:1]), target[:1])).mean()/2
+    torch.testing.assert_close(loss, expected)
+    assert rows == 1
+    loss.backward()
+    assert torch.isfinite(q.coeffs.grad).all() and q.coeffs.grad.abs().sum() > 0
+    assert not q._forward_pre_hooks and not q.clip_eval
+    q.coeffs.grad = None
+    empty, rows = exact_teacher_loss(model, images[1:], target[1:])
+    empty.backward()
+    assert rows == 0 and empty == 0 and not q.coeffs.grad.any()
+    q.clip_eval = True
+    with pytest.raises(ValueError, match='unclipped'):
+        exact_teacher_loss(model, images, target)
+
+
 def test_acceptance_rejects_rounding_partial_audit_and_wrong_checkpoint():
     from controlled_degree2.channelwise_acceptance import assess
     point = dict(tar_percent=96., actual_far=.0000999)

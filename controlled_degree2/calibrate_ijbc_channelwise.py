@@ -36,7 +36,45 @@ def parameters_for_calibration(model):
     return [p for p in model.parameters() if p.requires_grad]
 
 
-def calibration_loss(model, teacher, images, guard=.9, range_weight=1.):
+def exact_teacher_loss(model, images, target, guard=4.):
+    """Distill the actual unclipped graph on numerically safe rows only.
+
+    Probe without autograd, then rerun the selected images. Masking a loss
+    after an overflowing forward would still propagate NaN gradients.
+    """
+    sites = list(quadratic_modules(model))
+    if any(module.training for module in model.modules()) or any(q.clip_eval for q in sites):
+        raise ValueError('exact KD requires evaluation mode and unclipped activations')
+    safe = torch.ones(len(images), dtype=torch.bool, device=images.device)
+    handles = []
+
+    def observe(module, inputs):
+        relative = inputs[0].detach().abs()/module.lam_fit.reshape(1, -1, 1, 1)
+        safe.logical_and_(relative.flatten(1).amax(1) <= guard)
+
+    try:
+        for module in sites:
+            handles.append(module.register_forward_pre_hook(observe))
+        with torch.no_grad():
+            probe = model(images)
+            norms = probe.norm(dim=1)
+            safe.logical_and_(torch.isfinite(probe).all(1) & torch.isfinite(norms) & (norms > 0))
+    finally:
+        for handle in handles:
+            handle.remove()
+    rows = int(safe.sum())
+    if not rows:
+        return next(quadratic_modules(model)).coeffs.sum()*0, 0
+    output = model(images[safe])
+    norms = output.norm(dim=1)
+    if not torch.isfinite(output).all() or not torch.isfinite(norms).all() or (norms <= 0).any():
+        raise FloatingPointError('non-finite exact-KD selected-row rerun')
+    loss = (1-F.cosine_similarity(output, target[safe], dim=1)).mean()
+    return loss*rows/len(images), rows
+
+
+def calibration_loss(model, teacher, images, guard=.9, range_weight=1.,
+                     exact_kd_weight=0., exact_kd_guard=4.):
     """Bounded auxiliary KD plus exact-unclipped-prefix repair gradients."""
     sites = list(quadratic_modules(model))
     penalties, student_hints, teacher_hints, handles = [], {}, {}, []
@@ -74,8 +112,11 @@ def calibration_loss(model, teacher, images, guard=.9, range_weight=1.):
         configure(model, len(sites))
     prefix, _, _ = finite_prefix_batch_loss(model, images, len(sites), guard=1.,
                                            target=guard, detach_bn=False)
-    loss = auxiliary + range_weight*prefix
-    return loss, dict(kd=float(kd.detach()), prefix=float(prefix.detach()), loss=float(loss.detach()))
+    exact, exact_rows = (exact_teacher_loss(model, images, target, exact_kd_guard)
+                         if exact_kd_weight else (images.new_zeros(()), 0))
+    loss = auxiliary + range_weight*prefix + exact_kd_weight*exact
+    return loss, dict(kd=float(kd.detach()), prefix=float(prefix.detach()), loss=float(loss.detach()),
+                      exact_kd=float(exact.detach()), exact_rows=exact_rows)
 
 
 def main():
@@ -90,11 +131,15 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--range-weight', type=float, default=1.)
+    parser.add_argument('--exact-kd-weight', type=float, default=0.)
+    parser.add_argument('--exact-kd-guard', type=float, default=4.)
     parser.add_argument('--seed', type=int, default=20260914)
     parser.add_argument('--deadline', type=float, required=True)
     args = parser.parse_args()
     if args.steps <= 0 or args.batch_size <= 0 or args.lr <= 0 or args.range_weight < 0:
         parser.error('positive sizes/LR and nonnegative range weight required')
+    if args.exact_kd_weight < 0 or args.exact_kd_guard <= 0:
+        parser.error('nonnegative exact KD weight and positive guard required')
     if int(os.environ.get('WORLD_SIZE', '1')) != 1:
         parser.error('this calibration adapter runs on one GPU')
     torch.set_num_threads(2)
@@ -140,7 +185,9 @@ def main():
         if time.time() >= args.deadline:
             raise TimeoutError('calibration deadline reached')
         optimizer.zero_grad(set_to_none=True)
-        loss, metrics = calibration_loss(model, teacher, images.to(device), range_weight=args.range_weight)
+        loss, metrics = calibration_loss(model, teacher, images.to(device), range_weight=args.range_weight,
+                                         exact_kd_weight=args.exact_kd_weight,
+                                         exact_kd_guard=args.exact_kd_guard)
         if not torch.isfinite(loss):
             raise FloatingPointError('non-finite calibration loss')
         loss.backward()

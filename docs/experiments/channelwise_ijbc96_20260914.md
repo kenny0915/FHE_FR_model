@@ -615,3 +615,28 @@ with the same original failure manifest and half-random batches. Output
 `ijbc_calibration_epoch14_lr1e4`; command/logs `calibration_lr1e4_step.*`.
 It shares a second already allocated H200 while the first candidate's full
 evaluation runs; the primary 16-GPU training remains active.
+
+### Stronger calibration and exact-inference distillation option
+
+The first LR-1e-4 continuation completed 1,000 steps, final prefix .20958.
+Candidate SHA `0c71925fdfacd1f8a1356008fc45e195698265798854238ad36e4702adc973de`.
+The identical exported-graph subset now has **64/512** manifest and **4/512**
+random nonfinite embeddings (versus 408 and 9 after the first calibration).
+Valid random-row teacher cosine decreased to .88436; compared sets differ by
+newly repaired rows, so this is not a paired-only accuracy measurement.
+No full TAR is available for this candidate. Probe logs `calibration_lr1e4_probe_step.*`.
+A further 2,000-step LR-1e-4 continuation, seed 20260916, is running in
+`ijbc_calibration_epoch14_lr1e4_3000`, starting from this immutable completed
+candidate. Main epoch 16 still fails development finiteness; its snapshot
+is retained as `epoch16_quadratic.pt`.
+
+The calibration adapter now optionally adds teacher distillation on its actual
+unclipped graph (`--exact-kd-weight`, default zero preserves previous runs).
+A no-grad probe selects only rows with all polynomial inputs within four
+saved fit radii and finite nonzero FP32 embedding norms, then reruns only those
+images with autograd. Thus failed rows cannot poison gradients through masked
+NaNs. The loss is weighted by the selected fraction of the original batch.
+This training gate does not exist in exported inference. CPU tests verify
+correct loss, finite nonzero coefficient gradients with an overflowing excluded
+row, all-excluded zero gradients and rejection of clipped evaluation. Real-GPU
+validation and any benefit to full IJB-C accuracy remain to be established.
