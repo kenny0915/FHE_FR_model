@@ -1,0 +1,72 @@
+{
+  "templates": 512,
+  "cross_template_pairs": 130816,
+  "uses_pair_labels": false,
+  "groups": {
+    "(-1.0, 0.2)": {
+      "pairs": 130658,
+      "source": {
+        "mse": 0.000595690715950413,
+        "signed_mean": 0.00015228460289747563,
+        "overestimation_fraction": 0.5018827779393531
+      },
+      "calibrated": {
+        "mse": 0.0005464085665212219,
+        "signed_mean": 0.00032338886640695315,
+        "overestimation_fraction": 0.5050360483093267
+      }
+    },
+    "(0.2, 0.25)": {
+      "pairs": 90,
+      "source": {
+        "mse": 0.001523413715756565,
+        "signed_mean": -0.004080692099932159,
+        "overestimation_fraction": 0.45555555555555555
+      },
+      "calibrated": {
+        "mse": 0.001454880303013958,
+        "signed_mean": -0.0023435137002769534,
+        "overestimation_fraction": 0.4222222222222222
+      }
+    },
+    "(0.25, 0.3)": {
+      "pairs": 26,
+      "source": {
+        "mse": 0.0024011859827815225,
+        "signed_mean": 0.0014338760919425076,
+        "overestimation_fraction": 0.5
+      },
+      "calibrated": {
+        "mse": 0.0018387275159436529,
+        "signed_mean": 0.008025209911773917,
+        "overestimation_fraction": 0.5769230769230769
+      }
+    },
+    "(0.3, 0.4)": {
+      "pairs": 8,
+      "source": {
+        "mse": 0.0007492359344596633,
+        "signed_mean": 0.0059678702760214974,
+        "overestimation_fraction": 0.5
+      },
+      "calibrated": {
+        "mse": 0.0007405826765380447,
+        "signed_mean": 0.01329260905264653,
+        "overestimation_fraction": 0.75
+      }
+    },
+    "(0.4, 1.01)": {
+      "pairs": 34,
+      "source": {
+        "mse": 0.0005523786417671358,
+        "signed_mean": -0.007940519484381939,
+        "overestimation_fraction": 0.4117647058823529
+      },
+      "calibrated": {
+        "mse": 0.0004491303507626088,
+        "signed_mean": -0.00734894571166869,
+        "overestimation_fraction": 0.4117647058823529
+      }
+    }
+  }
+}

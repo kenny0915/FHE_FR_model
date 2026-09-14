@@ -35,3 +35,15 @@ def test_empty_tail_remains_connected_with_zero_loss_for_exact_teacher():
     assert stats['tail_pairs'] == 0 and stats['pairs'] == 3 and loss == 0
     loss.backward()
     assert torch.isfinite(x.grad).all()
+
+
+def test_validation_threshold_includes_near_boundary_pairs():
+    from controlled_degree2.calibrate_pair_geometry import evaluate
+    source = torch.eye(2)
+    teacher = torch.tensor([[1., 0.], [.25, (1-.25**2)**.5]])
+    ids = torch.arange(2)
+    high = evaluate(torch.eye(2), torch.zeros(2), source, teacher, ids, .3)
+    near = evaluate(torch.eye(2), torch.zeros(2), source, teacher, ids, .2)
+    assert high['tail_mse'] == 0.
+    assert abs(near['tail_mse'] - .0625) < 1e-6
+    assert abs(high['all_mse'] - near['all_mse']) < 1e-8

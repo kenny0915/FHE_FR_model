@@ -62,12 +62,12 @@ def pair_geometry_loss(output, teacher, source, source_ids, threshold=.3):
 
 
 @torch.no_grad()
-def evaluate(matrix, bias, source, teacher, source_ids):
+def evaluate(matrix, bias, source, teacher, source_ids, threshold=.3):
     totals = dict(all_mse=0., tail_mse=0.)
     batches = 0
     for start in range(0, len(source), 1024):
         x, y, ids = source[start:start+1024], teacher[start:start+1024], source_ids[start:start+1024]
-        _, stats = pair_geometry_loss(x @ matrix.T+bias, y, x, ids)
+        _, stats = pair_geometry_loss(x @ matrix.T+bias, y, x, ids, threshold)
         for k in totals:
             totals[k] += float(stats[k])
         batches += 1
@@ -81,9 +81,12 @@ def main():
     p.add_argument('--steps', type=int, default=2000)
     p.add_argument('--lr', type=float, default=1e-4)
     p.add_argument('--seed', type=int, default=20260926)
+    p.add_argument('--tail-threshold', type=float, default=.3)
     args = p.parse_args()
     if args.steps <= 0 or args.lr <= 0:
         p.error('positive steps and learning rate required')
+    if not -1 <= args.tail_threshold <= 1:
+        p.error('tail threshold must be within [-1, 1]')
     torch.set_num_threads(2)
     torch.manual_seed(args.seed)
     device = torch.device('cuda')
@@ -123,7 +126,7 @@ def main():
     matrix = torch.nn.Parameter(identity.clone())
     bias = torch.nn.Parameter(torch.zeros(dim,device=device))
     optimizer = torch.optim.Adam([matrix,bias],lr=args.lr)
-    baseline = evaluate(matrix,bias,vx,vy,vids)
+    baseline = evaluate(matrix,bias,vx,vy,vids,args.tail_threshold)
     best_score, best = sum(baseline.values()), None
     records = []
     for step in range(1,args.steps+1):
@@ -133,7 +136,7 @@ def main():
         rows = (image_ids[:, None]*views+torch.arange(views,device=device)).flatten()
         sx, sy = x[rows], y[rows]
         output = sx @ matrix.T+bias
-        geometry, _ = pair_geometry_loss(output,sy,sx,ids[rows])
+        geometry, _ = pair_geometry_loss(output,sy,sx,ids[rows],args.tail_threshold)
         anchor = (1-F.cosine_similarity(output,sy)).mean()
         penalty = ((matrix-identity).square().sum()+bias.square().sum())/dim
         loss = geometry+.01*anchor+.001*penalty
@@ -146,7 +149,7 @@ def main():
         if step % 100 == 0 or step == args.steps:
             if not torch.isfinite(matrix).all() or not torch.isfinite(bias).all():
                 raise FloatingPointError('non-finite affine parameters')
-            metrics = evaluate(matrix,bias,vx,vy,vids)
+            metrics = evaluate(matrix,bias,vx,vy,vids,args.tail_threshold)
             records.append(dict(step=step,**metrics))
             score = sum(metrics.values())
             if score < best_score:
@@ -162,7 +165,7 @@ def main():
                   teacher_sha256=config['teacher_sha256'],split_sha256=config['split_sha256'],
                   cache_sha256=digest(cache_path),uses_ijbc_pair_labels=False,
                   cache_layout=config.get('cache_layout','paired_image_orientations'),
-                  inference_clipping=False,tail_threshold=.3,point_anchor_weight=.01,identity_penalty=.001)
+                  inference_clipping=False,tail_threshold=args.tail_threshold,point_anchor_weight=.01,identity_penalty=.001)
     (root/'calibration_config.json').write_text(json.dumps(record,indent=2))
     if best is None:
         print('NO_IMPROVEMENT',flush=True)

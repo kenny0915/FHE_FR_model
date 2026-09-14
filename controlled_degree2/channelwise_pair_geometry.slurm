@@ -18,7 +18,8 @@ PYTHON=/home/u8798807/.conda/envs/face_recog/bin/python
 geometry_recipe_commit=$(git rev-parse HEAD)
 "$PYTHON" -m controlled_degree2.calibrate_pair_geometry \
     --cache-root "$CHANNEL_CACHE_ROOT" --output "$CHANNEL_OUTPUT" \
-    --steps "${CHANNEL_GEOMETRY_STEPS:-2000}"
+    --steps "${CHANNEL_GEOMETRY_STEPS:-2000}" \
+    --tail-threshold "${CHANNEL_TAIL_THRESHOLD:-0.3}"
 printf '%s\n' "$geometry_recipe_commit" > "$CHANNEL_OUTPUT/recipe_commit.txt"
 if [[ ! -f "$CHANNEL_OUTPUT/candidate.pt" ]]; then
     echo 'No held-out pair-geometry improvement; full evaluation skipped.'

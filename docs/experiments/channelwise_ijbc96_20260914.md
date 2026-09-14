@@ -1366,3 +1366,20 @@ Slurm FAILED does not indicate a runtime crash. The small change does not
 establish statistical significance or justify expanding training resources.
 This is calibration-set performance, with no pair labels in gradient fitting.
 The cache and source provenance are retained for reproducible further work.
+
+### Template near-threshold error diagnostic and threshold ablation
+
+The complete 512-template validation cache contains 130,816 cross-template
+pairs. Teacher cosine .25-.30 includes only 26 pairs: calibration reduces
+MSE .00240119 -> .00183873 but raises mean signed error .00143388 -> .00802521.
+There are 90 pairs in .20-.25 and eight in .30-.40. These are teacher-defined
+bands, not genuine/impostor labels; the small counts limit inference.
+See [channelwise_ijbc96_template_error_bands.json](channelwise_ijbc96_template_error_bands.json).
+
+Test a fixed high-similarity inclusion threshold .20 instead of .30, retaining
+the same complete-template cache, 95.8838% source, seed, LR, 2,000 steps and
+loss weights. This includes more near-decision-boundary pairs in both fitting
+and held-out selection. Source/teacher membership remains fixed and detached.
+It is not a continuation from the 95.8941% candidate; only the threshold is
+changed against 386141. Defaults remain .30. One H200 / 45 minutes includes
+full exported evaluation; no larger main run is resumed.
