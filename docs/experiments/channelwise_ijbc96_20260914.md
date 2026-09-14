@@ -1187,3 +1187,24 @@ Output `work_dirs/channelwise_pair_geometry_8000_20260915`, source cache
 Implementation **431cf2a** is pushed. All 25 pair/linear/campaign CPU tests
 pass; Slurm syntax and whitespace checks pass. Scheduler was empty before
 this single submission; original main training remains stopped.
+
+### Duration ablation full result: longer fitting does not improve TAR
+
+Job **386049** completed full evaluation in **22m10s**. Conservative TAR is
+**95.86337372807691%**, actual FAR **9.968711418401205e-5**. All 469,375
+source images / 938,750 original-and-flip rows, including the remainder,
+have zero nonfinite module-boundary values and embeddings. The graph passes
+25 channelwise quadratics / 17,664 coefficients, fixed BN and no clipping.
+Evaluated checkpoint SHA was independently recomputed:
+`81ddbbe1a5cc00571a24e08edb9b5daae89d6424fdbbb05fd5c0b99e062db383`.
+See [channelwise_ijbc96_pair_geometry_8000_result.json](channelwise_ijbc96_pair_geometry_8000_result.json).
+
+Held-out geometry selected step 8,000: all-pair MSE .0011543603905010968,
+tail MSE .0021425649101729505. Despite a lower selection objective than the
+2,000-step run, full TAR loses four genuine accepts (18,748 versus 18,752).
+Only the accuracy acceptance gate fails, explaining Slurm FAILED; evaluation
+did not crash. The best eligible result remains 95.88382676279593%, zero
+nonfinite, 23 genuine accepts short of 96%. No further duration extension
+is submitted. Retain the 2,000-step candidate and analyze the low-FAR proxy
+mismatch before choosing a different intervention. Both results are IJB-C
+calibration-set performance, not untouched test accuracy.
