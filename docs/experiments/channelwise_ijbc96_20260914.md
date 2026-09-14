@@ -1,6 +1,8 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: CPU validation and 16-H200 smoke passed; accuracy target not achieved.
+Status: best completed fresh-campaign IJB-C TAR is 95.6384% with 7,931 nonfinite
+augmented embeddings; the 96% / zero-nonfinite target is not achieved. Further
+calibration and full evaluation are running.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -661,3 +663,28 @@ all 469,375 source images; full coverage, graph and checkpoint identity pass.
 Accuracy and finiteness fail; `acceptance.json` records `target_met=false`.
 Artifacts are under `ijbc_calibration_epoch14_1000_full`; evaluated hash is
 `55e6133f9d72248626a2634f098702c58bf30a2e6083b9ba2418ae164b495b61`.
+
+### Three-thousand LR-1e-4 updates and measured feature drift
+
+Step **384727.9** completed its 2,000 additional updates, giving 1,000 updates
+at LR 1e-5 followed by 3,000 at LR 1e-4. Final candidate hash:
+`15dcf54332304311be385f2a337a7bd0710b3144ec4492d324bd15a0aa23d280`.
+Full IJB-C evaluation **384727.12** is running in
+`ijbc_calibration_epoch14_lr1e4_3000_full`, logs `calibration_lr1e4_3000_eval_step.*`.
+Fixed-subset probe **384727.13** reports **3/512** manifest and **1/512** random
+nonfinite embeddings. On the SAME 503 initially valid random rows, teacher
+cosine decreased **.89672 -> .87757**; this confirms drift beyond changed row
+membership. It does not directly measure TAR. Complete record/command:
+`calibration_lr1e4_3000_probe.json` / `calibration_lr1e4_3000_probe_step.json`.
+
+Exact-inference KD continuation **384727.14** starts from this candidate for
+1,000 steps, LR 1e-4, exact KD weight **5**, range weight 1, seed 20260918,
+with unchanged original failure replay and half-random calibration batches.
+Output `ijbc_calibration_epoch14_exactkd5`; logs `calibration_exactkd5_step.*`.
+This explicitly recorded policy revision aims to recover actual-inference
+teacher agreement while retaining range repair; success is not assumed.
+
+Probe **384727.11** also checked the preserved epoch-16 main-training checkpoint,
+hash `57299d130e28e82d3d1d640f9644c007a1f737360646d92b67844cc778881934`.
+It has 351/512 old-manifest and 9/512 random failures, random teacher cosine
+.89974. Main training continues; these subset results alone select no winner.
