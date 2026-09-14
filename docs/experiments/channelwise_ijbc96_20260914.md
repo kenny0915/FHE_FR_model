@@ -1287,3 +1287,21 @@ and 512 validation templates covers 40,031 and 10,623 complete source images.
 See [channelwise_ijbc96_template_split_plan.json](channelwise_ijbc96_template_split_plan.json).
 Cache extraction and template-level fitting still need integration; no GPU
 job is launched by this helper implementation.
+
+### Complete-template cache extraction integration
+
+`cache_template_geometry.py` extracts source and original-PReLU teacher
+features for all 50,654 images in the seeded complete-template split. The
+source is the eligible 2,000-step pair-geometry checkpoint. Metadata image
+names/order are checked (all 469,375 entries match); source/teacher/split and
+metadata hashes are recorded. Raw original/flip features retain detector,
+media and template weights. Cached barycenters divide each raw template by
+its positive affine-bias weight, so applying A*x+b and then normalizing is
+exactly equivalent to the original per-view affine followed by aggregation.
+This division is offline and does not enter the encrypted inference graph.
+Zero total detector weight and nonfinite extraction are rejected.
+
+The extraction-only Slurm job uses one H200 / 30 minutes and retains a
+hashed compact template cache. CLI import/help, shell syntax and three
+aggregation/split tests pass; combined 28 tests passed in the preceding
+implementation. No accuracy claim follows from cache extraction alone.
