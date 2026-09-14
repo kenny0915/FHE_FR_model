@@ -297,6 +297,16 @@ def apply_phase(student, epoch, args):
     for module in quadratic_modules(student):
         group = 0 if module.name == 'prelu' else int(module.name[5])
         module.alpha, module.clip, module.clip_eval = alphas[group], clipped, inference_bound
+    if getattr(args, 'sitewise_unclipped', False):
+        # Train the actual unbounded prefix from its first conversion update.
+        # The remaining suffix uses its original PReLU, with one site blended
+        # at a time. Evaluation always uses all 25 unbounded quadratics.
+        sites = list(quadratic_modules(student))
+        progress = (epoch-args.head_warmup)*len(sites)/args.conversion_epochs
+        alphas = [max(0., min(1., progress-index)) for index in range(len(sites))]
+        for module, alpha in zip(sites, alphas):
+            module.alpha, module.clip, module.clip_eval = alpha, False, False
+        clipped = False
     if getattr(args, 'unclipped_continuation', False):
         from controlled_degree2.unclipped_policy import apply_unclipping
         clipped = apply_unclipping(student, epoch, args.unclip_epochs)
@@ -358,7 +368,7 @@ def validate(student, args, rank, world, device, split):
     student.eval()
     set_quadratic_schedule(student, alpha=1., clip_eval=bool(getattr(args, 'inference_bound', False)))
     from eval.finite_audit import FiniteAudit
-    audit = FiniteAudit(student) if getattr(args, 'shared', False) else None
+    audit = FiniteAudit(student) if (getattr(args, 'shared', False) or getattr(args, 'sitewise_unclipped', False)) else None
     features, degraded, labels = [], [], []
     bad, peak = 0, 0.
     activation_ratio = torch.zeros((), device=device)
@@ -438,7 +448,8 @@ def check_resume_policy(config, args):
     for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr',
                 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr',
                 'batchnorm_mode', 'inference_bound', 'all_quadratic_start',
-                'unclipped_continuation', 'unclip_epochs', 'curvature_cap'):
+                'unclipped_continuation', 'unclip_epochs', 'curvature_cap',
+                'sitewise_unclipped', 'train_channel_coefficients'):
         if config.get(key, current.get(key)) != current.get(key):
             raise ValueError(f'resume changes fixed training policy: {key}')
 
@@ -459,8 +470,11 @@ def train(args, rank, world, device):
         replace_shared(student, prepared['calibration'])
     else:
         replace_prelu_with_quadratic(student, prepared['calibration'])
+    if getattr(args, 'train_channel_coefficients', False):
+        for module in quadratic_modules(student):
+            module.coeffs.requires_grad_(True)
     student.to(device)
-    if getattr(args, 'shared', False) and args.batchnorm_mode == 'train' and world > 1:
+    if args.batchnorm_mode == 'train' and world > 1:
         student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
     active = torch.tensor(prepared['active_ids'], dtype=torch.long)
     head = IdentityHead(prepared['centers'][active]).to(device)
@@ -481,7 +495,7 @@ def train(args, rank, world, device):
     optimizer = torch.optim.SGD([dict(params=[p for p in student.parameters() if p.requires_grad], lr=args.lr),
                                  dict(params=head.parameters(), lr=args.head_lr)], momentum=.9,
                                 weight_decay=5e-4, nesterov=True)
-    if getattr(args, 'shared', False):
+    if getattr(args, 'shared', False) or getattr(args, 'train_channel_coefficients', False):
         coefficient_params = [m.coeffs for m in modules]
         coefficient_ids = {id(p) for p in coefficient_params}
         optimizer.param_groups[0]['params'] = [p for p in optimizer.param_groups[0]['params'] if id(p) not in coefficient_ids]
@@ -533,7 +547,7 @@ def train(args, rank, world, device):
             factor = .05+.95*.5*(1+math.cos(math.pi*progress/args.epochs))
             optimizer.param_groups[0]['lr'] = (0. if progress < args.head_warmup else args.lr*factor)
             optimizer.param_groups[1]['lr'] = args.head_lr*factor
-            if getattr(args, 'shared', False):
+            if getattr(args, 'shared', False) or getattr(args, 'train_channel_coefficients', False):
                 optimizer.param_groups[2]['lr'] = args.coefficient_lr*factor
             images, labels = images.to(device), mapping[labels.to(device)]
             if bool((labels < 0).any()):
@@ -642,6 +656,10 @@ def parse_args():
     p.add_argument('--limit-batches', type=int, default=0, help='smoke test only')
     p.add_argument('--batchnorm-mode', choices=['frozen', 'train'], default='frozen')
     p.add_argument('--shared', action='store_true')
+    p.add_argument('--sitewise-unclipped', action='store_true',
+                   help='convert one channelwise activation site at a time without training or inference clipping')
+    p.add_argument('--train-channel-coefficients', action='store_true',
+                   help='optimize per-channel quadratic coefficients at coefficient-lr')
     p.add_argument('--initialization', choices=['fit', 'near_linear'], default='fit')
     p.add_argument('--coefficient-lr', type=float, default=.0001)
     p.add_argument('--deadline', type=float, default=0., help='absolute UTC Unix time; all ranks stop before updates')
@@ -654,6 +672,10 @@ def parse_args():
     p.add_argument('--resume')
     p.add_argument('--smoke', action='store_true', help='isolated 64-identity preparation and two optimizer steps')
     args = p.parse_args()
+    if args.sitewise_unclipped and (args.shared or args.inference_bound or args.all_quadratic_start):
+        p.error('sitewise unclipped conversion requires a fresh channelwise teacher conversion')
+    if args.train_channel_coefficients and args.shared:
+        p.error('channelwise coefficient optimization cannot be combined with shared coefficients')
     if args.unclipped_continuation:
         if not args.shared or not args.all_quadratic_start or args.inference_bound:
             p.error('unclipped continuation requires shared, all-quadratic, unbounded inference')

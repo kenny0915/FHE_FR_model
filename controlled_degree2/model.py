@@ -224,6 +224,12 @@ class DirectQuadratic(nn.Module):
         elif self.clip_eval:
             work = torch.maximum(torch.minimum(work, lam_fit), -lam_fit)
 
+        if self.training and self.alpha == 0.0:
+            # An unopened conversion site is exactly PReLU. Evaluating an
+            # unused square could otherwise introduce 0*Inf in the blend.
+            # Keep a zero dependency so DDP sees trainable coefficients even
+            # before their site's conversion begins.
+            return (F.prelu(raw, self.slope) + self.coeffs.sum()*0.0).to(input_dtype)
         coefficients = self.coeffs.t().reshape((3,) + self._view(work))
         c0, c1, c2 = coefficients
         output = c0 + c1 * work + c2 * (work * work)

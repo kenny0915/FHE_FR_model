@@ -10,12 +10,18 @@ import torch
 from torch import nn
 from torch.fx import symbolic_trace
 from controlled_degree2.shared import SharedQuadratic
+from controlled_degree2.model import DirectQuadratic
 
 
 class Polynomial(nn.Module):
     def __init__(self, source):
         super().__init__()
-        for name, value in zip(('c', 'b', 'a'), source.coeffs.detach().reshape(3)):
+        coefficients = source.coeffs.detach().T
+        if isinstance(source, SharedQuadratic):
+            coefficients = coefficients.reshape(3)
+        else:
+            coefficients = coefficients.reshape(3, 1, source.channels, 1, 1)
+        for name, value in zip(('c', 'b', 'a'), coefficients):
             self.register_buffer(name, value.clone())
 
     def forward(self, x):
@@ -36,18 +42,24 @@ class Affine(nn.Module):
         return x*self.scale+self.offset
 
 
-def export_graph(model, expected_sites=25):
+def export_graph(model, expected_sites=25, coefficient_mode='shared'):
     if model.training:
         raise ValueError('export requires evaluation mode')
-    sites = [m for m in model.modules() if isinstance(m, SharedQuadratic)]
-    if len(sites) != expected_sites or any(m.clip_eval or m.coeffs.shape != (1, 3) for m in sites):
-        raise ValueError('expected unclipped layer-shared quadratic at every site')
-    if any(not torch.isfinite(m.coeffs).all() or m.coeffs[0, 2] == 0 for m in sites):
+    if coefficient_mode not in ('shared', 'channelwise'):
+        raise ValueError('unknown coefficient mode')
+    sites = [m for m in model.modules() if isinstance(m, DirectQuadratic)]
+    if len(sites) != expected_sites or any(
+            m.clip_eval or m.coeffs.ndim != 2 or m.coeffs.shape[1] != 3
+            or (coefficient_mode == 'shared' and not isinstance(m, SharedQuadratic))
+            or (coefficient_mode == 'channelwise' and isinstance(m, SharedQuadratic))
+            for m in sites):
+        raise ValueError('expected unclipped quadratics matching coefficient mode at every site')
+    if any(not torch.isfinite(m.coeffs).all() or (m.coeffs[:, 2] == 0).any() for m in sites):
         raise ValueError('every site must have finite coefficients and nonzero quadratic term')
     result = copy.deepcopy(model).eval()
     for name, module in list(result.named_modules()):
         replacement = None
-        if isinstance(module, SharedQuadratic):
+        if isinstance(module, DirectQuadratic):
             replacement = Polynomial(module)
         elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
             replacement = Affine(module)
@@ -69,7 +81,8 @@ def export_graph(model, expected_sites=25):
         raise ValueError(f'non-polynomial or unrecognized inference operation: {node.op} {node.target}')
     if any(not torch.isfinite(v).all() for v in graph.state_dict().values()):
         raise ValueError('non-finite exported constants')
-    return graph, dict(pure_polynomial=True, quadratic_sites=len(sites), coefficients=3*len(sites),
+    return graph, dict(pure_polynomial=True, quadratic_sites=len(sites),
+                       coefficients=sum(m.coeffs.numel() for m in sites), coefficient_mode=coefficient_mode,
                        operations=['addition', 'multiplication', 'affine convolution/linear', 'reshape'],
                        batchnorm='fixed scale/offset constants', inference_clipping=False,
                        scope='image-to-embedding backbone before plaintext normalization/scoring')
