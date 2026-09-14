@@ -323,3 +323,17 @@ Report: `work_dirs/channelwise_ijbc96_nopath_20260914/numerical_failure_e5_s845/
 This supports investigating guarded prefix repair during conversion, but
 provides no full-conversion, IJB-C, or accuracy evidence. All 35 related
 recovery/campaign tests passed before GPU submission.
+
+
+### Fidelity tradeoff in partial BN repair
+
+Probe **383600** (2,000 range-only steps) kept the full batch finite but
+reduced teacher cosine on the original 127 finite rows from 0.93377 to
+0.81646; the guard still failed. This policy is not adopted for training.
+Probe **383604** adds a separate 32-row finite teacher-distillation anchor,
+with weight 100 and `log1p(prefix_loss / guard**2)`. The failure row is always
+included in the prefix objective. After 2,000 steps the 127-row teacher
+cosine improved to 0.97502, but the failed row still had an overflowing norm.
+Thus neither result meets even the numerical repair gate, much less IJB-C
+acceptance. Lower teacher weights 10 and 1 are being tested for 3,000 steps
+each on one H200 each. These experiments do not save production checkpoints.
