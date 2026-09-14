@@ -1383,3 +1383,9 @@ and held-out selection. Source/teacher membership remains fixed and detached.
 It is not a continuation from the 95.8941% candidate; only the threshold is
 changed against 386141. Defaults remain .30. One H200 / 45 minutes includes
 full exported evaluation; no larger main run is resumed.
+
+Submitted threshold ablation as **386239**, `channelwise-template-tail02-20260915`,
+one H200 / 45 minutes, output `work_dirs/channelwise_template_tail02_20260915`.
+Implementation **e85962a** is pushed. The existing 29 combined tests pass;
+a new validation-threshold regression passes with the four pair tests.
+Shell syntax and whitespace checks pass. Main training remains stopped.
