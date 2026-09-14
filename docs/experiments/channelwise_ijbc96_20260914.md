@@ -371,3 +371,29 @@ Allocation cap is 4h15m; original absolute deadline 1789385375 is retained.
 Initial resumed epoch-5 step-0 loss is 7.7510, KD 0.1225, range 0.0088,
 with clipping false. All 19 recipe/campaign tests passed. This initial
 finite update does not establish stability through later conversion.
+
+
+### No-stress failure and finite-prefix training routing
+
+383627 FAILED at epoch 5 step 702 after 3m57s. Dependent full IJB-C job
+383634 was CANCELLED without running. Rank 2 had finite embeddings but
+stage 3 magnitude 2.03e19; KD and range arithmetic overflowed. Captures:
+`work_dirs/channelwise_ijbc96_nostress_20260914/numerical_failure_e5_s702`.
+Disabling the stress family is therefore insufficient for stable conversion.
+
+`GuardedConversion` is a new training-only component. It probes each input
+before evaluating an escaping quadratic, routes escaping rows to detached
+finite-prefix BN repair, and computes full features for the remaining rows.
+No training row is discarded: the caller must retain repair rows for replay
+and must mask the all-repair dummy feature from identity losses. This is
+not an inference replacement; full inference and IJB-C never use this router.
+It is not yet integrated into multi-GPU training.
+
+CPU validation: 17 routing/recovery tests passed, then all three routing
+tests passed with explicit trainable-coefficient gradient coverage. GPU
+check **383641** completed in 6 seconds using the exact captured rank-2
+batch: 127 full rows, one prefix-repair row, finite loss 0.610792, repair
+0.008856, and all 237 gradient tensors finite. Zero optimizer updates.
+Code `ce610d9`; `guarded_backward.json` records the outcome. This establishes
+single-GPU backward viability only; distributed integration and full target
+accuracy remain unproven.
