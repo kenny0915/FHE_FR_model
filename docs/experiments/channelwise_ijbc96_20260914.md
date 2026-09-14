@@ -1751,3 +1751,25 @@ and introduce no new inference operation. No negative mining is implicit.
 Tests verify partition exclusion, duplicate/conflict handling, exact loss,
 gradient direction and class balancing. Integration into the calibration
 runner, provenance and bounded GPU fitting remain to be completed.
+
+### Supervised pair loss integrated and preflight checked
+
+`--supervised-pair-weight` defaults to zero; nonzero requires a complete-
+template cache and full-template updates. The runner filters official pairs
+to fitting endpoints, retains all positives, and fixes negative membership
+using initial source cosine >=.2 before any update. It saves the selected
+local pair table and its SHA, label-file SHA (checked before/after loading),
+class counts, margins and weight. `uses_ijbc_pair_labels` is true only when
+this path is used. Held-out teacher-geometry selection remains unchanged.
+
+CPU preflight on the expanded fitting cache finds **630 positive / 629
+fixed hard negative pairs**; initial balanced margin loss is .00500029.
+A proposed .01 weight contributes about .0000500 initially. The source
+remains the same 95.8838% checkpoint for a controlled comparison. No pair
+labels from validation endpoints enter fitting. The fixed set cannot be
+changed by the learned output to evade negatives.
+
+All five relevant suites pass: **39 tests**. Shell syntax and whitespace
+checks pass. No GPU fitting submitted in this integration step. A bounded
+one-H200 calibration/evaluation can now test the changed supervision signal
+without changing the 25 quadratic activations or adding inference operations.

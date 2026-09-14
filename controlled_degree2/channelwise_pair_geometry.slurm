@@ -24,7 +24,8 @@ fi
     --cache-root "$CHANNEL_CACHE_ROOT" --output "$CHANNEL_OUTPUT" \
     --steps "${CHANNEL_GEOMETRY_STEPS:-2000}" \
     --tail-threshold "${CHANNEL_TAIL_THRESHOLD:-0.3}" \
-    --point-anchor-weight "${CHANNEL_POINT_ANCHOR_WEIGHT:-0.01}" "${geometry_args[@]}"
+    --point-anchor-weight "${CHANNEL_POINT_ANCHOR_WEIGHT:-0.01}" \
+    --supervised-pair-weight "${CHANNEL_SUPERVISED_PAIR_WEIGHT:-0}" "${geometry_args[@]}"
 printf '%s\n' "$geometry_recipe_commit" > "$CHANNEL_OUTPUT/recipe_commit.txt"
 if [[ ! -f "$CHANNEL_OUTPUT/candidate.pt" ]]; then
     echo 'No held-out pair-geometry improvement; full evaluation skipped.'

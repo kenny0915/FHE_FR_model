@@ -13,6 +13,7 @@ from controlled_degree2.model import load_controlled_checkpoint, save_checkpoint
 from controlled_degree2.recipe_a import digest
 from controlled_degree2.recipe_a_recovery import configure
 from controlled_degree2.recipe_a_recovery_v2 import sitewise
+from controlled_degree2.supervised_template_pairs import restrict_pairs, supervised_margin_loss
 
 
 def unpack_template_cache(cache, split, config, device):
@@ -100,6 +101,8 @@ def main():
     p.add_argument('--seed', type=int, default=20260926)
     p.add_argument('--tail-threshold', type=float, default=.3)
     p.add_argument('--point-anchor-weight', type=float, default=.01)
+    p.add_argument('--supervised-pair-weight', type=float, default=0.)
+    p.add_argument('--pair-labels', default='ijb/IJBC/meta/ijbc_template_pair_label.txt')
     p.add_argument('--full-template-batch', action='store_true',
                    help='Use every fitting template per update (maximum 4096), without sampling')
     args = p.parse_args()
@@ -109,6 +112,10 @@ def main():
         p.error('tail threshold must be within [-1, 1]')
     if not math.isfinite(args.point_anchor_weight) or args.point_anchor_weight < 0:
         p.error('point anchor weight must be finite and nonnegative')
+    if not math.isfinite(args.supervised_pair_weight) or args.supervised_pair_weight < 0:
+        p.error('supervised pair weight must be finite and nonnegative')
+    if args.supervised_pair_weight and not args.full_template_batch:
+        p.error('supervised pair calibration requires full-template-batch')
     torch.set_num_threads(2)
     torch.manual_seed(args.seed)
     device = torch.device('cuda')
@@ -147,6 +154,33 @@ def main():
         raise ValueError('full-template-batch is limited to 4096 fitting templates')
     ids = torch.arange(len(x),device=device)//views
     vids = torch.arange(len(vx),device=device)//views
+    supervision = None
+    supervision_record = None
+    if args.supervised_pair_weight:
+        label_hash = digest(args.pair_labels)
+        official = np.loadtxt(args.pair_labels, dtype=np.int64)
+        local = restrict_pairs(official, cache['fit']['template_ids'].numpy())
+        del official
+        if digest(args.pair_labels) != label_hash:
+            raise ValueError('pair label file changed while loading')
+        # Fix negative membership before fitting; include all genuine pairs.
+        normalized = F.normalize(x, dim=1)
+        source_sim = normalized @ normalized.T
+        local_tensor = torch.as_tensor(local, device=device)
+        keep = ((local_tensor[:, 2] == 1) |
+                (source_sim[local_tensor[:, 0], local_tensor[:, 1]] >= .2))
+        supervision = local_tensor[keep]
+        # Validate both classes and all indices before optimization.
+        supervised_margin_loss(x, supervision)
+        np.save(root/'supervised_pairs.npy', supervision.cpu().numpy())
+        supervision_record = dict(label_path=args.pair_labels, label_sha256=label_hash,
+            selected_pairs_sha256=digest(root/'supervised_pairs.npy'),
+            positive_pairs=int((supervision[:, 2] == 1).sum()),
+            negative_pairs=int((supervision[:, 2] == 0).sum()),
+            negative_selection='fixed initial source cosine >= 0.2',
+            partition='both endpoints in fitting templates only',
+            positive_margin=.4, negative_margin=.2, weight=args.supervised_pair_weight)
+        del source_sim, normalized, local_tensor
     dim = x.shape[1]
     identity = torch.eye(dim,device=device)
     matrix = torch.nn.Parameter(identity.clone())
@@ -169,6 +203,8 @@ def main():
         anchor = (1-F.cosine_similarity(output,sy)).mean()
         penalty = ((matrix-identity).square().sum()+bias.square().sum())/dim
         loss = geometry+args.point_anchor_weight*anchor+.001*penalty
+        if supervision is not None:
+            loss = loss+args.supervised_pair_weight*supervised_margin_loss(output, supervision)
         if not torch.isfinite(loss):
             raise FloatingPointError('non-finite geometry loss')
         optimizer.zero_grad(set_to_none=True)
@@ -192,7 +228,8 @@ def main():
     (root/'selection.json').write_text(json.dumps(report,indent=2))
     record = dict(config=vars(args),source_sha256=config['source_sha256'],
                   teacher_sha256=config['teacher_sha256'],split_sha256=config['split_sha256'],
-                  cache_sha256=digest(cache_path),uses_ijbc_pair_labels=False,
+                  cache_sha256=digest(cache_path),uses_ijbc_pair_labels=supervision is not None,
+                  supervision=supervision_record,
                   validation_pair_scope='all unordered distinct-source pairs including cross-block pairs',
                   cache_layout=config.get('cache_layout','paired_image_orientations'),
                   inference_clipping=False,tail_threshold=args.tail_threshold,
