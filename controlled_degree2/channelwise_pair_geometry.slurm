@@ -16,10 +16,14 @@ cd "${SLURM_SUBMIT_DIR:?}"
 export OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1 WORLD_SIZE=1
 PYTHON=/home/u8798807/.conda/envs/face_recog/bin/python
 geometry_recipe_commit=$(git rev-parse HEAD)
+geometry_args=()
+if [[ "${CHANNEL_FULL_TEMPLATE_BATCH:-0}" == 1 ]]; then
+    geometry_args+=(--full-template-batch)
+fi
 "$PYTHON" -m controlled_degree2.calibrate_pair_geometry \
     --cache-root "$CHANNEL_CACHE_ROOT" --output "$CHANNEL_OUTPUT" \
     --steps "${CHANNEL_GEOMETRY_STEPS:-2000}" \
-    --tail-threshold "${CHANNEL_TAIL_THRESHOLD:-0.3}"
+    --tail-threshold "${CHANNEL_TAIL_THRESHOLD:-0.3}" "${geometry_args[@]}"
 printf '%s\n' "$geometry_recipe_commit" > "$CHANNEL_OUTPUT/recipe_commit.txt"
 if [[ ! -f "$CHANNEL_OUTPUT/candidate.pt" ]]; then
     echo 'No held-out pair-geometry improvement; full evaluation skipped.'

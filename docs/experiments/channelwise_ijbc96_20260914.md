@@ -1486,3 +1486,20 @@ template minibatch sampling. This is distinct from another threshold sweep.
 Its gradient equivalence to the existing population loss and memory/runtime
 need verification before any full GPU experiment. No GPU job was submitted
 for this diagnostic and the best verified TAR remains 95.95029912563277%.
+
+### Full-template population update option implemented
+
+`calibrate_pair_geometry --full-template-batch` now uses all fitting template
+rows once per update with the existing pair-geometry loss, anchor and penalty.
+It requires a complete-template cache and caps fitting size at 4,096 templates
+to bound quadratic memory. The default sampled recipe is unchanged; Slurm
+exposes the option through `CHANNEL_FULL_TEMPLATE_BATCH=1`. The flag is saved
+in the calibration configuration. Source initialization, held-out selection,
+FC-only folding and full exported acceptance remain the same.
+
+An explicit unordered-pair reference test verifies both population loss and
+gradients with respect to the affine matrix and bias. The pair, template,
+linear-head and channelwise suites pass: **31 tests**. Shell syntax and
+whitespace checks pass. GPU memory/runtime still require a bounded server
+probe before deciding on a full-population calibration experiment. No training
+job is submitted in this implementation step, and 96% remains unmet.

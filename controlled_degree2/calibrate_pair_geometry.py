@@ -82,6 +82,8 @@ def main():
     p.add_argument('--lr', type=float, default=1e-4)
     p.add_argument('--seed', type=int, default=20260926)
     p.add_argument('--tail-threshold', type=float, default=.3)
+    p.add_argument('--full-template-batch', action='store_true',
+                   help='Use every fitting template per update (maximum 4096), without sampling')
     args = p.parse_args()
     if args.steps <= 0 or args.lr <= 0:
         p.error('positive steps and learning rate required')
@@ -99,6 +101,8 @@ def main():
     if digest(cache_root/'split.npz') != config['split_sha256']:
         raise ValueError('cache split hash mismatch')
     template_mode = config.get('cache_layout') == 'complete_template_barycenters'
+    if args.full_template_batch and not template_mode:
+        raise ValueError('full-template-batch requires a complete-template cache')
     cache_path = cache_root/('template_cache.pt' if template_mode else 'embedding_cache.pt')
     if template_mode:
         if digest(cache_path) != config['cache_sha256']:
@@ -119,6 +123,8 @@ def main():
         views = 2
     if any(not torch.isfinite(t).all() for t in (x,y,vx,vy)):
         raise ValueError('non-finite cache')
+    if args.full_template_batch and len(x) > 4096:
+        raise ValueError('full-template-batch is limited to 4096 fitting templates')
     ids = torch.arange(len(x),device=device)//views
     vids = torch.arange(len(vx),device=device)//views
     dim = x.shape[1]
@@ -132,8 +138,11 @@ def main():
     for step in range(1,args.steps+1):
         # Sample 256 images (both views) or complete templates. Repeated
         # sampled units are excluded by their fixed source IDs in the mask.
-        image_ids = torch.randint(len(x)//views,(256,),device=device)
-        rows = (image_ids[:, None]*views+torch.arange(views,device=device)).flatten()
+        if args.full_template_batch:
+            rows = torch.arange(len(x),device=device)
+        else:
+            image_ids = torch.randint(len(x)//views,(256,),device=device)
+            rows = (image_ids[:, None]*views+torch.arange(views,device=device)).flatten()
         sx, sy = x[rows], y[rows]
         output = sx @ matrix.T+bias
         geometry, _ = pair_geometry_loss(output,sy,sx,ids[rows],args.tail_threshold)

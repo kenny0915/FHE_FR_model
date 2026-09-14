@@ -47,3 +47,30 @@ def test_validation_threshold_includes_near_boundary_pairs():
     assert high['tail_mse'] == 0.
     assert abs(near['tail_mse'] - .0625) < 1e-6
     assert abs(high['all_mse'] - near['all_mse']) < 1e-8
+
+
+def test_population_loss_and_affine_gradients_match_explicit_pairs():
+    torch.manual_seed(28)
+    source = torch.randn(7, 4, dtype=torch.float64)
+    teacher = torch.randn_like(source)
+    matrix = torch.eye(4, dtype=torch.float64).requires_grad_()
+    bias = torch.zeros(4, dtype=torch.float64, requires_grad=True)
+    output = source @ matrix.T + bias
+    loss, stats = pair_geometry_loss(output, teacher, source, torch.arange(7), .2)
+    cosine = torch.nn.functional.cosine_similarity
+    errors, tail = [], []
+    for i in range(7):
+        for j in range(i+1, 7):
+            target = cosine(teacher[i], teacher[j], dim=0)
+            baseline = cosine(source[i], source[j], dim=0)
+            error = (cosine(output[i], output[j], dim=0)-target).square()
+            errors.append(error)
+            if target >= .2 or baseline >= .2:
+                tail.append(error)
+    reference = torch.stack(errors).mean() + torch.stack(tail).mean()
+    assert stats['pairs'] == 21 and stats['tail_pairs'] == len(tail)
+    torch.testing.assert_close(loss, reference)
+    actual_grad = torch.autograd.grad(loss, (matrix, bias), retain_graph=True)
+    expected_grad = torch.autograd.grad(reference, (matrix, bias))
+    for actual, expected in zip(actual_grad, expected_grad):
+        torch.testing.assert_close(actual, expected)
