@@ -1408,3 +1408,17 @@ Only the accuracy gate fails; Slurm FAILED is not an evaluation runtime crash.
 The comparison supports the wider fixed tail in this run, without establishing
 statistical significance. This is IJB-C calibration-set performance; labels
 were not used for gradient fitting. Original main training remains stopped.
+
+### Fixed-tail .10 ablation
+
+The .20 run selects step 2,000, with validation all/tail MSE
+.0005713513237424195/.0013784667244181037 versus its baseline
+.0005966859753243625/.0017905861604958773. Full TAR improves over the .30
+control. Test .10 inclusion once to determine whether broadening the tail
+further helps or dilutes the useful near-threshold signal. All other settings
+stay fixed: same complete-template cache, 95.8838% source, seed, LR and 2,000
+steps; no pair labels in gradient fitting. This is a controlled new threshold
+arm, not continuation from the new best checkpoint. The existing tested CLI
+and Slurm wrapper support this parameter; no training code changes are needed.
+One H200 / 45 minutes includes full exported TAR, graph and finite validation.
+Main training remains stopped, and the queue was confirmed empty beforehand.
