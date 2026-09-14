@@ -1,11 +1,11 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
 Status: best fully finite fresh-campaign IJB-C calibration-set TAR is
-95.7815615892008%, with zero nonfinite intermediate values and embeddings.
-The higher diagnostic TAR of 95.9145% has 104 nonfinite embeddings and is
-ineligible. The 96% target is not achieved. The final head-adaptation evaluation
-completed at 95.76622181316152%, also fully finite. This recipe has been stopped;
-main job 384727 and pending evaluation 384733 were cancelled after saving results.
+95.79690136524007%, from exact-path cosine-only head calibration, with zero
+nonfinite intermediate values and embeddings. The higher historical diagnostic
+95.9145% has 104 nonfinite embeddings and is ineligible. The 96% target remains
+unmet. Main training is stopped; the paired magnitude-loss arm is running in
+one-GPU job 385638, followed by verified original-PReLU baseline job 385651.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -952,3 +952,20 @@ and writes `channelwise-385651.out/.err` and
 It runs serially after the exact-head ablation, without restarting main
 training. Historical 96.5588% remains a reference, not yet verified performance
 of this immutable original checkpoint.
+
+### Exact-path cosine arm completed (job 385638)
+
+The 2,000-step MSE-weight-0 arm completed full exported IJB-C evaluation:
+**95.79690136524007% TAR**, actual FAR **9.898374134499722e-5**,
+**zero** nonfinite intermediate values and embeddings over all 469,375
+source images / 938,750 original and flip orientations. Graph and checkpoint
+identity checks pass. Candidate SHA
+`e0162796d245fb5ff8017a92e004e2f3dcfaa88036db5ba0162ec3f48a642ba5`.
+See [channelwise_ijbc96_exact_cosine_result.json](channelwise_ijbc96_exact_cosine_result.json).
+
+This improves the source by 0.01533977603927 percentage points, leaving
+0.20309863475993 points to the 96% gate. The small observed improvement is not
+evidence of statistical significance. Result interpretation remains IJB-C
+calibration-set performance. The same-source, same-seed MSE-weight-1 arm has
+started in the existing allocation; its full result is pending. No extra
+training job was submitted.

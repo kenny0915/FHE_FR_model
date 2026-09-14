@@ -1,0 +1,78 @@
+{
+  "result_directory": "work_dirs/channelwise_exact_head_20260915/mse0/ijbc_full",
+  "slurm_job": "385638",
+  "arm": "exact cosine only; MSE weight 0",
+  "acceptance": {
+    "target_met": false,
+    "checks": {
+      "tar": false,
+      "requested_roc_point": true,
+      "full_ijbc": true,
+      "finite": true,
+      "graph": true,
+      "checkpoint": true
+    },
+    "tar_percent": 95.79690136524007,
+    "actual_far": 9.898374134499722e-05,
+    "requested_far": 0.0001,
+    "checkpoint_sha256": "e0162796d245fb5ff8017a92e004e2f3dcfaa88036db5ba0162ec3f48a642ba5",
+    "interpretation": "IJB-C calibration-set performance; not untouched test accuracy"
+  },
+  "polynomial_certificate": {
+    "pure_polynomial": true,
+    "quadratic_sites": 25,
+    "coefficients": 17664,
+    "coefficient_mode": "channelwise",
+    "operations": [
+      "addition",
+      "multiplication",
+      "affine convolution/linear",
+      "reshape"
+    ],
+    "batchnorm": "fixed scale/offset constants",
+    "inference_clipping": false,
+    "scope": "image-to-embedding backbone before plaintext normalization/scoring",
+    "checkpoint_sha256": "e0162796d245fb5ff8017a92e004e2f3dcfaa88036db5ba0162ec3f48a642ba5"
+  },
+  "finite_audit_summary": {
+    "nonfinite_values": 0,
+    "embedding_nonfinite_rows": 0,
+    "source_images": 469375,
+    "augmented_embeddings": 938750,
+    "target": "IJBC",
+    "audited_input_rows": 938750,
+    "audited_output_rows": 938750,
+    "scope": "all module inputs and outputs, original and flip, including remainder"
+  },
+  "calibration": {
+    "config": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6/last.pt",
+      "teacher": "work_dirs/ms1mv3_r50/model.pt",
+      "ijb_root": "ijb/IJBC",
+      "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_exact_head_20260915/mse0",
+      "manifest": [],
+      "steps": 2000,
+      "batch_size": 64,
+      "workers": 4,
+      "lr": 0.003,
+      "range_weight": 0.0,
+      "exact_kd_weight": 1.0,
+      "exact_kd_guard": 4.0,
+      "auxiliary_weight": 0.0,
+      "exact_mse_weight": 0.0,
+      "parameter_scope": "head",
+      "seed": 20260924,
+      "deadline": 1789409183.0
+    },
+    "source_sha256": "8298aa8c0addaf8432648207a8ff9d4f3d14ddfc60c8dce07eee7527bcf2b69b",
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "calibration_dataset": "IJBC",
+    "uses_ijbc_pair_labels": false,
+    "inference_clipping": false
+  },
+  "report_sha256": {
+    "acceptance.json": "03c291b5234432a036689e01ae7134db3fca33e1c1c94705d4f983a384ccb766",
+    "finite_audit.json": "3b388402706c7187107a61c5d879f0a3597ef803cc79593a3dd1a77ca49ae2d3",
+    "polynomial_certificate.json": "005a9a97408b9abc5186c7ace47ed4752617db647c1af5a8bbf27893cc002685"
+  }
+}
