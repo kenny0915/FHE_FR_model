@@ -3,6 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.nn import functional as F
 
@@ -11,6 +12,30 @@ from controlled_degree2.model import load_controlled_checkpoint, save_checkpoint
 from controlled_degree2.recipe_a import digest
 from controlled_degree2.recipe_a_recovery import configure
 from controlled_degree2.recipe_a_recovery_v2 import sitewise
+
+
+def unpack_template_cache(cache, split, config, device):
+    """Validate complete-template cache IDs and preserve per-template sampling."""
+    tensors = []
+    sets = []
+    for name in ('fit', 'validation'):
+        part = cache[name]
+        ids = part['template_ids'].cpu().numpy()
+        expected = split[name+'_templates']
+        if not np.array_equal(ids, expected) or len(np.unique(ids)) != len(ids):
+            raise ValueError('template cache IDs do not match disjoint split')
+        if len(ids) != config['config'][name+'_templates']:
+            raise ValueError('template count mismatch')
+        x, y, w = part['source'], part['teacher'], part['bias_weight']
+        if x.ndim != 2 or x.shape != y.shape or len(x) != len(ids) or w.shape != (len(ids),):
+            raise ValueError('invalid template cache shapes')
+        if any(not torch.isfinite(t).all() for t in (x, y, w)) or (w <= 0).any():
+            raise ValueError('nonfinite template cache or invalid detector weight')
+        tensors.extend((x.to(device=device, dtype=torch.float32), y.to(device=device, dtype=torch.float32)))
+        sets.append(set(ids.tolist()))
+    if sets[0] & sets[1]:
+        raise ValueError('fitting and validation templates overlap')
+    return tuple(tensors)
 
 
 def pair_geometry_loss(output, teacher, source, source_ids, threshold=.3):
@@ -70,15 +95,29 @@ def main():
         raise ValueError('cache source/teacher hash mismatch')
     if digest(cache_root/'split.npz') != config['split_sha256']:
         raise ValueError('cache split hash mismatch')
-    cache = torch.load(cache_root/'embedding_cache.pt', map_location='cpu', weights_only=False)
-    x, y = (t.to(device) for t in cache['fit'])
-    vx, vy = (t.to(device) for t in cache['validation'])
-    if len(x) != 2*config['config']['fit_images'] or len(vx) != 2*config['config']['validation_images']:
-        raise ValueError('cache does not match recorded paired-orientation split')
+    template_mode = config.get('cache_layout') == 'complete_template_barycenters'
+    cache_path = cache_root/('template_cache.pt' if template_mode else 'embedding_cache.pt')
+    if template_mode:
+        if digest(cache_path) != config['cache_sha256']:
+            raise ValueError('template cache hash mismatch')
+        for path, expected in config['metadata_sha256'].items():
+            if digest(path) != expected:
+                raise ValueError('template metadata hash mismatch')
+    cache = torch.load(cache_path, map_location='cpu', weights_only=False)
+    if template_mode:
+        with np.load(cache_root/'split.npz') as split:
+            x, y, vx, vy = unpack_template_cache(cache, split, config, device)
+        views = 1
+    else:
+        x, y = (t.to(device) for t in cache['fit'])
+        vx, vy = (t.to(device) for t in cache['validation'])
+        if len(x) != 2*config['config']['fit_images'] or len(vx) != 2*config['config']['validation_images']:
+            raise ValueError('cache does not match recorded paired-orientation split')
+        views = 2
     if any(not torch.isfinite(t).all() for t in (x,y,vx,vy)):
         raise ValueError('non-finite cache')
-    ids = torch.arange(len(x),device=device)//2
-    vids = torch.arange(len(vx),device=device)//2
+    ids = torch.arange(len(x),device=device)//views
+    vids = torch.arange(len(vx),device=device)//views
     dim = x.shape[1]
     identity = torch.eye(dim,device=device)
     matrix = torch.nn.Parameter(identity.clone())
@@ -88,10 +127,10 @@ def main():
     best_score, best = sum(baseline.values()), None
     records = []
     for step in range(1,args.steps+1):
-        # Sample 256 source images, retaining both views. Duplicate sampled
-        # images are correctly excluded by original source ids in the mask.
-        image_ids = torch.randint(len(x)//2,(256,),device=device)
-        rows = torch.stack((2*image_ids,2*image_ids+1),dim=1).flatten()
+        # Sample 256 images (both views) or complete templates. Repeated
+        # sampled units are excluded by their fixed source IDs in the mask.
+        image_ids = torch.randint(len(x)//views,(256,),device=device)
+        rows = (image_ids[:, None]*views+torch.arange(views,device=device)).flatten()
         sx, sy = x[rows], y[rows]
         output = sx @ matrix.T+bias
         geometry, _ = pair_geometry_loss(output,sy,sx,ids[rows])
@@ -116,11 +155,13 @@ def main():
             print(records[-1],flush=True)
     report = dict(baseline=baseline,validation=records,improved=best is not None,
                   selected_step=None if best is None else best[0],
-                  selection='held-out cross-image all-pair MSE plus fixed high-similarity-pair MSE')
+                  selection=('held-out cross-template' if template_mode else 'held-out cross-image')
+                  +' all-pair MSE plus fixed high-similarity-pair MSE')
     (root/'selection.json').write_text(json.dumps(report,indent=2))
     record = dict(config=vars(args),source_sha256=config['source_sha256'],
                   teacher_sha256=config['teacher_sha256'],split_sha256=config['split_sha256'],
-                  cache_sha256=digest(cache_root/'embedding_cache.pt'),uses_ijbc_pair_labels=False,
+                  cache_sha256=digest(cache_path),uses_ijbc_pair_labels=False,
+                  cache_layout=config.get('cache_layout','paired_image_orientations'),
                   inference_clipping=False,tail_threshold=.3,point_anchor_weight=.01,identity_penalty=.001)
     (root/'calibration_config.json').write_text(json.dumps(record,indent=2))
     if best is None:

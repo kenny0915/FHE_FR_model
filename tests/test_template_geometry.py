@@ -53,3 +53,27 @@ def test_aggregation_preserves_gradients_and_rejects_bad_inputs():
         aggregate_templates(x, [1, 1], [3, 3, 3], [1., 1., 1.])
     with pytest.raises(ValueError):
         aggregate_templates(x, [1, 1, 2], [3, 3, 3], [1., -1., 1.])
+
+
+def test_template_cache_validates_split_and_affine_barycenter_layout():
+    from controlled_degree2.calibrate_pair_geometry import unpack_template_cache
+    import copy
+    cache = {}
+    split = {}
+    config = {'config': {'fit_templates': 2, 'validation_templates': 2}}
+    for name, ids in [('fit', [1, 3]), ('validation', [2, 4])]:
+        cache[name] = dict(source=torch.ones(2, 4, dtype=torch.float64),
+                           teacher=torch.ones(2, 4, dtype=torch.float64),
+                           bias_weight=torch.tensor([2., 3.]), template_ids=torch.tensor(ids))
+        split[name+'_templates'] = np.array(ids)
+    tensors = unpack_template_cache(cache, split, config, 'cpu')
+    assert len(tensors) == 4 and all(t.shape == (2, 4) and t.dtype == torch.float32 for t in tensors)
+    bad = copy.deepcopy(cache)
+    bad['fit']['bias_weight'][0] = 0
+    with pytest.raises(ValueError):
+        unpack_template_cache(bad, split, config, 'cpu')
+    bad = copy.deepcopy(cache)
+    bad['validation']['template_ids'] = torch.tensor([1, 3])
+    bad_split = dict(split, validation_templates=np.array([1, 3]))
+    with pytest.raises(ValueError, match='overlap'):
+        unpack_template_cache(bad, bad_split, config, 'cpu')

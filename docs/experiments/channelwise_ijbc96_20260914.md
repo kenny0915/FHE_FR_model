@@ -1312,3 +1312,21 @@ Source `channelwise_pair_geometry_20260915/ijbc_full/evaluated_checkpoint.pt`
 (SHA e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d).
 Output `work_dirs/channelwise_template_cache_20260915`; fitting/evaluation
 will use this cache after extraction validation. Original main stays stopped.
+
+### Template cache fitting integration
+
+The existing pair-geometry calibrator now recognizes complete-template
+barycenters. It verifies cache and metadata hashes, exact retained template
+IDs/counts, disjoint fit/validation templates, finite tensors and positive
+bias weights. Sampling treats each template as one unit; duplicate template
+pairs are excluded. Existing paired-orientation sampling is preserved.
+The same affine folding and full exported acceptance gates remain in force.
+Template selection reports its cross-template scope explicitly.
+
+All 29 combined template/pair/linear/campaign tests pass, including rejection
+of overlap and invalid template weights. Job 386128 was confirmed RUNNING
+and advancing through fitting-image extraction while this integration was
+prepared. No dependent fitting job is submitted before the completed cache
+is validated. Planned first template fit uses the default 2,000 updates,
+fixed teacher/source high-similarity membership and held-out template proxy;
+no identity or verification-pair labels enter its gradient objective.
