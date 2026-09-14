@@ -311,3 +311,15 @@ only its existing upstream BN affine. This is numerical evidence only:
 no resumable checkpoint or accuracy improvement is claimed. Initial guard
 4 and target 2 are multiples of each saved PReLU fit interval radius;
 the original approximation target and interval themselves are unchanged.
+
+
+Partial repair probe **383585** completed in 9 seconds, code `e63a681`.
+At 200 SGD steps the original 128-row batch changed from one nonfinite
+embedding/norm row to zero. All tensors outside the permitted BN affines
+were unchanged; no inference clipping was introduced. The guard was NOT
+fully satisfied: last escaping site layer2.1 had ratio 11.83 versus guard 4.
+Source hash `1c6d1822ad3589d9e215c63e3479e0a490eee87188b9b80ef2e92724afeaf5e9`.
+Report: `work_dirs/channelwise_ijbc96_nopath_20260914/numerical_failure_e5_s845/repair_probe/report.json`.
+This supports investigating guarded prefix repair during conversion, but
+provides no full-conversion, IJB-C, or accuracy evidence. All 35 related
+recovery/campaign tests passed before GPU submission.
