@@ -1598,3 +1598,20 @@ Tests compare tiled results with the complete Gram matrix for tile sizes
 the only high-similarity pair across a tile boundary, where the old evaluator
 would omit it. All four relevant suites pass: **36 tests**, with only existing
 PyTorch deprecation warnings. Whitespace checks pass. No GPU job submitted.
+
+### Expanded random complete-template cache
+
+Prepare 4,096 fitting / 2,048 validation templates with random seed 20260927,
+using the same 95.8838% source and original teacher as previous cache. Metadata
+preflight gives 82,363 fitting / 40,697 validation images (123,060 total);
+fit/validation template IDs are disjoint. The larger prefix reassigns some
+previous validation templates to fitting; this is a new calibration split,
+not an untouched holdout or an identity-disjoint split. No pair labels drive
+template selection. The source remains fixed to isolate expanded coverage.
+
+The extraction wrapper now accepts fit/validation counts and seed through
+environment variables, retaining prior defaults. Shell syntax, metadata split
+preflight and whitespace checks pass; extraction/aggregation implementation
+is unchanged and covered by the existing template tests. Submit extraction
+only on one H200 / 30 minutes. Verify resulting hashes and template shapes
+before any fit; main backbone training stays stopped.
