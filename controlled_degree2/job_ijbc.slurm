@@ -24,7 +24,7 @@ if [[ "${CHANNELWISE_ACCEPTANCE:-0}" == 1 ]]; then
 else
   mkdir -p "${RESULT_DIR}"
 fi
-export CUDA_VISIBLE_DEVICES=0 OMP_NUM_THREADS=12 PYTHONUNBUFFERED=1
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}" OMP_NUM_THREADS=12 PYTHONUNBUFFERED=1
 audit_args=()
 if [[ "${POLYNOMIAL_EXPORT:-0}" == 1 ]]; then
   audit_args+=(--polynomial-export "${RESULT_DIR}/polynomial_certificate.json"

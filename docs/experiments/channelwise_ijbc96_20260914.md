@@ -1,6 +1,6 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best completed fresh-campaign IJB-C TAR is 95.6384% with 7,931 nonfinite
+Status: best completed fresh-campaign IJB-C TAR is 95.7049% with 110 nonfinite
 augmented embeddings; the 96% / zero-nonfinite target is not achieved. Further
 calibration and full evaluation are running.
 
@@ -728,3 +728,27 @@ seed 20260919, output `ijbc_calibration_epoch14_head2000`; command/logs
 `calibration_head2000_step.*`. It can adapt output geometry, but cannot repair
 an overflowing frozen spatial backbone. The pending full-scan failure manifest
 will guide any subsequent joint numerical repair.
+
+### Complete longer-calibration result and residual-repair plan
+
+Full evaluation **384727.12** completed: conservative TAR **95.70486271%**,
+actual FAR **9.9495285e-5**, **110** nonfinite augmented embeddings. All 938,750
+input/output rows are audited; graph and checkpoint identity pass. Accuracy
+and finite requirements still fail. The manifest is under
+`ijbc_calibration_epoch14_lr1e4_3000_full/nonfinite_manifest.csv`.
+
+Head-only step **384727.18** completed 2,000 updates. Candidate hash
+`777e6fb12a0fe149f060131012dd022b754046dd23fb7b624dd5f31204086d82`.
+The fixed probe retains 2/512 manifest and 1/512 random failures, with paired
+random teacher cosine **.89537** (up from .89309 before head adaptation).
+Valid embedding norms have median 15.25 and maximum 36.91; the corresponding
+teacher median is 21.99. This is a subset diagnostic, not TAR. Reports
+`calibration_head2000_probe.json` / `calibration_head2000_probe_step.*`.
+
+Next: fully evaluate this head-adapted candidate and run joint calibration
+from a separate copy using the latest 110-row failure manifest, LR 1e-4,
+exact KD weight 5, range weight 1, all spatial/quadratic/output affine parameters.
+The evaluation launcher now preserves an explicitly supplied CUDA device mask,
+allowing overlapping single-GPU evaluations on distinct allocated GPUs. It
+still defaults to device 0; finite audit requires exactly one visible GPU.
+Shell syntax and whitespace checks pass.
