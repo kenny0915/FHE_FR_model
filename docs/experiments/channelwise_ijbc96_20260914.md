@@ -522,3 +522,24 @@ this run's newly produced `student_best.pt`. It snapshots the checkpoint,
 exports the channelwise polynomial graph and audits all original/flip rows
 before conservative FAR acceptance. No fresh IJB-C score is available yet.
 The prior credit-rejected submission is retained in `resume_provenance.json`.
+
+
+### First all-quadratic checkpoint and early full IJB-C diagnosis
+
+384727 reached epoch 14 with all 25 alphas at one and clipping disabled.
+The first unrestricted development validation failed: `nonfinite=712020353`
+is the sum of nonfinite boundary values and failed embedding rows, NOT a
+count of failed images. No TAR is reported by that development gate.
+Training continues; the immutable `epoch14_quadratic.pt` snapshot is retained.
+
+An early full IJB-C diagnostic runs as step **384727.2**, sharing one of the
+already allocated H200s on 25a-hgpn026 (`srun --overlap`), with a one-hour cap.
+It does not allocate a seventeenth GPU, but can slow the synchronized training.
+Command and logs are saved as `epoch14_eval_step.json/.out/.err`; result
+folder `ijbc_epoch14`. The complete 469,375-image evaluation has started.
+The exported certificate confirms pure polynomial inference, no clipping,
+25 channelwise quadratic sites and 17,664 coefficients. Snapshot SHA-256:
+`69cf56b3938118d7b8dc698089c8a60d2fe09a6c83682867a904759a3b3b5675`.
+This proves the structural requirement for this snapshot, not finite
+inference or target accuracy. Full results remain pending and will guide
+whether/how the permitted IJB-C calibration is needed.
