@@ -1636,3 +1636,8 @@ all cross-block pairs under implementation af8b62f. Same 95.8838% source as
 the smaller-cache control; no labels in gradient fitting. One H200 / 45 minutes
 includes full exported IJB-C acceptance after held-out proxy selection.
 Main training remains stopped; this tests expanded coverage, not longer training.
+
+Submitted **386630**, `channelwise-population-expanded`, one H200 / 45 minutes,
+MST114196, recipe HEAD **bb814dc**. Output
+`work_dirs/channelwise_template_population_expanded_20260915`. Full-template
+mode, .20 threshold, 2,000 updates; expanded cache verified before submission.
