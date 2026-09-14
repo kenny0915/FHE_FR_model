@@ -1,8 +1,10 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best completed fresh-campaign diagnostic IJB-C TAR is 95.9145% with 104 nonfinite
-augmented embeddings; the 96% / zero-nonfinite target is not achieved. Further
-calibration and full evaluation are running.
+Status: best fully finite fresh-campaign IJB-C calibration-set TAR is
+95.7815615892008%, with zero nonfinite intermediate values and embeddings.
+The higher diagnostic TAR of 95.9145% has 104 nonfinite embeddings and is
+ineligible. The 96% target is not achieved; the final head-adaptation evaluation
+is running. Further MS1MV3 continuation submission is on hold.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -813,3 +815,40 @@ It tests recovery of ordinary-input feature agreement after focused repairs.
 Neither calibration phase uses IJB-C identity/pair labels for gradients.
 The separate MS1MV3 main training uses ArcFace (margin .5, scale 64), KD and
 range control; no AdaFace loss is used in this campaign.
+
+### Full numerical repair confirmed; continuation reassessment (September 15)
+
+Full exported evaluation **384727.28** completed in 18m27s. The residual-six
+candidate achieves **95.7815615892008% TAR**, actual FAR
+**9.911162731572719e-5**, with **zero** nonfinite intermediate values and
+embeddings across all **469,375** source images / **938,750** original and
+flip orientations, including the remainder batch. All acceptance checks
+except TAR pass. The step reports FAILED because the accuracy gate returns
+nonzero; extraction and numerical auditing completed successfully.
+The gap to the goal is **0.2184384107992 percentage points**.
+
+The compact machine-readable report is
+[channelwise_ijbc96_residual6_result.json](channelwise_ijbc96_residual6_result.json),
+including the original report hashes and graph certificate. Full reports and
+the immutable evaluated checkpoint remain under
+`work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6_full`.
+This is **IJB-C calibration-set performance**, not untouched test accuracy.
+
+Random-IJB head-only calibration **384727.29** completed 2,000 updates in
+7m35s. Checkpoint SHA
+`bf07956815e06230f5a36d5f36752ceabe23614695610373d59baa15bb8eba44`.
+Probe **384727.30** preserves zero failures on all 1,139 unique known probe
+orientations and improves paired random teacher cosine .88816 -> .89569.
+Full exported evaluation **384727.31** is running in
+`ijbc_calibration_epoch14_head_random_full`; probe improvement does not prove
+full TAR improvement or full finiteness.
+
+The user authorized at most 16 H200 GPUs and 48 hours, and confirmed account
+MST114196 was replenished. A Slurm test-only submission succeeded, but no new
+continuation job was submitted. Following the user's question about whether
+continued training is worthwhile, further main-training submission is on
+hold: recent MS-only validation still overflows, while the completed IJB
+repair now demonstrably fixes numerical failures at some accuracy cost.
+The pending head-only full evaluation will inform the next decision. Existing
+main training and evaluation remain separate; no IJB-calibrated weights have
+been fed back into MS1MV3 main training.
