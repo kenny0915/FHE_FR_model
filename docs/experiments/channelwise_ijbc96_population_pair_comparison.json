@@ -1,0 +1,30 @@
+{
+  "label_path": "ijb/IJBC/meta/ijbc_template_pair_label.txt",
+  "uses_pair_labels": "diagnostic only; no gradient training",
+  "models": {
+    "sampled": {
+      "threshold": 0.2802081760610482,
+      "tar_percent": 95.95029912563277,
+      "actual_far": 9.923951328645715e-05,
+      "true_accepts": 18765,
+      "false_accepts": 1552
+    },
+    "population": {
+      "threshold": 0.2805252116671933,
+      "tar_percent": 95.95541238431252,
+      "actual_far": 9.898374134499722e-05,
+      "true_accepts": 18766,
+      "false_accepts": 1548
+    }
+  },
+  "comparison": {
+    "genuine_gained": 7,
+    "genuine_lost": 6,
+    "both_genuine_rejected": 785,
+    "impostor_newly_accepted": 63,
+    "impostor_newly_rejected": 67,
+    "genuine_union_accepts": 18772,
+    "impostor_union_accepts": 1615
+  },
+  "interpretation": "Union is an oracle complementarity diagnostic, not a deployable score or TAR at the required FAR; affine averaging requires separate full evaluation."
+}

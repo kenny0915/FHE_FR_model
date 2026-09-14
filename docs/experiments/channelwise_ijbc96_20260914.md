@@ -1544,3 +1544,20 @@ not establish statistical significance or justify longer training. Only
 TAR fails acceptance; the job did not crash. This remains IJB-C calibration-set
 performance with no pair/identity labels used in gradient fitting. Preserve
 this candidate as the new best and retain the sampled control for comparison.
+
+### Population versus sampled error complementarity
+
+Recomputed both full ROC curves from saved scores and official labels on CPU;
+their conservative TAR/FAR points exactly match recorded acceptance. Population
+updates gain seven genuine accepts and lose six versus sampled .20, with 63
+new impostor accepts and 67 removed. Both models reject the same 785 genuine
+pairs. Their acceptance union contains only 18,772 genuine accepts (target
+18,775) and 1,615 impostor accepts (above the FAR cap).
+[Pair comparison](channelwise_ijbc96_population_pair_comparison.json).
+
+This is a label-based diagnostic only, not gradient fitting. The union is
+not a deployable result or a bound on all possible affine interpolations.
+It offers weak evidence for immediately testing weight averaging: most
+remaining errors are shared. No averaging job is submitted. Further work
+should address these shared errors rather than assume the two heads provide
+enough complementarity to reach 96%.
