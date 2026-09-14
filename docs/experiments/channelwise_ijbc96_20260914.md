@@ -6,7 +6,8 @@ nonfinite intermediate values and embeddings. The higher historical diagnostic
 95.9145% has 104 nonfinite embeddings and is ineligible. The 96% target remains
 unmet. Main training is stopped. The paired magnitude-loss arm completed at
 95.69974945032469%, also fully finite, and did not improve TAR. One-GPU ablation
-385638 has finished; verified original-PReLU baseline job 385651 is next.
+385638 has finished. Original-PReLU baseline 385651 is verified at 96.5537%
+and zero nonfinite. Linear-alignment test 385889 is submitted on one H200.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1056,3 +1057,12 @@ and 45 minutes. CPU tests verify recovery of known rotations on unseen data,
 identity anchoring, fixed-BN affine folding (including negative BN scales),
 singular-scale rejection and disjoint deterministic sampling. All 22 linear
 head/campaign tests pass; Slurm syntax and diff whitespace checks pass.
+
+Submitted linear-alignment test as **385889**, one H200 / 45 minutes, account
+MST114196, excluding 25a-hgpn143/144. Source is the immutable evaluated
+checkpoint at
+`work_dirs/channelwise_exact_head_20260915/mse0/ijbc_full/evaluated_checkpoint.pt`
+(SHA `e0162796d245fb5ff8017a92e004e2f3dcfaa88036db5ba0162ec3f48a642ba5`).
+Output root: `work_dirs/channelwise_linear_head_20260915`; logs
+`channelwise-385889.out/.err`. Implementation commit **ee25c16**. No main
+training or other GPU allocation is running concurrently.
