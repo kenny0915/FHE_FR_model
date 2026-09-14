@@ -1773,3 +1773,20 @@ All five relevant suites pass: **39 tests**. Shell syntax and whitespace
 checks pass. No GPU fitting submitted in this integration step. A bounded
 one-H200 calibration/evaluation can now test the changed supervision signal
 without changing the 25 quadratic activations or adding inference operations.
+
+### Supervised pair calibration submitted
+
+Submitted **386742**, `channelwise-template-supervised01`, one H200 /
+45 minutes, MST114196, implementation/recipe **8ff70f4**. Output
+`work_dirs/channelwise_template_supervised01_20260915`. Expanded cache,
+full-template population updates, .20 geometry tail, 2,000 steps, LR 1e-4,
+.01 teacher anchor and .001 identity penalty stay fixed. Add supervised
+pair loss weight .01, margins .4/.2 and the fixed source-.2 negative set.
+The preflight expects 630 positive / 629 negative fitting pairs.
+
+This is explicitly **IJB-C pair-label-supervised calibration**. Pair labels
+are restricted to fitting endpoints and provenance records the label and
+selected-pair hashes. Selection remains held-out teacher geometry; full
+exported graph/finite/ROC acceptance follows. The best unlabeled result is
+retained. Queue was empty before this single submission; main training stays
+stopped. Success still requires full 96% TAR with zero nonfinite values.
