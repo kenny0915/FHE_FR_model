@@ -1503,3 +1503,20 @@ linear-head and channelwise suites pass: **31 tests**. Shell syntax and
 whitespace checks pass. GPU memory/runtime still require a bounded server
 probe before deciding on a full-population calibration experiment. No training
 job is submitted in this implementation step, and 96% remains unmet.
+
+### Full-population resource probe passed
+
+Slurm **386536**, one H200, completed in five seconds. Twenty full-population
+updates have finite losses, clipped gradients and parameters. Warm step time
+is .0038285 seconds, peak allocated/reserved GPU memory 257,470,464 /
+312,475,648 bytes. This excludes backbone export/evaluation; the 2,000-update
+estimate of 7.66 seconds is only for cached affine fitting. All 2,096,128
+unordered pairs / 4,266 fixed .20-tail pairs are included per update.
+[Probe result and source](channelwise_ijbc96_population_probe.json).
+
+Proceed with one bounded full-population comparison: same source, cache,
+.20 threshold, LR 1e-4, 2,000 updates, anchor/regularization and held-out
+selection as 386239; only template sampling is removed. Start from the
+95.8838% source used by that control, not from the selected .20 mapping.
+One H200 / 45 minutes includes full exported accuracy, graph and finite
+checks. This changes the optimization method rather than sweeping thresholds.
