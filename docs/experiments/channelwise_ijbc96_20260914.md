@@ -3,8 +3,9 @@
 Status: best fully finite fresh-campaign IJB-C calibration-set TAR is
 95.7815615892008%, with zero nonfinite intermediate values and embeddings.
 The higher diagnostic TAR of 95.9145% has 104 nonfinite embeddings and is
-ineligible. The 96% target is not achieved; the final head-adaptation evaluation
-is running. Further MS1MV3 continuation submission is on hold.
+ineligible. The 96% target is not achieved. The final head-adaptation evaluation
+completed at 95.76622181316152%, also fully finite. This recipe has been stopped;
+main job 384727 and pending evaluation 384733 were cancelled after saving results.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -861,3 +862,27 @@ step counts, replay-manifest hashes, and checkpoint hashes. Each predecessor
 hash was recomputed from disk and matched its successor's recorded source;
 all stages use the original PReLU teacher hash and preparation provenance.
 This records the successful lineage, excluding discarded smoke/diagnostic runs.
+
+### Final head result and stopping this recipe (September 15, 01:03 Taipei)
+
+Full exported evaluation **384727.31** completed in 18m12s:
+**95.76622181316152% TAR**, actual FAR **9.936739925718713e-5**,
+**zero** nonfinite intermediate values and embeddings over all 938,750
+orientations. Graph, source hash, full coverage and numerical checks pass;
+the accuracy gate fails. See
+[channelwise_ijbc96_head_random_result.json](channelwise_ijbc96_head_random_result.json).
+The improved small-probe teacher cosine did **not** improve full TAR: it is
+0.01533977603928 percentage points below the residual-six candidate.
+No passing 96% claim is warranted.
+
+The main run's just-completed epoch 19 validation still reports
+`activation_max_ratio=Infinity`, `nonfinite=568045742` (aggregate boundary
+scalar/embedding counter, not an image count). Its checkpoint `last.pt` is
+preserved; training was partway through epoch 20. These observations do not
+support extending the same main-training or head-only calibration recipe.
+After the completed full evaluation, pending evaluation **384733** and main
+allocation **384727** were cancelled to avoid further resource use. No new
+continuation was submitted. The best eligible result of this recipe remains
+**95.7815615892008% / zero nonfinite**, an IJB-C calibration-set result.
+The broader 96% objective remains unmet; stopping this recipe does not
+redefine or satisfy that objective.
