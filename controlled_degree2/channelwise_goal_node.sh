@@ -6,6 +6,10 @@ test -n "$bootstrap_interface"
 export NCCL_SOCKET_IFNAME="=$bootstrap_interface"
 export GLOO_SOCKET_IFNAME="$bootstrap_interface"
 extra=()
+if [[ -n "${CHANNEL_RESUME:-}" ]]; then
+    extra+=(--resume "$CHANNEL_RESUME")
+fi
+extra+=(--capture-numerical-failure)
 if [[ "$CHANNEL_SMOKE" == 1 ]]; then
     extra+=(--smoke --workers 1 --calibration-images 128)
 else

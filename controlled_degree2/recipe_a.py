@@ -121,6 +121,41 @@ def require_finite(value, device, where):
         raise FloatingPointError(f'{where}: non-finite on at least one rank; aborting, no skipped update')
 
 
+def capture_failure(root, student, head, optimizer, prepared, args, rank,
+                    epoch, step, progress, images, labels, mask, tensors, hints):
+    """Save the pre-update state and exact augmented batches, without repair."""
+    folder = Path(root)/f'numerical_failure_e{epoch}_s{step}'
+    folder.mkdir(parents=True, exist_ok=True)
+    def summary(value):
+        x = value.detach()
+        finite = torch.isfinite(x)
+        return dict(shape=list(x.shape), nonfinite=int((~finite).sum()),
+                    finite_absmax=float(torch.where(finite, x.abs(), 0).max()))
+    def ratio_value(module):
+        value = float(module.last_max)
+        return value if math.isfinite(value) else str(value)
+    report = dict(rank=rank, epoch=epoch, step=step, progress=progress,
+                  tensors={n: summary(t) for n, t in tensors.items()},
+                  stages={str(n): summary(t) for n, t in hints.items()},
+                  sites={m.name: dict(alpha=m.alpha, clip=m.clip,
+                         max_ratio=ratio_value(m), penalty=summary(m.last_penalty))
+                         for m in quadratic_modules(student) if m.last_penalty is not None},
+                  nonfinite_gradients={n: summary(p.grad) for n, p in student.named_parameters()
+                      if p.grad is not None and not bool(torch.isfinite(p.grad).all())})
+    torch.save(dict(images=images.detach().cpu(), labels=labels.detach().cpu(),
+                    mask=mask.detach().cpu(), report=report), folder/f'rank{rank}.pt')
+    (folder/f'rank{rank}.json').write_text(json.dumps(report, indent=2, allow_nan=False))
+    if rank == 0:
+        save_checkpoint(str(folder/'state.pt'), student, prepared['calibration'],
+                        teacher_weights=args.teacher,
+                        extra=dict(origin='teacher_only_recipe_a_failure', pure_quadratic=False,
+                                   epoch=epoch, step=step, progress=progress,
+                                   provenance=prepared['metadata'], config=vars(args),
+                                   head=head.state_dict(), optimizer=optimizer.state_dict(),
+                                   diagnostic_only=True))
+    barrier()
+
+
 def loader(args, rows, labels, deterministic=False, sampler=None):
     return DataLoader(SourceRows(args.dataset_root, rows, labels, deterministic),
                       batch_size=args.batch_size, sampler=sampler,
@@ -561,18 +596,38 @@ def train(args, rank, world, device):
             with torch.no_grad():
                 target = teacher(images)
             features = model(images)
-            require_finite(features, device, 'training embeddings')
+            try:
+                require_finite(features, device, 'training embeddings')
+            except FloatingPointError:
+                if getattr(args, 'capture_numerical_failure', False):
+                    capture_failure(root, student, head, optimizer, prepared, args, rank,
+                                    epoch, step, progress, images, labels, mask,
+                                    dict(features=features, target=target), student_hints)
+                raise
             classification = classifier(features, labels, mask, margin=.5*min(1., progress+0.1))
             kd, boundary = recipe_loss(features, target, student_hints, teacher_hints, mask, modules,
                                        elements, hint_weight=.3*(1-progress/args.epochs))
             beta = args.range_weight*min(1., (progress+.05)/2.)
             loss = classification+kd+beta*boundary
-            require_finite(loss, device, 'training loss')
+            try:
+                require_finite(loss, device, 'training loss')
+            except FloatingPointError:
+                if getattr(args, 'capture_numerical_failure', False):
+                    capture_failure(root, student, head, optimizer, prepared, args, rank,
+                                    epoch, step, progress, images, labels, mask,
+                                    dict(loss=loss, classification=classification, kd=kd,
+                                         boundary=boundary, features=features, target=target), student_hints)
+                raise
             loss.backward()
             parameters = [p for group in optimizer.param_groups for p in group['params']]
             bad = torch.tensor(int(any(p.grad is not None and not torch.isfinite(p.grad).all() for p in parameters)), device=device)
             reduce(bad, dist.ReduceOp.MAX)
             if bad.item():
+                if getattr(args, 'capture_numerical_failure', False):
+                    capture_failure(root, student, head, optimizer, prepared, args, rank,
+                                    epoch, step, progress, images, labels, mask,
+                                    dict(loss=loss, classification=classification, kd=kd,
+                                         boundary=boundary, features=features, target=target), student_hints)
                 raise FloatingPointError('non-finite gradients; aborting without optimizer update')
             clip_grad_norm_stable(parameters, 5., error_if_nonfinite=True)
             optimizer.step()
@@ -670,6 +725,8 @@ def parse_args():
     p.add_argument('--unclip-epochs', type=float, default=0.)
     p.add_argument('--curvature-cap', type=float, default=0.)
     p.add_argument('--resume')
+    p.add_argument('--capture-numerical-failure', action='store_true',
+                   help='save exact augmented batches and pre-update state before a numerical abort')
     p.add_argument('--smoke', action='store_true', help='isolated 64-identity preparation and two optimizer steps')
     args = p.parse_args()
     if args.sitewise_unclipped and (args.shared or args.inference_bound or args.all_quadratic_start):

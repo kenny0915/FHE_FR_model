@@ -188,3 +188,29 @@ coefficients still match their fresh fits in this snapshot. The largest
 coefficient change is .002835 at `layer2.2.prelu`. This is still a conversion
 snapshot with `pure_quadratic=false`, not a full-network finite/accuracy gate.
 No student IJB-C score has been produced and no test metric changed this run.
+
+## First numerical failure and diagnostic continuation
+
+Job 383299 aborted in epoch 5 after the last logged step 850/2477 (Layer3
+first-site alpha .686314). All ranks passed the embedding finite check but
+the synchronized **training loss** finite check failed before backward or an
+optimizer update. This does not identify which loss component overflowed;
+no failed batch was captured by the original trainer. Do not infer an
+embedding overflow or a particular layer from the last finite log alone.
+
+The Slurm allocation lingered after the worker failure. It and dependent
+evaluation 383314 are explicitly cancelled; no IJB-C result exists.
+`--capture-numerical-failure` now saves the exact augmented per-rank batches,
+component/stage/activation diagnostics and rank-0 pre-update backbone/head/
+optimizer state before numerical abort, with no sanitization or skipped update.
+The hook is observational and leaves the successful update path unchanged.
+Fourteen focused tests passed, including preservation of the failing batch
+and unchanged weights. Shell syntax and whitespace checks passed.
+
+Next action is a 20-minute diagnostic continuation from the immutable
+epoch-4 checkpoint in a fresh output directory, copying the original
+preparation/split and preserving the original optimizer/training policy.
+Only failure capture is added. The transient training-tail replay cache is
+rebuilt on resume, so this is not a bit-exact replay of the failed epoch.
+The purpose is to capture a concrete numerical failure, or establish that
+the resumed trajectory progresses, before selecting a numerical repair.

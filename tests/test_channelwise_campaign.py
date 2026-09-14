@@ -118,3 +118,31 @@ def test_audit_counts_actual_full_and_remainder_forwards():
     assert result['boundaries']['.input[0]']['observed_rows'] == 5
     assert result['boundaries']['.output']['observed_rows'] == 5
     assert result['nonfinite_values'] == 0
+
+
+def test_failure_capture_preserves_exact_batch_and_preupdate_weights(tmp_path):
+    import json
+    from controlled_degree2.recipe_a import capture_failure
+    q = DirectQuadratic(2, name='prelu')
+    q.coeffs.requires_grad_(True)
+    model = nn.Sequential(q)
+    head = nn.Linear(2, 3)
+    optimizer = torch.optim.SGD(model.parameters(), lr=.01)
+    images = torch.full((2, 2, 2, 2), 1e25)
+    q.clip = False
+    features = model(images)
+    before = q.coeffs.detach().clone()
+    capture_failure(tmp_path, model, head, optimizer,
+                    dict(calibration={}, metadata={'source':'test'}),
+                    SimpleNamespace(teacher='teacher.pt'), 0, 5, 850, 5.34,
+                    images, torch.tensor([0, 1]), torch.tensor([True, False]),
+                    dict(features=features), {1:features})
+    folder = tmp_path/'numerical_failure_e5_s850'
+    report = json.loads((folder/'rank0.json').read_text())
+    assert report['tensors']['features']['nonfinite'] > 0
+    batch = torch.load(folder/'rank0.pt', weights_only=False)
+    torch.testing.assert_close(batch['images'], images, rtol=0, atol=0)
+    state = torch.load(folder/'state.pt', weights_only=False)
+    torch.testing.assert_close(state['state_dict_backbone']['0.coeffs'], before, rtol=0, atol=0)
+    torch.testing.assert_close(q.coeffs, before, rtol=0, atol=0)
+    assert state['diagnostic_only'] and not state['pure_quadratic']

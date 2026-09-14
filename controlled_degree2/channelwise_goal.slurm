@@ -28,6 +28,11 @@ if [[ "$CHANNEL_SMOKE" != 1 ]]; then
     : "${CHANNEL_DEADLINE:?Production requires an agreed absolute deadline}"
 fi
 for stage in prepare train; do
+    if [[ "$stage" == prepare && -n "${CHANNEL_RESUME:-}" ]]; then
+        test -f "$CHANNEL_OUTPUT/prepared.pt"
+        test -f "$CHANNEL_OUTPUT/split.npz"
+        continue
+    fi
     srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --distribution=block:block \
         --kill-on-bad-exit=1 bash controlled_degree2/channelwise_goal_node.sh "$stage"
 done
