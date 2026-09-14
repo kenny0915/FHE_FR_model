@@ -1,11 +1,11 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best fully finite IJB-C calibration-set TAR is 95.89405328015545%,
-actual FAR 9.975105716937703e-5, from template-geometry job 386141. Full original
+Status: best fully finite IJB-C calibration-set TAR is 95.95029912563277%,
+actual FAR 9.923951328645715e-5, from template-tail-.20 job 386239. Full original
 and flip intermediate/embedding nonfinite counts are zero. All 25 sites remain
 channelwise pure quadratics with no inference clipping. The 96% target is
-unmet: 21 additional genuine accepts are needed. Main training is stopped;
-386141 finished evaluation, with FAILED status caused only by the accuracy gate.
+unmet: ten additional genuine accepts are needed. Main training is stopped;
+386239 finished evaluation, with FAILED status caused only by the accuracy gate.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1389,3 +1389,22 @@ one H200 / 45 minutes, output `work_dirs/channelwise_template_tail02_20260915`.
 Implementation **e85962a** is pushed. The existing 29 combined tests pass;
 a new validation-threshold regression passes with the four pair tests.
 Shell syntax and whitespace checks pass. Main training remains stopped.
+
+### Template tail .20 full result: new best, ten accepts short
+
+Job **386239** finished full evaluation in **19m30s**, despite transient slow
+initialization/early batches on 25a-hgpn020. Conservative TAR is
+**95.95029912563277%**, actual FAR **9.923951328645715e-5**. Full coverage of
+469,375 source images / 938,750 original-and-flip rows, including remainder,
+confirms zero nonfinite module-boundary values and embeddings. The certificate
+confirms 25 channelwise quadratics / 17,664 coefficients and no clipping.
+Evaluated checkpoint hash independently verified:
+`7661f9bbf7fa8575eb8e6d24479de590f81738adae209ee659be0bc8187b948c`.
+See [channelwise_ijbc96_template_tail02_result.json](channelwise_ijbc96_template_tail02_result.json).
+
+The candidate accepts 18,765 / 19,557 genuine pairs, 11 more than the .30
+threshold control. At least 18,775 accepts are needed for 96%, leaving ten.
+Only the accuracy gate fails; Slurm FAILED is not an evaluation runtime crash.
+The comparison supports the wider fixed tail in this run, without establishing
+statistical significance. This is IJB-C calibration-set performance; labels
+were not used for gradient fitting. Original main training remains stopped.
