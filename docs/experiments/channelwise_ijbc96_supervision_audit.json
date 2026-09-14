@@ -1,0 +1,17 @@
+{
+  "uses_ijbc_pair_labels": true,
+  "fit_templates": 4096,
+  "validation_templates": 2048,
+  "disjoint_template_partitions": true,
+  "selected_pairs": 1259,
+  "positive_pairs": 630,
+  "negative_pairs": 629,
+  "all_selected_pairs_match_official_labels": true,
+  "all_fit_positive_pairs_included": true,
+  "label_sha256": "9b9dbf1057d0df8b848ec922778c95f09eb8c731227eaf83ce08bc059c5fbfec",
+  "selected_pairs_sha256": "492276e15a466c61a4ac59fdb71e6923229110a835a79de86becb31cfb062f79",
+  "cache_sha256": "bbea6466eaf5e79209f797fc2b1fd3609511f636d7e92bd27ae75f6b74fc60df",
+  "interpretation": "IJB-C pair-label-supervised calibration-set performance, not untouched test accuracy",
+  "slurm_job": "386742",
+  "artifact_directory": "work_dirs/channelwise_template_supervised01_20260915"
+}

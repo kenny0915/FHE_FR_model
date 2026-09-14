@@ -1790,3 +1790,15 @@ selected-pair hashes. Selection remains held-out teacher geometry; full
 exported graph/finite/ROC acceptance follows. The best unlabeled result is
 retained. Queue was empty before this single submission; main training stays
 stopped. Success still requires full 96% TAR with zero nonfinite values.
+
+### Supervised fitting provenance independently audited
+
+While job 386742 continues full evaluation, independently verified the saved
+selected-pair, official-label and template-cache hashes. Mapped all 1,259
+selected local pairs back to official template IDs and streamed the official
+label file: every pair and label matches, and all 630 fitting positive pairs
+are included. The 4,096 fitting and 2,048 validation template IDs are disjoint;
+all selected endpoints are fitting rows. This does not establish identity
+disjointness or untouched-test performance.
+[Audit record](channelwise_ijbc96_supervision_audit.json).
+No new GPU job is submitted; full TAR and finite acceptance remain pending.
