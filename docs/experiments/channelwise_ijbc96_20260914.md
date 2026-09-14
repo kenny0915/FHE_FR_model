@@ -934,3 +934,21 @@ is `work_dirs/channelwise_exact_head_20260915/smoke_verification.json`.
 The independent cosine-only 2,000-update arm is now running; early logged
 batches select all 64 rows for exact-path KD. These checks do not replace a
 full IJB-C accuracy/numerical evaluation.
+
+### Verified original-PReLU baseline scheduled
+
+Historical PReLU scores have no original checkpoint/evaluation hash metadata.
+To complete the same-source comparison, job **385651** evaluates an immutable
+copy of `work_dirs/ms1mv3_r50/model.pt`, verified SHA
+`ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a`,
+under `work_dirs/channelwise_prelu_verified_20260915/evaluated_checkpoint.pt`.
+Provenance is saved alongside it. This is evaluation only, network `r50`,
+unchanged full IJB-C original/flip protocol, batch 512, full finite audit and
+nonfinite manifest. No polynomial certificate is expected for a PReLU model.
+
+The job is PENDING on `afterany:385638`, uses one H200 with a 40-minute cap,
+and writes `channelwise-385651.out/.err` and
+`work_dirs/channelwise_prelu_verified_20260915/ijbc_full/original_prelu`.
+It runs serially after the exact-head ablation, without restarting main
+training. Historical 96.5588% remains a reference, not yet verified performance
+of this immutable original checkpoint.
