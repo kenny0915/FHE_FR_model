@@ -420,6 +420,8 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
         summary = dict(nonfinite_values=sum(a['nonfinite_values'] for a in audits),
                        embedding_nonfinite_rows=nonfinite_rows, batches=audits,
                        source_images=len(files), augmented_embeddings=2*len(files), target=args.target,
+                       audited_input_rows=sum(a['boundaries']['.input[0]']['observed_rows'] for a in audits),
+                       audited_output_rows=sum(a['boundaries']['.output']['observed_rows'] for a in audits),
                        scope='all module inputs and outputs, original and flip, including remainder')
         os.makedirs(os.path.dirname(os.path.abspath(args.finite_audit)), exist_ok=True)
         with open(args.finite_audit, 'w') as stream:

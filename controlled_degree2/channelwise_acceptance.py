@@ -15,7 +15,9 @@ def assess(raw, audit, certificate, checkpoint_sha256):
         tar=math.isfinite(tar) and 96 <= tar <= 100,
         requested_roc_point='0.0001' in points and math.isfinite(far) and 0 < far < .001,
         full_ijbc=audit.get('target') == 'IJBC' and audit.get('source_images') == 469375
-                  and audit.get('augmented_embeddings') == 938750,
+                  and audit.get('augmented_embeddings') == 938750
+                  and audit.get('audited_input_rows') == 938750
+                  and audit.get('audited_output_rows') == 938750,
         finite=audit.get('nonfinite_values') == 0 and audit.get('embedding_nonfinite_rows') == 0,
         graph=certificate.get('pure_polynomial') is True
               and certificate.get('inference_clipping') is False

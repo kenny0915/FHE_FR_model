@@ -23,14 +23,16 @@ class FiniteAudit:
             finite = torch.isfinite(value)
             bad = (~finite).sum()
             peak = torch.where(finite, value.abs(), 0).amax().double()
+            rows = int(value.shape[0]) if value.ndim else 1
             if name not in self.stats:
-                self.stats[name] = [bad, peak]
+                self.stats[name] = [bad, peak, rows]
             else:
                 self.stats[name][0] += bad
                 self.stats[name][1] = torch.maximum(self.stats[name][1], peak)
+                self.stats[name][2] += rows
 
     def result(self):
-        modules = {n: dict(nonfinite_values=int(v[0]), finite_absmax=float(v[1]))
+        modules = {n: dict(nonfinite_values=int(v[0]), finite_absmax=float(v[1]), observed_rows=v[2])
                    for n, v in self.stats.items()}
         return dict(nonfinite_values=sum(v['nonfinite_values'] for v in modules.values()),
                     boundaries=modules)

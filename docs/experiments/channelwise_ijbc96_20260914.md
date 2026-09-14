@@ -103,3 +103,23 @@ using commit bd701c4 (also pushed). Output:
 training checkpoints and per-epoch metrics stay under this directory.
 Its initial absolute deadline is Unix 1789385375; Slurm limit is six hours.
 No candidate IJB-C score is available yet. This goal remains active.
+
+Preparation completed and recorded teacher SHA-256
+`ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a`.
+The fresh teacher-development check reproduced clean TAR 99.01615% and
+lowres20 TAR 34.57615% at sampled FAR=1e-4, with zero non-finite observations.
+These are MS1MV3 development metrics, not IJB-C accuracy. Head warmup started
+with finite losses and all conversion alphas zero.
+
+## Immutable final evaluation
+
+The existing `job_ijbc.slurm` supports `CHANNELWISE_ACCEPTANCE=1`, together
+with `POLYNOMIAL_EXPORT=1`, `FINITE_AUDIT=1` and
+`POLYNOMIAL_COEFFICIENT_MODE=channelwise`. This mode requires a fresh result
+directory and snapshots the selected checkpoint there before evaluating any
+batch. The exporter and acceptance report identify the snapshot by SHA-256.
+Actual root input/output hook counts must both equal 938,750; metadata row
+counts alone do not certify complete inference. The final script writes
+`acceptance.json` and exits nonzero when the 96%/finite/coverage gate is unmet;
+that report distinguishes a completed below-target evaluation from a runtime
+failure. Additional focused audit/export tests: 35 passed.
