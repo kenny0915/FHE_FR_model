@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import pickle
+from contextlib import nullcontext
 
 import matplotlib
 import pandas as pd
@@ -190,11 +191,13 @@ class Embedding(object):
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()
+        self.finite_audit = None
         if args.finite_audit:
             if torch.cuda.device_count() != 1:
                 raise ValueError('--finite-audit requires one visible GPU for exact hook accounting')
             from eval.finite_audit import FiniteAudit
-            finite_audits.append(FiniteAudit(resnet))
+            self.finite_audit = FiniteAudit(resnet)
+            finite_audits.append(self.finite_audit)
         self.nonfinite_rows = 0
         self.nonfinite_records = []
         self.trace_model = resnet if args.nonfinite_manifest else None
@@ -252,8 +255,10 @@ class Embedding(object):
             )
         if bad_rows and self.trace_model is not None:
             bad_indices = torch.where(~finite_rows)[0]
-            traces = trace_first_nonfinite(
-                self.trace_model, imgs.index_select(0, bad_indices))
+            # Diagnostic replays must not inflate full-dataset audit coverage.
+            with self.finite_audit.paused() if self.finite_audit else nullcontext():
+                traces = trace_first_nonfinite(
+                    self.trace_model, imgs.index_select(0, bad_indices))
             for bad_index, trace in zip(bad_indices.tolist(), traces):
                 local_source = bad_index // 2
                 record = dict(trace)

@@ -562,3 +562,25 @@ updated parameters finite. Step-25 KD 0.101471, prefix 0.180486, total loss
 `calibration_smoke_step.json/.out/.err`. This validates the real calibration
 pipeline, not full-inference finiteness or accuracy. Production calibration
 will use the completed IJB-C failure manifest and requires a new full audit.
+
+
+### Epoch-14 full IJB-C result and audit accounting correction
+
+The complete IJB-C diagnostic finished: conservative TAR **95.53612517%**
+at actual FAR **9.9495285e-5**. The manifest contains **9,712** original/flip
+embedding rows with nonfinite values. Therefore this result fails both
+accuracy and finite-inference requirements. The graph certificate and
+checkpoint identity pass. The score is diagnostic, using the evaluator's
+reported nonfinite handling, not a zero-nonfinite result.
+
+Diagnostic tracing replayed those 9,712 rows through the same audited model,
+inflating audited input/output rows from 938,750 to 948,462 and duplicating
+some boundary failure counts. The new audit pause context excludes diagnostic
+replays from subsequent full-evaluation accounting and restores collection
+even if tracing raises. All 14 campaign tests pass. This accounting fix does
+not change model weights or the existing TAR, and does not remove real failures.
+
+Next calibration uses the immutable epoch-14 checkpoint and the complete
+failure manifest: 1,000 steps, batch 32 (half random IJB-C orientations,
+half manifest replay), LR 1e-5, original teacher KD and finite-prefix loss.
+Saved inference remains unclipped; a new full IJB-C audit is required.

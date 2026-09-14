@@ -1,10 +1,12 @@
 """Read-only inference audit of every module input/output, including residuals."""
 import torch
+from contextlib import contextmanager
 
 
 class FiniteAudit:
     def __init__(self, model):
         self.stats = {}
+        self.enabled = True
         self.handles = []
         for name, module in model.named_modules():
             self.handles.append(module.register_forward_pre_hook(
@@ -13,6 +15,8 @@ class FiniteAudit:
                 lambda m, inputs, output, n=name: self.observe(n+'.output', output)))
 
     def observe(self, name, value):
+        if not self.enabled:
+            return
         if isinstance(value, (tuple, list)):
             for index, item in enumerate(value):
                 self.observe(name+f'[{index}]', item)
@@ -36,6 +40,15 @@ class FiniteAudit:
                    for n, v in self.stats.items()}
         return dict(nonfinite_values=sum(v['nonfinite_values'] for v in modules.values()),
                     boundaries=modules)
+
+    @contextmanager
+    def paused(self):
+        previous = self.enabled
+        self.enabled = False
+        try:
+            yield
+        finally:
+            self.enabled = previous
 
     def close(self):
         for handle in self.handles:

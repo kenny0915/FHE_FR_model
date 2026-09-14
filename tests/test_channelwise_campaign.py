@@ -206,3 +206,20 @@ def test_stress_ablation_requires_explicit_resume_revision():
         check_resume_policy({}, args)
     args.resume_policy_revision = 'reconstructed source has normal colors; captured augmented row overflowed'
     check_resume_policy({}, args)
+
+
+def test_audit_diagnostic_replays_do_not_inflate_coverage():
+    from eval.finite_audit import FiniteAudit
+    model = nn.Identity()
+    audit = FiniteAudit(model)
+    model(torch.tensor([[float('inf')], [1.]]))
+    with pytest.raises(RuntimeError):
+        with audit.paused():
+            model(torch.tensor([[float('inf')]]))
+            raise RuntimeError('diagnostic failed')
+    model(torch.ones(1, 1))
+    result = audit.result()
+    assert result['boundaries']['.input[0]']['observed_rows'] == 3
+    assert result['boundaries']['.output']['observed_rows'] == 3
+    assert result['nonfinite_values'] == 2
+    audit.close()
