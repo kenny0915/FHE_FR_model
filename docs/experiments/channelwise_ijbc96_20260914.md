@@ -1102,3 +1102,36 @@ linear corrections are ineffective. No extension of this fitting recipe
 was submitted. The best eligible calibration-set result remains
 95.79690136524007%, zero nonfinite, with 40 additional genuine accepts needed
 at the FAR cap to reach 96%. All current jobs are terminal.
+
+### Unlabeled pair-geometry diagnostic and bounded calibration
+
+An independent CPU probe of 1,024 cached validation source images (2,048
+orientations) excludes same-source views and examines 2,095,104 cross-image
+pairs without identity/pair labels. Linear alignment improves overall
+similarity MSE .00108284 -> .00100614, but worsens the 1,490 teacher-similarity
+>=.3 pairs from .00214181 -> .00251013. This subset observation supports
+testing pair geometry directly, but is not a causal explanation of full TAR.
+See [channelwise_ijbc96_pair_geometry_probe.json](channelwise_ijbc96_pair_geometry_probe.json).
+
+`calibrate_pair_geometry.py` reuses the exact-cosine source embedding cache,
+with its source/teacher/split hashes and source-image-disjoint fitting and
+validation partitions. It learns a 512-dimensional affine correction with
+Adam, LR 1e-4, 2,000 updates, seed 20260926. Each update samples 256 source
+images and both views. Duplicate/same-image pairs and diagonals are excluded.
+Loss is all-pair similarity MSE plus high-similarity-pair MSE, plus .01 teacher
+point-cosine anchor and .001 identity penalty. High-similarity membership is
+fixed by teacher OR source cosine >=.3, not the learned output. No identity
+or verification-pair labels are read.
+
+Every 100 updates, select by the sum of all-pair and high-similarity MSE on
+fixed held-out cache batches; the original identity correction is a candidate.
+No improvement skips full evaluation. The selected affine is folded into the
+existing FC only. All spatial layers, BN state and 25 per-channel PReLU-fit
+quadratics/intervals remain unchanged; no inference operation/layer is added.
+A real-head affine composition probe precedes saving. Full exported IJB-C
+acceptance remains necessary, and results remain calibration-set performance.
+
+The one-H200 job has a 45-minute limit. All 25 campaign/linear/pair tests pass,
+including rotational invariance of pair similarity, exclusion of same-image
+views, finite high-similarity gradients, detached fixed targets/selection,
+and empty-tail behavior. Slurm syntax and whitespace checks also pass.

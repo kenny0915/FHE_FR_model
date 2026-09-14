@@ -1,0 +1,29 @@
+{
+  "orientations": 2048,
+  "source_images": 1024,
+  "labels_used": false,
+  "excludes_same_source_views": true,
+  "bins": {
+    "all": {
+      "pairs": 2095104,
+      "source_similarity_mse": 0.0010828426199480266,
+      "aligned_similarity_mse": 0.0010061383681967456,
+      "source_signed_error": 0.00083912016850014,
+      "aligned_signed_error": 0.0005664189237787582
+    },
+    "teacher_ge_0.3": {
+      "pairs": 1490,
+      "source_similarity_mse": 0.002141808234708062,
+      "aligned_similarity_mse": 0.0025101319229505524,
+      "source_signed_error": 0.017417032461929813,
+      "aligned_signed_error": 0.02418220378780889
+    },
+    "teacher_lt_0.2_student_ge_0.3": {
+      "pairs": 44,
+      "source_similarity_mse": 0.035406893647402876,
+      "aligned_similarity_mse": 0.023302548052261163,
+      "source_signed_error": 0.18316844248465697,
+      "aligned_signed_error": 0.14653885563383326
+    }
+  }
+}
