@@ -96,3 +96,10 @@ calibration succeeded; 16 ranks x 128 images completed two updates with
 unclipped stem conversion. First loss 3.4841; maximum stem weight change
 .000553. This proves execution only, not full conversion or accuracy.
 Initial implementation commit 0324a53 was pushed to origin/main.
+
+First production job **383299** started on nodes 25a-hgpn019–020, 16 H200s,
+using commit bd701c4 (also pushed). Output:
+`work_dirs/channelwise_ijbc96_20260914`. The fresh preparation, source hashes,
+training checkpoints and per-epoch metrics stay under this directory.
+Its initial absolute deadline is Unix 1789385375; Slurm limit is six hours.
+No candidate IJB-C score is available yet. This goal remains active.
