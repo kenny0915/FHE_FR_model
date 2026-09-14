@@ -1,11 +1,12 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best fully finite IJB-C calibration-set TAR is 95.95029912563277%,
-actual FAR 9.923951328645715e-5, from template-tail-.20 job 386239. Full original
-and flip intermediate/embedding nonfinite counts are zero. All 25 sites remain
-channelwise pure quadratics with no inference clipping. The 96% target is
-unmet: ten additional genuine accepts are needed. Main training is stopped;
-386239 finished evaluation, with FAILED status caused only by the accuracy gate.
+Status: best fully finite IJB-C calibration-set TAR is 95.95541238431252%,
+actual FAR 9.898374134499722e-5, from full-template population job 386548.
+Full original and flip intermediate/embedding nonfinite counts are zero.
+All 25 sites remain channelwise pure quadratics with no inference clipping.
+The 96% target is unmet: nine additional genuine accepts are needed.
+Main training is stopped; 386548 finished evaluation, with FAILED status
+caused only by the accuracy gate.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1525,3 +1526,21 @@ Submitted **386548**, `channelwise-template-population`, one H200 / 45 minutes,
 MST114196, recipe HEAD **54f02fe**, implementation **45e0496**. Output
 `work_dirs/channelwise_template_population_20260915`; full-template mode is
 enabled, threshold .20 and 2,000 updates. Main backbone training stays stopped.
+
+### Full-population result: one additional accept, target unmet
+
+Job **386548** finished in **21m43s**. Full exported conservative TAR is
+**95.95541238431252%**, actual FAR **9.898374134499722e-5**. All 469,375 source
+images / 938,750 original-and-flip rows have zero nonfinite module-boundary
+values and embeddings, including the remainder. The certificate confirms
+25 channelwise pure quadratics / 17,664 coefficients and no inference clipping.
+Checkpoint SHA independently verified:
+`4b2b7923e5a5c3d355836be5888671ebbd7f51d59f440272d6be2da0c2a10a1d`.
+[Verified result](channelwise_ijbc96_template_population_result.json).
+
+This accepts 18,766 / 19,557 genuine pairs, one more than the sampled .20
+control. At least 18,775 are needed, leaving nine. The one-pair gain does
+not establish statistical significance or justify longer training. Only
+TAR fails acceptance; the job did not crash. This remains IJB-C calibration-set
+performance with no pair/identity labels used in gradient fitting. Preserve
+this candidate as the new best and retain the sampled control for comparison.
