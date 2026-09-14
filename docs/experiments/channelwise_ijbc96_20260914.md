@@ -1305,3 +1305,10 @@ The extraction-only Slurm job uses one H200 / 30 minutes and retains a
 hashed compact template cache. CLI import/help, shell syntax and three
 aggregation/split tests pass; combined 28 tests passed in the preceding
 implementation. No accuracy claim follows from cache extraction alone.
+
+Submitted extraction as **386128**, `channelwise-template-cache-20260915`,
+one H200 / 30 minutes, MST114196. Implementation **47a9e55** is pushed.
+Source `channelwise_pair_geometry_20260915/ijbc_full/evaluated_checkpoint.pt`
+(SHA e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d).
+Output `work_dirs/channelwise_template_cache_20260915`; fitting/evaluation
+will use this cache after extraction validation. Original main stays stopped.
