@@ -10,6 +10,10 @@ if [[ -n "${CHANNEL_RESUME:-}" ]]; then
     extra+=(--resume "$CHANNEL_RESUME")
 fi
 extra+=(--capture-numerical-failure)
+extra+=(--pathological-fraction "${CHANNEL_PATHOLOGICAL_FRACTION:-0.02}")
+if [[ -n "${CHANNEL_RESUME_POLICY_REVISION:-}" ]]; then
+    extra+=(--resume-policy-revision "$CHANNEL_RESUME_POLICY_REVISION")
+fi
 if [[ "$CHANNEL_SMOKE" == 1 ]]; then
     extra+=(--smoke --workers 1 --calibration-images 128)
 else

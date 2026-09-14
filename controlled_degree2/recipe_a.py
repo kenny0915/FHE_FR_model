@@ -358,13 +358,17 @@ def hook_stages(model, storage):
 
 
 def recipe_loss(features, target, student_hints, teacher_hints, mask, modules, elements, hint_weight):
-    weights = mask.float()
-    cosine = ((1-F.cosine_similarity(features.float(), target.float(), dim=1))*weights).sum()/weights.sum().clamp_min(1)
+    # Excluded pathological rows must not form a squared error first: Inf*0
+    # is NaN. Range regularization below still observes every input row.
+    active = mask.bool()
+    has_active = bool(active.any())
+    cosine = ((1-F.cosine_similarity(features[active].float(), target[active].float(), dim=1)).mean()
+              if has_active else features[active].sum())
     hints = []
     for stage in student_hints:
-        s, t = student_hints[stage].float(), teacher_hints[stage].float()
+        s, t = student_hints[stage][active].float(), teacher_hints[stage][active].float()
         error = (s-t).square().flatten(1).mean(1) / t.square().flatten(1).mean(1).clamp_min(1e-6)
-        hints.append((error*weights).sum()/weights.sum().clamp_min(1))
+        hints.append(error.mean() if has_active else s.sum())
     hint = torch.stack(hints).mean()
     boundary = torch.stack([m.last_penalty/elements[m.name] + 0.01*m.last_sample_penalty.mean() for m in modules]).mean()
     return cosine + hint_weight*hint, boundary
@@ -480,6 +484,9 @@ def check_resume_policy(config, args):
     # Legacy recovery constructs its namespace from the original checkpoint;
     # newly added optional flags can be absent on both sides.
     current = vars(args)
+    if config.get('pathological_fraction', .02) != current.get('pathological_fraction', .02):
+        if not current.get('resume_policy_revision', '').strip():
+            raise ValueError('resume changes pathological_fraction without an explicit policy revision')
     for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr',
                 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr',
                 'batchnorm_mode', 'inference_bound', 'all_quadratic_start',
@@ -490,6 +497,7 @@ def check_resume_policy(config, args):
 
 
 def train(args, rank, world, device):
+    args.loss_masking = 'active_rows'
     root = Path(args.output)
     prepared = torch.load(root/'prepared.pt', map_location='cpu', weights_only=False)
     if bool(prepared['metadata']['config']['smoke']) != args.smoke:
@@ -587,7 +595,7 @@ def train(args, rank, world, device):
             images, labels = images.to(device), mapping[labels.to(device)]
             if bool((labels < 0).any()):
                 raise ValueError('development identity reached training')
-            images, mask = prepare_range_batch(images, pathological_fraction=.02,
+            images, mask = prepare_range_batch(images, pathological_fraction=getattr(args, 'pathological_fraction', .02),
                                                crop_probability=.1, lowres_probability=.2,
                                                photo_probability=.2, stress_probability=.1)
             images, labels, mask = replay.inject(images, labels, mask)
@@ -707,6 +715,9 @@ def parse_args():
     p.add_argument('--lr', type=float, default=.004)
     p.add_argument('--head-lr', type=float, default=.02)
     p.add_argument('--range-weight', type=float, default=1.)
+    p.add_argument('--pathological-fraction', type=float, default=.02)
+    p.add_argument('--resume-policy-revision', default='',
+                   help='record explicit justification for changing pathological-fraction on resume')
     p.add_argument('--negative-pairs', type=int, default=2000000)
     p.add_argument('--limit-batches', type=int, default=0, help='smoke test only')
     p.add_argument('--batchnorm-mode', choices=['frozen', 'train'], default='frozen')
@@ -729,6 +740,8 @@ def parse_args():
                    help='save exact augmented batches and pre-update state before a numerical abort')
     p.add_argument('--smoke', action='store_true', help='isolated 64-identity preparation and two optimizer steps')
     args = p.parse_args()
+    if not 0 <= args.pathological_fraction < 1:
+        p.error('pathological fraction must lie in [0, 1)')
     if args.sitewise_unclipped and (args.shared or args.inference_bound or args.all_quadratic_start):
         p.error('sitewise unclipped conversion requires a fresh channelwise teacher conversion')
     if args.train_channel_coefficients and args.shared:

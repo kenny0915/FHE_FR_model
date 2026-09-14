@@ -160,3 +160,28 @@ def test_loss_diagnostics_distinguish_masked_overflow_from_active_overflow():
     assert active['fp32']['nonfinite_active_rows'] == 1
     assert active['fp64']['nonfinite_active_rows'] == 0
     assert isinstance(active['fp64']['active_mean'], float)
+
+
+def test_identity_distillation_excludes_pathologies_before_squaring():
+    from controlled_degree2.recipe_a import recipe_loss
+    q = DirectQuadratic(2)
+    q.last_penalty = torch.tensor(0.)
+    q.last_sample_penalty = torch.zeros(2)
+    features = torch.ones(2, 2, requires_grad=True)
+    s = torch.tensor([[1., 1.], [1e25, 1e25]], requires_grad=True)
+    kd, _ = recipe_loss(features, features.detach(), {1:s}, {1:torch.ones_like(s)},
+                        torch.tensor([True, False]), [q], {q.name:2}, .3)
+    assert torch.isfinite(kd)
+    kd.backward()
+    assert torch.isfinite(s.grad).all() and not s.grad[1].any()
+    empty, _ = recipe_loss(features, features.detach(), {1:s}, {1:torch.ones_like(s)},
+                           torch.tensor([False, False]), [q], {q.name:2}, .3)
+    assert empty == 0
+
+
+def test_pathology_ablation_requires_explicit_resume_revision():
+    args = SimpleNamespace(pathological_fraction=0.)
+    with pytest.raises(ValueError, match='policy revision'):
+        check_resume_policy({}, args)
+    args.resume_policy_revision = 'ablate synthetic pathology after captured row-125 overflow'
+    check_resume_policy({}, args)

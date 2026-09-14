@@ -235,5 +235,31 @@ without updates. It reports forward-boundary finiteness, embedding norm
 overflow, per-stage FP32 versus FP64 errors, active versus masked errors,
 and range-loss mean versus sum-then-scale arithmetic. A CPU test demonstrates
 the masked `0*Inf` NaN distinction and active FP32 square overflow; it does
-not establish the cause of the real failed run. This replay has not yet run
-on a captured real failure; diagnostic job 383449 is waiting to start.
+not establish the cause of the real failed run. The completed replay and resulting policy revision are recorded below.
+
+
+### Captured failure and pathological-augmentation ablation
+
+Diagnostic 383449 failed at epoch 5, step 84. All 16 exact augmented batches
+and the pre-update checkpoint are saved under
+`work_dirs/channelwise_ijbc96_diag_20260914/numerical_failure_e5_s84`.
+Only rank 15 had a nonfinite loss. Single-H200 replay **383511** completed
+and reproduced classification 8.23009, KD NaN and boundary Inf. Batch row
+125 was an artificial pathological image excluded from identity losses.
+It dominated the activation tail (stage 3 maximum about 3.41e21); all
+forward boundaries remained finite but its FP32 embedding norm overflowed.
+Masked squared errors produced `0*Inf`, while range penalties also overflowed.
+Active rows had finite squared errors, although their stage 3 hint error
+was still large (~892); this does not prove ordinary inputs are stable.
+
+The loss now selects active rows before cosine/squared-error computation.
+Historical replay retains the legacy formula unless a checkpoint explicitly
+records `loss_masking=active_rows`. Range penalties continue to cover every
+training input. An explicit resume-policy revision is required to change
+pathological augmentation frequency. The proposed ablation sets its fraction
+to zero while retaining ordinary crop, low-resolution, photographic and
+stress augmentation. It resumes the original epoch-4 checkpoint into a fresh
+output directory, with the original preparation, optimizer and other policy.
+A read-only active-row backward check precedes this run. No IJB-C row may be
+excluded from final evaluation. Validation: 60 related CPU tests passed;
+after adding the backward diagnostic, all 11 campaign tests passed again.

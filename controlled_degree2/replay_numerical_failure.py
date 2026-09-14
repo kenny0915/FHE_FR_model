@@ -1,7 +1,7 @@
 """Read-only, single-GPU replay of an exact captured training failure.
 
-Compare legacy FP32 loss arithmetic with active-row FP64 diagnostics; no
-parameters, optimizer state, gradients or training policy are changed.
+Compare captured loss arithmetic with active-row FP64 diagnostics. An optional
+backward check on identity rows computes gradients without updating weights.
 """
 import argparse
 import json
@@ -32,11 +32,24 @@ def hint_arithmetic(student, teacher, mask):
     return reports
 
 
+def legacy_recipe_loss(features, target, student_hints, teacher_hints, mask, modules, elements, hint_weight):
+    weights = mask.float()
+    cosine = ((1-F.cosine_similarity(features.float(), target.float(), dim=1))*weights).sum()/weights.sum().clamp_min(1)
+    hints = []
+    for stage in student_hints:
+        s, t = student_hints[stage].float(), teacher_hints[stage].float()
+        error = (s-t).square().flatten(1).mean(1)/t.square().flatten(1).mean(1).clamp_min(1e-6)
+        hints.append((error*weights).sum()/weights.sum().clamp_min(1))
+    boundary = torch.stack([m.last_penalty/elements[m.name]+.01*m.last_sample_penalty.mean() for m in modules]).mean()
+    return cosine+hint_weight*torch.stack(hints).mean(), boundary
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state', required=True)
     parser.add_argument('--batch', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--check-active-backward', action='store_true')
     args = parser.parse_args()
     torch.set_num_threads(2)
     device = torch.device('cuda')
@@ -77,7 +90,8 @@ def main():
             target = teacher(images)
             features = model(images)
             classification = head(features, labels, mask, margin=.5*min(1., source['progress']+.1))
-            kd, boundary = recipe_loss(features, target, student_hints, teacher_hints,
+            captured_loss = recipe_loss if source['config'].get('loss_masking') == 'active_rows' else legacy_recipe_loss
+            kd, boundary = captured_loss(features, target, student_hints, teacher_hints,
                                        mask, modules, elements, .3*(1-source['progress']/config.epochs))
             beta = config.range_weight*min(1., (source['progress']+.05)/2.)
             report = dict(
@@ -96,6 +110,35 @@ def main():
         for handle in handles:
             handle.remove()
         audit.close()
+    if args.check_active_backward:
+        for module in modules:
+            module.coeffs.requires_grad_(bool(getattr(config, 'train_channel_coefficients', False)))
+        student_hints.clear()
+        teacher_hints.clear()
+        handles = hook_stages(model, student_hints)+hook_stages(teacher, teacher_hints)
+        try:
+            active_images, active_labels = images[mask], labels[mask]
+            if not len(active_images):
+                raise ValueError('captured batch contains no identity rows')
+            with torch.no_grad():
+                active_target = teacher(active_images)
+            active_features = model(active_images)
+            active_mask = torch.ones(len(active_images), dtype=torch.bool, device=device)
+            ce = head(active_features, active_labels, active_mask, margin=.5*min(1., source['progress']+.1))
+            kd, boundary = recipe_loss(active_features, active_target, student_hints, teacher_hints,
+                                        active_mask, modules, elements, .3*(1-source['progress']/config.epochs))
+            loss = ce+kd+beta*boundary
+            result = dict(rows=len(active_images), loss=scalar(loss.detach()), kd=scalar(kd.detach()),
+                          boundary=scalar(boundary.detach()), optimizer_updates=0)
+            if bool(torch.isfinite(loss)):
+                loss.backward()
+                named = list(model.named_parameters())+[('head.'+n,p) for n,p in head.named_parameters()]
+                result['nonfinite_gradients'] = [n for n,p in named if p.grad is not None and not torch.isfinite(p.grad).all()]
+                result['gradient_tensors'] = sum(p.grad is not None for _,p in named)
+            report['active_only_backward'] = result
+        finally:
+            for handle in handles:
+                handle.remove()
     Path(args.output).write_text(json.dumps(report, indent=2, allow_nan=False))
     print(json.dumps(report['replay'], indent=2))
 
