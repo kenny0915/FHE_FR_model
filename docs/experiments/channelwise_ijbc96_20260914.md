@@ -915,3 +915,11 @@ magnitude-correcting gradient when cosine already matches, frozen polynomial
 parameters, no auxiliary clipping in exact-only mode, and finite connected
 zero gradients when all rows are excluded for a frozen-body head. All 18
 campaign tests pass; the new Slurm script also passes `bash -n`.
+
+Submitted as **385638**, initially PENDING, on account MST114196 with the
+script's one-H200 / one-hour limits and excluded nodes 25a-hgpn143/144.
+Submission exports `CHANNEL_SOURCE` as the absolute residual-six `last.pt`
+path and `CHANNEL_OUTPUT` as
+`/work/u8798807/FHE_FR_model/work_dirs/channelwise_exact_head_20260915`.
+Training source commit is **ccd4551**; logs are `channelwise-385638.out/.err`.
+No MS1MV3 main training or other GPU allocation is running concurrently.
