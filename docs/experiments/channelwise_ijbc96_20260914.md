@@ -1,11 +1,11 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best fully finite IJB-C calibration-set TAR is 95.95541238431252%,
-actual FAR 9.898374134499722e-5, from full-template population job 386548.
+Status: best fully finite IJB-C calibration-set TAR is 95.96563890167204%,
+actual FAR 9.962317119864707e-5, from expanded population job 386630.
 Full original and flip intermediate/embedding nonfinite counts are zero.
 All 25 sites remain channelwise pure quadratics with no inference clipping.
-The 96% target is unmet: nine additional genuine accepts are needed.
-Main training is stopped; 386548 finished evaluation, with FAILED status
+The 96% target is unmet: seven additional genuine accepts are needed.
+Main training is stopped; 386630 finished evaluation, with FAILED status
 caused only by the accuracy gate.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
@@ -1641,3 +1641,21 @@ Submitted **386630**, `channelwise-population-expanded`, one H200 / 45 minutes,
 MST114196, recipe HEAD **bb814dc**. Output
 `work_dirs/channelwise_template_population_expanded_20260915`. Full-template
 mode, .20 threshold, 2,000 updates; expanded cache verified before submission.
+
+### Expanded population result: two additional accepts, target unmet
+
+Job **386630** finished in **24m27s**. Full exported conservative TAR is
+**95.96563890167204%**, actual FAR **9.962317119864707e-5**. All 469,375 source
+images / 938,750 original-and-flip rows, including remainder, have zero
+nonfinite module-boundary values and embeddings. The certificate confirms
+25 channelwise pure quadratics / 17,664 coefficients and no inference clipping.
+Checkpoint SHA independently verified:
+`5fc54d8e4934d8fefb6a464e1e9be8e578fa2b4f29cd9c7a6232b0d4ee9cb7fd`.
+[Verified result](channelwise_ijbc96_expanded_population_result.json).
+
+This accepts 18,768 / 19,557 genuine pairs, two more than the smaller-cache
+population control. Target requires 18,775 accepts, leaving seven. This small
+gain does not establish statistical significance. Only TAR fails acceptance;
+Slurm FAILED is not a runtime crash. This remains IJB-C calibration-set
+performance, with no pair labels in gradient fitting. Preserve this candidate
+as best; no new training job is submitted with this result record.
