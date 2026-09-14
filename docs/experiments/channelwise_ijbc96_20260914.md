@@ -752,3 +752,27 @@ The evaluation launcher now preserves an explicitly supplied CUDA device mask,
 allowing overlapping single-GPU evaluations on distinct allocated GPUs. It
 still defaults to device 0; finite audit requires exactly one visible GPU.
 Shell syntax and whitespace checks pass.
+
+### Adaptive replay of the remaining numerical failures
+
+Head-only full evaluation is **384727.20**, output
+`ijbc_calibration_epoch14_head2000_full`. Joint residual calibration
+**384727.21** completed 1,000 updates in 7m53s from the head-only candidate,
+using the latest 110-row manifest, all parameter scopes, LR 1e-4, exact KD
+weight 5 and range weight 1. Candidate hash
+`7d2f4940394905be3b1611d5b592f6853c1996e9f1110365c08176113cd46a0a`.
+
+Probe **384727.22** covers the original fixed 1,024 orientations AND all 110
+latest failures. The original manifest/random groups now both have **0**
+nonfinite embeddings. The 110-row group improves **93 -> 21** failures
+relative to the head-only source. Paired random teacher cosine .89529 ->
+.89364 (511 shared-valid rows). This is still a failing candidate, not a full
+evaluation or zero-nonfinite claim. Reports `calibration_residual110_probe.*`.
+
+Step **384727.23** reproduced/extracted those exact 21 remaining orientations
+into `calibration_residual110_remaining.json`, tagged with candidate hash.
+Calibration **384727.24** now replays this smaller set for **500** steps,
+with the same LR/weights/all-parameter scope and seed 20260921. Output
+`ijbc_calibration_epoch14_residual21`; logs `calibration_residual21_step.*`.
+The next probe must still cover all 110 previous failures and the original
+1,024 orientations, so narrowing replay cannot silently hide regressions.
