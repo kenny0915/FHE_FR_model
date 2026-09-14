@@ -448,3 +448,17 @@ If no fully converted finite development-selected checkpoint was produced,
 the initial file check aborts evaluation. Result directory: `ijbc_full` under
 the guarded run. Submission response was delayed but confirmed job 383719;
 no duplicate was submitted.
+
+
+### First completed guarded epoch
+
+383686 completed epoch 5 and entered epoch 6. Immutable hardlink
+`work_dirs/channelwise_ijbc96_guarded_20260914/epoch5_conversion.pt` is
+preserved with SHA-256
+`491ef3355fe879bd1ea76e0645ae8abc7d572a300df89ecf148c6acc0ea21084`.
+`epoch5_state_audit.json` confirms all backbone tensors finite, all 237 BN
+running-statistic/count buffers unchanged from original epoch 4, and matching
+original PReLU teacher hash. Ten activation sites have updated coefficients,
+through layer3.1. The checkpoint correctly remains `pure_quadratic=false`:
+later activations are still in the PReLU conversion curriculum. No full-model
+finite audit or IJB-C accuracy claim follows from this partial checkpoint.
