@@ -7,7 +7,8 @@ nonfinite intermediate values and embeddings. The higher historical diagnostic
 unmet. Main training is stopped. The paired magnitude-loss arm completed at
 95.69974945032469%, also fully finite, and did not improve TAR. One-GPU ablation
 385638 has finished. Original-PReLU baseline 385651 is verified at 96.5537%
-and zero nonfinite. Linear-alignment test 385889 is submitted on one H200.
+and zero nonfinite. Linear-alignment test 385889 finished at 95.7662%, fully
+finite but below its source. No GPU jobs are currently running.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1081,3 +1082,23 @@ selection evidence is `selection.json` in that run root. No full accuracy or
 zero-nonfinite claim is made for this candidate yet. One delayed squeue RPC
 was re-polled; sacct and advancing evaluation logs confirmed the same job
 remained live, and no duplicate job was launched.
+
+### Linear alignment full result: no TAR improvement
+
+Job **385889** completed extraction, fitting and full exported evaluation in
+27m38s. The unrounded conservative result is **95.76622181316152% TAR**,
+actual FAR **9.917557030109217e-5**, with **zero** nonfinite intermediate
+values and embeddings over all 469,375 images / 938,750 orientations.
+Graph, identity and coverage checks pass; the accuracy gate fails, so Slurm
+reports FAILED despite successful evaluation. Candidate hash is
+`a7a8e6d3d98b46b02ddec3934160f3233ed2a5763737e1116be3edcdcf3c5b58`.
+See [channelwise_ijbc96_linear_result.json](channelwise_ijbc96_linear_result.json).
+
+The result is 0.03067955207855 percentage points (six genuine accepts) below
+its exact-cosine source, despite better held-out teacher cosine. This is
+further evidence that average teacher cosine is an insufficient selection
+proxy for this low-FAR verification objective. It does not prove that all
+linear corrections are ineffective. No extension of this fitting recipe
+was submitted. The best eligible calibration-set result remains
+95.79690136524007%, zero nonfinite, with 40 additional genuine accepts needed
+at the FAR cap to reach 96%. All current jobs are terminal.
