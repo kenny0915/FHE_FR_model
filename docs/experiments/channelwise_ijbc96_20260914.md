@@ -1,6 +1,6 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best completed fresh-campaign IJB-C TAR is 95.7049% with 110 nonfinite
+Status: best completed fresh-campaign diagnostic IJB-C TAR is 95.9145% with 104 nonfinite
 augmented embeddings; the 96% / zero-nonfinite target is not achieved. Further
 calibration and full evaluation are running.
 
@@ -776,3 +776,40 @@ with the same LR/weights/all-parameter scope and seed 20260921. Output
 `ijbc_calibration_epoch14_residual21`; logs `calibration_residual21_step.*`.
 The next probe must still cover all 110 previous failures and the original
 1,024 orientations, so narrowing replay cannot silently hide regressions.
+
+### First candidate finite on all known failures; full audit pending
+
+Head-adapted full evaluation **384727.20** completed: conservative TAR
+**95.91450631%**, actual FAR **9.9878943e-5**, **104** nonfinite augmented
+embeddings. Eleven failures were absent from the preceding 110-row manifest;
+all subsequent probes include BOTH complete manifests to detect regressions.
+Full coverage, graph and checkpoint identity pass; accuracy and finiteness fail.
+
+The 500-update 21-row repair **384727.24** produced SHA
+`fa926f14f85ebd1334e049ca479e725c112b7a20a9c5b4da1eafeee84ef14e08`.
+Probe **384727.25** found four failures in the previous-110 group and six in the
+new head-evaluation group, six unique failures overall. The fixed original
+1,024 orientations remained finite. Exact remaining rows were recorded in
+`calibration_residual21_remaining.json`.
+
+Focused six-row repair **384727.26** completed another 500 updates with the
+same all-parameter LR-1e-4 / exact-KD-5 / range-1 policy, seed 20260922.
+Candidate SHA **8298aa8c0addaf8432648207a8ff9d4f3d14ddfc60c8dce07eee7527bcf2b69b**.
+Probe **384727.27** finds zero nonfinite embeddings and zero invalid FP32 norms
+in every group: original 512 manifest + 512 random, previous 110 failures and
+latest 104 failures. These are 1,238 evaluated records / **1,139 unique
+orientations**, NOT full IJB-C coverage. Paired random teacher cosine declined
+.89235 -> .88816, motivating further output-head adaptation. Reports
+`calibration_residual6_probe.json` and `calibration_residual6_probe_step.*`.
+
+Full exported IJB-C audit **384727.28** is now running in
+`ijbc_calibration_epoch14_residual6_full`, with a 40-minute step cap. No passing
+full finite/accuracy result is claimed yet. In parallel, head-only continuation
+**384727.29** freezes this spatial/polynomial backbone and uses **uniform random
+IJB-C orientations without failure replay**, 2,000 steps, batch 64, LR .003,
+exact KD weight 5, range weight 0, seed 20260923. Output
+`ijbc_calibration_epoch14_head_random`; logs `calibration_head_random_step.*`.
+It tests recovery of ordinary-input feature agreement after focused repairs.
+Neither calibration phase uses IJB-C identity/pair labels for gradients.
+The separate MS1MV3 main training uses ArcFace (margin .5, scale 64), KD and
+range control; no AdaFace loss is used in this campaign.
