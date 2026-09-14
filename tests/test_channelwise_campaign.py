@@ -198,3 +198,11 @@ def test_pathology_ablation_requires_explicit_resume_revision():
         check_resume_policy({}, args)
     args.resume_policy_revision = 'ablate synthetic pathology after captured row-125 overflow'
     check_resume_policy({}, args)
+
+
+def test_stress_ablation_requires_explicit_resume_revision():
+    args = SimpleNamespace(stress_probability=0.)
+    with pytest.raises(ValueError, match='stress_probability'):
+        check_resume_policy({}, args)
+    args.resume_policy_revision = 'reconstructed source has normal colors; captured augmented row overflowed'
+    check_resume_policy({}, args)

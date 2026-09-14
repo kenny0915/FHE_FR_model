@@ -484,9 +484,10 @@ def check_resume_policy(config, args):
     # Legacy recovery constructs its namespace from the original checkpoint;
     # newly added optional flags can be absent on both sides.
     current = vars(args)
-    if config.get('pathological_fraction', .02) != current.get('pathological_fraction', .02):
-        if not current.get('resume_policy_revision', '').strip():
-            raise ValueError('resume changes pathological_fraction without an explicit policy revision')
+    for key, default in (('pathological_fraction', .02), ('stress_probability', .1)):
+        if config.get(key, default) != current.get(key, default):
+            if not current.get('resume_policy_revision', '').strip():
+                raise ValueError(f'resume changes {key} without an explicit policy revision')
     for key in ('seed', 'head_warmup', 'conversion_epochs', 'epochs', 'lr', 'head_lr',
                 'range_weight', 'global_batch', 'shared', 'initialization', 'coefficient_lr',
                 'batchnorm_mode', 'inference_bound', 'all_quadratic_start',
@@ -597,7 +598,7 @@ def train(args, rank, world, device):
                 raise ValueError('development identity reached training')
             images, mask = prepare_range_batch(images, pathological_fraction=getattr(args, 'pathological_fraction', .02),
                                                crop_probability=.1, lowres_probability=.2,
-                                               photo_probability=.2, stress_probability=.1)
+                                               photo_probability=.2, stress_probability=getattr(args, 'stress_probability', .1))
             images, labels, mask = replay.inject(images, labels, mask)
             optimizer.zero_grad(set_to_none=True)
             # FP32 is intentional for both optimization and deployment consistency.
@@ -716,8 +717,9 @@ def parse_args():
     p.add_argument('--head-lr', type=float, default=.02)
     p.add_argument('--range-weight', type=float, default=1.)
     p.add_argument('--pathological-fraction', type=float, default=.02)
+    p.add_argument('--stress-probability', type=float, default=.1)
     p.add_argument('--resume-policy-revision', default='',
-                   help='record explicit justification for changing pathological-fraction on resume')
+                   help='record explicit justification for changing augmentation probabilities on resume')
     p.add_argument('--negative-pairs', type=int, default=2000000)
     p.add_argument('--limit-batches', type=int, default=0, help='smoke test only')
     p.add_argument('--batchnorm-mode', choices=['frozen', 'train'], default='frozen')
@@ -742,6 +744,8 @@ def parse_args():
     args = p.parse_args()
     if not 0 <= args.pathological_fraction < 1:
         p.error('pathological fraction must lie in [0, 1)')
+    if not 0 <= args.stress_probability <= 1:
+        p.error('stress probability must lie in [0, 1]')
     if args.sitewise_unclipped and (args.shared or args.inference_bound or args.all_quadratic_start):
         p.error('sitewise unclipped conversion requires a fresh channelwise teacher conversion')
     if args.train_channel_coefficients and args.shared:

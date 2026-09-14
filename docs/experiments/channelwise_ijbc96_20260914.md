@@ -337,3 +337,29 @@ cosine improved to 0.97502, but the failed row still had an overflowing norm.
 Thus neither result meets even the numerical repair gate, much less IJB-C
 acceptance. Lower teacher weights 10 and 1 are being tested for 3,000 steps
 each on one H200 each. These experiments do not save production checkpoints.
+
+
+### Lower-weight probes and source-image reconstruction
+
+383613 (teacher weight 1) passed the partial-phase interval guard after
+about 1,850 updates; all 128 embeddings/norms were finite. Teacher cosine
+on the original 127 finite rows was 0.91918 (source 0.93377). 383612 (weight
+10, 3,000 steps) kept all embeddings/norms finite and raised the corresponding
+cosine to 0.95627, but did not satisfy every interval guard. These are only
+same-batch diagnostics, with no IJB-C or held-out accuracy evidence.
+
+DistributedSampler reconstruction located rank 15 batch row 25 at MS1MV3
+source row **4510751**, identity label **81726**. It lies outside the eight-row
+replay-injection prefix. Original and augmented images are preserved as
+`row25_original.png` and `row25.png` alongside `row25_source.json`. Visual
+inspection shows a normal-color original and a strongly saturated red/blue
+augmented image. The exact randomly selected augmentation operation was not
+captured, so it cannot be attributed to a particular transform with certainty.
+
+The next controlled ablation disables the extra stress family (probability
+0.1 to 0), alongside the already disabled artificial pathological rows.
+It retains crop 0.1, lowres 0.2 and photo 0.2. This avoids adopting the
+costly, only same-batch-validated repair policy prematurely. It resumes the
+same preserved original epoch-4 checkpoint in a fresh directory and retains
+full IJB-C coverage as the final criterion. An explicit resume-policy
+revision is required and recorded for this change.

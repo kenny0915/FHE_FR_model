@@ -11,6 +11,7 @@ if [[ -n "${CHANNEL_RESUME:-}" ]]; then
 fi
 extra+=(--capture-numerical-failure)
 extra+=(--pathological-fraction "${CHANNEL_PATHOLOGICAL_FRACTION:-0.02}")
+extra+=(--stress-probability "${CHANNEL_STRESS_PROBABILITY:-0.1}")
 if [[ -n "${CHANNEL_RESUME_POLICY_REVISION:-}" ]]; then
     extra+=(--resume-policy-revision "$CHANNEL_RESUME_POLICY_REVISION")
 fi
