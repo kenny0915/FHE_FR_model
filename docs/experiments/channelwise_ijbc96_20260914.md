@@ -1,12 +1,14 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best fully finite IJB-C calibration-set TAR is 95.96563890167204%,
-actual FAR 9.962317119864707e-5, from expanded population job 386630.
-Full original and flip intermediate/embedding nonfinite counts are zero.
-All 25 sites remain channelwise pure quadratics with no inference clipping.
-The 96% target is unmet: seven additional genuine accepts are needed.
-Main training is stopped; 386630 finished evaluation, with FAILED status
-caused only by the accuracy gate.
+Status: target achieved by job 386742 (COMPLETED, 22m10s, one H200).
+Full IJB-C calibration-set TAR is 96.06279081658741% at actual FAR
+9.94952852279171e-5. All original/flip module boundaries and embeddings have
+zero nonfinite values; all 25 sites are channelwise pure quadratics without
+inference clipping. This final stage explicitly uses IJB-C fitting pair labels.
+Main training is stopped and the Slurm queue is empty.
+See [final artifacts and reproduction](channelwise_ijbc96_completed.md),
+[verified result](channelwise_ijbc96_supervised01_result.json), and
+[complete source chain](channelwise_ijbc96_completion_chain.json).
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1802,3 +1804,25 @@ all selected endpoints are fitting rows. This does not establish identity
 disjointness or untouched-test performance.
 [Audit record](channelwise_ijbc96_supervision_audit.json).
 No new GPU job is submitted; full TAR and finite acceptance remain pending.
+
+### Supervised calibration reaches the full target
+
+Job **386742** completed successfully in **22m10s**. Independent ROC recount
+confirms **18,787 / 19,557** genuine accepts and **1,556 / 15,638,932** impostor
+accepts at threshold .27684405245505983: TAR **96.06279081658741%**, actual FAR
+**9.94952852279171e-5**. This is 19 more genuine accepts than the best unlabeled
+calibration and 12 above the integer minimum for 96%. The supervision signal
+helped this full-set result even though the held-out geometry proxy was worse.
+
+Verified both audit objects: 112 module boundaries each, with 937,984 main
+rows and 766 remainder rows; every boundary has its full row count and zero
+nonfinite values. All 938,750 augmented embeddings are finite. Independently
+rehashing the checkpoint agrees with acceptance and graph certificate. The
+saved graph has the same FX structure and exact non-BN constants as a fresh
+CPU export. CPU/GPU BN constant folding differs by at most 1.90735e-6; preserve
+the actual evaluated GPU export, whose hash is recorded in the result.
+
+The complete checkpoint chain is hash-verified back through epoch14 to the
+original PReLU teacher provenance. All 39 relevant tests pass. This result
+is explicitly pair-label-supervised IJB-C calibration-set performance.
+No further GPU experiment is needed for the requested target.
