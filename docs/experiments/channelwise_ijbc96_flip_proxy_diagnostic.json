@@ -1,0 +1,49 @@
+{
+  "validation_source_images": 1024,
+  "selection": "first 1024 images in existing held-out cache, no verification labels",
+  "metrics": {
+    "identity": {
+      "orientation": {
+        "all_mse": 0.0010828427039086819,
+        "tail_mse": 0.003677095752209425,
+        "pairs": 2095104,
+        "tail_pairs": 1695
+      },
+      "flip_sum": {
+        "all_mse": 0.0008961732382886112,
+        "tail_mse": 0.0030258791521191597,
+        "pairs": 523776,
+        "tail_pairs": 442
+      }
+    },
+    "pair2000": {
+      "orientation": {
+        "all_mse": 0.001120583969168365,
+        "tail_mse": 0.00226863706484437,
+        "pairs": 2095104,
+        "tail_pairs": 1695
+      },
+      "flip_sum": {
+        "all_mse": 0.0009413975058123469,
+        "tail_mse": 0.0021768221631646156,
+        "pairs": 523776,
+        "tail_pairs": 442
+      }
+    },
+    "pair8000": {
+      "orientation": {
+        "all_mse": 0.0011699474416673183,
+        "tail_mse": 0.0021247665863484144,
+        "pairs": 2095104,
+        "tail_pairs": 1695
+      },
+      "flip_sum": {
+        "all_mse": 0.0009928542422130704,
+        "tail_mse": 0.0020758933387696743,
+        "pairs": 523776,
+        "tail_pairs": 442
+      }
+    }
+  },
+  "limitation": "Flip-sum diagnostic only; not full media/template aggregation or TAR."
+}

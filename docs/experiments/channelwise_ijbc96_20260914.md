@@ -1228,3 +1228,24 @@ Labels are used only for this diagnostic, not gradient fitting. A next
 analysis should check the mismatch between single-orientation calibration
 cosines and the actual original/flip, media/template aggregation protocol
 before allocating another full run. Main training stays stopped.
+
+### Flip aggregation proxy audit
+
+Read `eval_ijbc.py`: current scoring adds original/flip raw embeddings,
+retains their norms, multiplies detector scores, averages within each media,
+sums media within each template, then L2-normalizes the template. Cached
+pair calibration instead compares normalized individual orientations.
+
+A CPU diagnostic uses the first 1,024 held-out source images, no pair labels,
+and the saved affine mappings. Same-image pairs are excluded; high-similarity
+membership stays fixed by source/teacher cosine >= .3. In flip-summed space,
+all-pair/tail MSE are .00089617/.00302588 for identity,
+.00094140/.00217682 for 2,000 steps, and .00099285/.00207589 for 8,000 steps.
+Thus the summed proxy still favors the longer candidate whose full TAR is
+lower. A flip-only correction is not sufficient evidence for another run.
+See [channelwise_ijbc96_flip_proxy_diagnostic.json](channelwise_ijbc96_flip_proxy_diagnostic.json).
+
+This is a subset proxy diagnosis, not full template aggregation or TAR.
+Further work should evaluate template-level geometry (with correct detector,
+media and bias weighting) or a low-FAR-tail objective before new GPU fitting.
+No inference or training code changes accompany this diagnosis.
