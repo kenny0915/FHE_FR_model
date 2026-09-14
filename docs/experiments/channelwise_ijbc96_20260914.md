@@ -432,3 +432,19 @@ other training policy and source preparation are retained. Allocation cap
 3h55m; absolute deadline 1789385375 unchanged. Every 25 steps, global
 `GUARDED_ROWS full=... repair=...` counts expose the repair fraction.
 No accuracy or full-inference stability result is available yet.
+
+
+383686 has reached epoch 5 step 750 with finite loss, crossing the preceding
+no-stress failure at step 702. Logged full-row fractions are approximately
+94–98%; at step 750, 2,004 rows used full features and 44 prefix repair.
+This is training routing evidence, not a full-inference finite audit.
+
+Full IJB-C evaluation **383719** is PENDING with `afterany:383686` and one
+H200. It requires the newly trained `student_best.pt`, snapshots its weights,
+and runs channelwise polynomial export, all-image/orientation finite audit
+and conservative FAR acceptance. Using afterany allows a valid full-conversion
+checkpoint to be evaluated even if later training reaches its deadline.
+If no fully converted finite development-selected checkpoint was produced,
+the initial file check aborts evaluation. Result directory: `ijbc_full` under
+the guarded run. Submission response was delayed but confirmed job 383719;
+no duplicate was submitted.
