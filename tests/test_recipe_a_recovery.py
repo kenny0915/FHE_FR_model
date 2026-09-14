@@ -46,6 +46,21 @@ def test_partial_phase_repair_preserves_blend_and_unopened_prelu():
     assert model.prelu.training and not model.bn1.training
 
 
+def test_forced_probe_site_repairs_rows_that_round_below_guard():
+    model = Toy().train()
+    affine_parameters(model)
+    model.bn1.eval()
+    model.layer1[0].bn2.eval()
+    model.prelu.alpha = 1.
+    model.layer1[0].prelu.alpha = 0.
+    loss, site, ratios = finite_prefix_loss(model, torch.full((1, 1, 2, 2), 3.999),
+                                           25, guard=4., target=2., preserve_phase=True,
+                                           force_site='prelu')
+    assert site == 'prelu' and ratios.max() < 4. and loss > 0
+    loss.backward()
+    assert model.bn1.weight.grad is not None and torch.isfinite(model.bn1.weight.grad).all()
+
+
 def test_stops_before_overflow_and_restores_graph_flags():
     model = Toy()
     parameters = affine_parameters(model)

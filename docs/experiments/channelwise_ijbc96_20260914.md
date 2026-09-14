@@ -462,3 +462,24 @@ original PReLU teacher hash. Ten activation sites have updated coefficients,
 through layer3.1. The checkpoint correctly remains `pure_quadratic=false`:
 later activations are still in the PReLU conversion curriculum. No full-model
 finite audit or IJB-C accuracy claim follows from this partial checkpoint.
+
+
+### Guarded routing abort after epoch 6
+
+383686 completed epoch 6 (preserved `epoch6_conversion.pt`) but stopped
+advancing after epoch 7 step 400. A worker raised the router's ambiguous
+`prefix routing changed between probe and repair` error. It could mean
+that a subgroup no longer crossed the guard, or that its repair loss was
+nonfinite; the original message did not distinguish them and no failure
+batch was captured. The allocation remained RUNNING while peers waited,
+so 383686 and dependent 383719 were explicitly cancelled; scancel succeeded.
+
+The router now retains the first probed escape site when recomputing the
+subgroup gradient. This handles small batch-shape-dependent threshold changes
+without dropping the sample's repair gradient. Earlier genuine escapes still
+stop computation first. The revised error includes probe site, repair site
+and loss, and training now coordinates routing errors across ranks and saves
+all exact batches before aborting. A regression test exercises a row that
+rounds below the guard but remains above the repair target. All 33 routing,
+recovery and campaign tests passed. This addresses a plausible routing cause,
+not a proven diagnosis of the uncaptured real batch; resumed evidence is needed.

@@ -66,7 +66,7 @@ class PrefixEscape(Exception):
 
 
 def finite_prefix_loss(model, images, open_groups, guard=1., target=.9, detach_bn=True,
-                       preserve_phase=False):
+                       preserve_phase=False, force_site=None):
     """Stop *before* evaluating the first escaping quadratic.
 
     BN inputs are detached in this probe only, so the penalty can update the
@@ -86,7 +86,7 @@ def finite_prefix_loss(model, images, open_groups, guard=1., target=.9, detach_b
             raise FloatingPointError(f'non-finite input before finite prefix guard: {module.name}')
         relative = raw / module.lam_fit.reshape(1, -1, 1, 1)
         ratios = relative.detach().abs().flatten(1).amax(1)
-        if bool((ratios > guard).any()):
+        if bool((ratios > guard).any()) or module.name == force_site:
             # FP64 avoids overflow of the loss even for a large but finite
             # first escape. No NaN replacement or downstream graph is used.
             excess = (relative.double().abs()-target).clamp_min(0)

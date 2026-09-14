@@ -35,16 +35,17 @@ class GuardedConversion(nn.Module):
                 if site is None:
                     break
                 escaping = ratios > self.guard
-                groups.append(pending[escaping])
+                groups.append((site, pending[escaping]))
                 scores[pending[escaping]] = ratios[escaping]
                 pending = pending[~escaping]
         repair = images.new_zeros((), dtype=torch.float64)
-        for rows in groups:
+        for probe_site, rows in groups:
             loss, site, _ = finite_prefix_loss(
                 self.backbone, images[rows], 25, self.guard, self.target,
-                preserve_phase=True)
+                preserve_phase=True, force_site=probe_site)
             if site is None or not torch.isfinite(loss):
-                raise FloatingPointError('prefix routing changed between probe and repair')
+                raise FloatingPointError(f'prefix repair invalid: probe_site={probe_site}, '
+                                         f'repair_site={site}, loss={float(loss.detach())}')
             repair = repair + torch.log1p(loss / self.guard**2) * (len(rows)/len(images))
         if len(pending):
             features = self.backbone(images[pending])

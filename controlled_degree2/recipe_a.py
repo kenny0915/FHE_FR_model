@@ -614,7 +614,22 @@ def train(args, rank, world, device):
                 target = teacher(images)
             replay_scores = None
             if guarded:
-                features, full_rows, prefix_repair, replay_scores = model(images)
+                routing_error = None
+                try:
+                    features, full_rows, prefix_repair, replay_scores = model(images)
+                except FloatingPointError as error:
+                    routing_error = str(error)
+                    features = images.new_zeros((len(images), 512))
+                failed_route = torch.tensor(int(routing_error is not None), device=device)
+                reduce(failed_route, dist.ReduceOp.MAX)
+                if failed_route.item():
+                    if getattr(args, 'capture_numerical_failure', False):
+                        (root/f'routing_error_e{epoch}_s{step}_rank{rank}.json').write_text(
+                            json.dumps(dict(rank=rank, error=routing_error)))
+                        capture_failure(root, student, head, optimizer, prepared, args, rank,
+                                        epoch, step, progress, images, labels, mask,
+                                        dict(features=features, target=target), student_hints)
+                    raise FloatingPointError('prefix routing failed; all ranks abort before backward')
             else:
                 features = model(images)
             try:
