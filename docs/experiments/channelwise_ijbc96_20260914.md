@@ -640,3 +640,12 @@ This training gate does not exist in exported inference. CPU tests verify
 correct loss, finite nonzero coefficient gradients with an overflowing excluded
 row, all-excluded zero gradients and rejection of clipped evaluation. Real-GPU
 validation and any benefit to full IJB-C accuracy remain to be established.
+
+The additional 2,000-step continuation is Slurm step **384727.9**. The exact-KD
+GPU smoke **384727.10** subsequently completed 25 updates in 33 seconds using
+a separate copy of the 1,000-step LR-1e-4 candidate. Final exact KD .090612,
+31/32 safe rows, prefix .258782, total .695178; gradients, updated parameters
+and fixed-buffer checks passed. Saved inference remains unclipped. Output
+`ijbc_calibration_exactkd_smoke`, command/logs `calibration_exactkd_smoke_step.*`.
+It is a pipeline validation, not a measured accuracy improvement. All 15
+campaign tests passed before the smoke; implementation commit `afecffd`.
