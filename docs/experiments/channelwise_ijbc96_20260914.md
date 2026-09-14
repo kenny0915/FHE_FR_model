@@ -1690,3 +1690,8 @@ a claim that a threefold weight is optimal. No pair labels enter fitting.
 All 36 relevant tests pass, shell syntax and whitespace checks pass. One
 H200 / 45 minutes includes full exported IJB-C acceptance. Main training
 remains stopped. Preserve the current best regardless of this comparison.
+
+Submitted **386695**, `channelwise-template-anchor03`, one H200 / 45 minutes,
+MST114196, recipe **181ab7e**. Output
+`work_dirs/channelwise_template_anchor03_20260915`; anchor .03, expanded
+cache, full-template mode, .20 tail threshold, 2,000 updates.
