@@ -590,3 +590,28 @@ already allocated H200 on node 026 with a 40-minute deadline. Output
 `ijbc_calibration_epoch14_1000`; command/logs `calibration1000_step.json/.out/.err`.
 The first 75 updates completed with finite recorded losses; acceptance still
 requires the saved unclipped model and a new full evaluation.
+
+### Completed calibration and fixed-subset comparison
+
+384727.4 completed all 1,000 updates in 5m03s. Candidate SHA-256:
+`55e6133f9d72248626a2634f098702c58bf30a2e6083b9ba2418ae164b495b61`.
+Full exported-graph IJB-C evaluation **384727.5** is running under
+`ijbc_calibration_epoch14_1000_full`; logs `calibration1000_eval_step.*`.
+
+Diagnostic step **384727.6** compared source and candidate on the same seeded
+512 manifest orientations plus 512 random orientations, using exported graphs.
+Manifest embedding nonfinite rows decreased **512 -> 408**; random failures
+remained **9 -> 9**. Valid random-row teacher cosine was .89672 -> .89780.
+One additional calibrated manifest row has finite coordinates but an overflowing
+FP32 embedding norm (409 invalid norms versus 408 nonfinite embeddings).
+The production evaluator aggregates templates in float64, so this FP32 probe
+norm count is a stricter diagnostic, not its reported nonfinite count.
+Records, hashes and executable command are in `calibration1000_probe.json`
+and `calibration1000_probe_step.json`. This subset cannot establish acceptance.
+
+Based on partial numerical improvement, continuation **384727.7** starts from
+this calibrated candidate for another 1,000 steps, LR **1e-4**, seed 20260915,
+with the same original failure manifest and half-random batches. Output
+`ijbc_calibration_epoch14_lr1e4`; command/logs `calibration_lr1e4_step.*`.
+It shares a second already allocated H200 while the first candidate's full
+evaluation runs; the primary 16-GPU training remains active.
