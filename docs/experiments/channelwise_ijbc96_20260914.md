@@ -417,3 +417,18 @@ A two-process Gloo test alternates which rank receives only overflowing
 inputs, performs three optimizer updates, and verifies exact synchronized
 backbone/head weights after each. Additional coverage checks repaired-row
 retention in replay, all-repair gradients, and unchanged ordinary outputs.
+
+
+Integrated validation passed all 24 routing/campaign/recipe tests.
+16-H200 smoke **383671** completed in 65 seconds with two optimizer updates,
+backbone delta 0.000576 and no nonfinite values. All 2,048 smoke rows used
+full features; GPU repair-path evidence remains the captured-batch single-GPU
+test and the mixed-rank Gloo test described above.
+
+Production continuation **383686** is submitted from the same original
+epoch-4 checkpoint, output `work_dirs/channelwise_ijbc96_guarded_20260914`.
+Code `c9a57c1`, guard 4, target 2, pathology/stress probabilities zero;
+other training policy and source preparation are retained. Allocation cap
+3h55m; absolute deadline 1789385375 unchanged. Every 25 steps, global
+`GUARDED_ROWS full=... repair=...` counts expose the repair fraction.
+No accuracy or full-inference stability result is available yet.
