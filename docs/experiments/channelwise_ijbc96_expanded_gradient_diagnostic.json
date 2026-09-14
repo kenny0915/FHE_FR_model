@@ -1,0 +1,34 @@
+{
+  "scope": "CPU single-checkpoint gradient diagnostic, no optimization",
+  "weights": {
+    "anchor": 0.01,
+    "penalty": 0.001
+  },
+  "validation_geometry": 0.0018524331972002983,
+  "components": {
+    "geometry": {
+      "weighted_loss": 0.0005380502552725375,
+      "gradient_norm": 5.5687411077087745e-05,
+      "cosine_with_validation_gradient": -0.07136474549770355,
+      "cosine_with_fit_geometry_gradient": 1.0000019073486328
+    },
+    "anchor": {
+      "weighted_loss": 0.00046026328345760703,
+      "gradient_norm": 4.6072498662397265e-05,
+      "cosine_with_validation_gradient": 0.07560068368911743,
+      "cosine_with_fit_geometry_gradient": -0.9392409324645996
+    },
+    "penalty": {
+      "weighted_loss": 5.06519281771034e-05,
+      "gradient_norm": 1.9892635464202613e-05,
+      "cosine_with_validation_gradient": 0.024536147713661194,
+      "cosine_with_fit_geometry_gradient": -0.6196221113204956
+    }
+  },
+  "total_gradient_norm": 9.803887905945885e-07,
+  "artifact_sha256": {
+    "work_dirs/channelwise_template_cache_expanded_20260915/template_cache.pt": "bbea6466eaf5e79209f797fc2b1fd3609511f636d7e92bd27ae75f6b74fc60df",
+    "work_dirs/channelwise_template_population_expanded_20260915/alignment.pt": "7f5f0ba689b34b1550d57304f2076df45b6fa16158390ff220bf266919e2314d"
+  },
+  "method": "At saved step-2000 affine mapping; float32 CPU; full fitting pair geometry at threshold .2, weighted cosine anchor and identity penalty; autograd gradients of matrix/bias flattened together; validation geometry over all 2048 templates. Positive gradient cosine means an infinitesimal negative component-gradient step decreases the validation surrogate; not a prediction of TAR or an Adam step."
+}

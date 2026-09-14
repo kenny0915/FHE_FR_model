@@ -1659,3 +1659,20 @@ gain does not establish statistical significance. Only TAR fails acceptance;
 Slurm FAILED is not a runtime crash. This remains IJB-C calibration-set
 performance, with no pair labels in gradient fitting. Preserve this candidate
 as best; no new training job is submitted with this result record.
+
+### Expanded fit plateau and loss-component gradient diagnostic
+
+Validation sum improves only about 8.35e-8 from step 1,900 to 2,000. At the
+selected mapping, total fitting gradient norm is 9.80e-7, much smaller than
+geometry (5.57e-5), weighted teacher anchor (4.61e-5) and regularizer
+(1.99e-5) components. Geometry versus anchor gradient cosine is -.939.
+Cosine with held-out geometry gradient is -.0714 for fitting geometry,
++.0756 for anchor and +.0245 for regularization. Thus the stationary point
+reflects competing objectives; extending this same recipe has weak support.
+[Single-checkpoint CPU diagnostic](channelwise_ijbc96_expanded_gradient_diagnostic.json).
+
+The direction evidence suggests inspecting stronger teacher anchoring or
+regularization before another fit, rather than reducing the anchor merely
+to improve fitting loss. These are local surrogate gradients, not proof of
+TAR improvement or predictions of Adam steps. No optimization or GPU job
+was run for this diagnostic; the verified best remains 95.96563890167204%.
