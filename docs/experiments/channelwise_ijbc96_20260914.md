@@ -279,3 +279,15 @@ loss masking, and preserves the remaining optimization/conversion policy.
 `ablation_provenance.json` records the source hash, policy revision,
 submission and diagnostic. Code commit: `f266f49`. No new student IJB-C
 score or successful fully converted checkpoint is available yet.
+
+
+### FAR acceptance precision
+
+Final acceptance now uses the best empirical ROC TAR at measured FAR
+**at or below 1e-4**, without rounding. The previous guard allowed an overly
+broad FAR interval for a nearest-ROC-point result. Evaluation preserves the
+historical nearest-point table and adds `at_or_below_requested_far` to each
+raw point; acceptance requires this explicit constrained point. A regression
+case where nearest-point TAR is 96.1% above the requested FAR but the valid
+TAR is only 95.5% now fails acceptance. All 12 campaign tests pass. This
+changes evaluation/acceptance only; active training 383545 is unaffected.

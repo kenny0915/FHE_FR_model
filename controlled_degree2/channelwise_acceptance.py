@@ -6,14 +6,25 @@ import math
 from pathlib import Path
 
 
+def conservative_roc_point(fpr, tpr, requested_far):
+    """Best empirical TAR whose measured FAR does not exceed the request."""
+    candidates = [(float(t), float(f)) for f, t in zip(fpr, tpr)
+                  if math.isfinite(f) and math.isfinite(t) and 0 <= f <= requested_far]
+    if not candidates:
+        raise ValueError('ROC has no point within requested FAR')
+    tar, far = max(candidates)
+    return dict(tar_percent=tar*100, actual_far=far)
+
+
 def assess(raw, audit, certificate, checkpoint_sha256):
     points = raw[0]['points'] if len(raw) == 1 else {}
     point = points.get('0.0001', {})
-    tar = point.get('tar_percent', float('nan'))
-    far = point.get('actual_far', float('nan'))
+    constrained = point.get('at_or_below_requested_far', {})
+    tar = constrained.get('tar_percent', float('nan'))
+    far = constrained.get('actual_far', float('nan'))
     checks = dict(
         tar=math.isfinite(tar) and 96 <= tar <= 100,
-        requested_roc_point='0.0001' in points and math.isfinite(far) and 0 < far < .001,
+        requested_roc_point='0.0001' in points and math.isfinite(far) and 0 <= far <= .0001,
         full_ijbc=audit.get('target') == 'IJBC' and audit.get('source_images') == 469375
                   and audit.get('augmented_embeddings') == 938750
                   and audit.get('audited_input_rows') == 938750

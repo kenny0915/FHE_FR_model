@@ -20,6 +20,7 @@ import torch
 from skimage import transform as trans
 from backbones import get_model
 from sklearn.metrics import roc_curve, auc
+from controlled_degree2.channelwise_acceptance import conservative_roc_point
 
 try:
     from prettytable import PrettyTable
@@ -741,6 +742,7 @@ for method in methods:
         raw_row['points'][str(x_labels[fpr_iter])] = {
             'tar_percent': float(tpr[min_index] * 100),
             'actual_far': float(fpr[min_index]),
+            'at_or_below_requested_far': conservative_roc_point(fpr, tpr, x_labels[fpr_iter]),
         }
     tpr_fpr_table.add_row(tpr_fpr_row)
     tpr_fpr_rows.append(tpr_fpr_row)

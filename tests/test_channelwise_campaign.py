@@ -91,20 +91,33 @@ def test_ijbc_calibration_updates_finite_prefix_and_restores_unclipped_graph():
 
 def test_acceptance_rejects_rounding_partial_audit_and_wrong_checkpoint():
     from controlled_degree2.channelwise_acceptance import assess
-    raw = [dict(points={'0.0001': dict(tar_percent=96., actual_far=.0000999)})]
+    point = dict(tar_percent=96., actual_far=.0000999)
+    raw = [dict(points={'0.0001': dict(at_or_below_requested_far=point)})]
     audit = dict(target='IJBC', source_images=469375, augmented_embeddings=938750,
                  audited_input_rows=938750, audited_output_rows=938750,
                  nonfinite_values=0, embedding_nonfinite_rows=0)
     certificate = dict(pure_polynomial=True, inference_clipping=False, quadratic_sites=25,
                        coefficient_mode='channelwise', coefficients=17664, checkpoint_sha256='abc')
     assert assess(raw, audit, certificate, 'abc')['target_met']
-    raw[0]['points']['0.0001']['tar_percent'] = 95.9999
+    point['tar_percent'] = 95.9999
     assert not assess(raw, audit, certificate, 'abc')['target_met']
-    raw[0]['points']['0.0001']['tar_percent'] = 96.
+    point['tar_percent'] = 96.
+    point['actual_far'] = .000100001
+    assert not assess(raw, audit, certificate, 'abc')['target_met']
+    point['actual_far'] = .0000999
     for key, value in (('augmented_embeddings', 938748), ('nonfinite_values', 1),
                        ('audited_input_rows', 938748), ('audited_output_rows', 0)):
         assert not assess(raw, dict(audit, **{key:value}), certificate, 'abc')['target_met']
     assert not assess(raw, audit, certificate, 'different')['target_met']
+
+
+def test_conservative_roc_rejects_nearest_point_above_target():
+    from controlled_degree2.channelwise_acceptance import conservative_roc_point
+    # The nearest ROC point would pass 96%, but violates the requested FAR.
+    fpr, tpr = [0., .00009, .00009, .000101, 1.], [0., .94, .955, .961, 1.]
+    result = conservative_roc_point(fpr, tpr, .0001)
+    assert result == dict(tar_percent=95.5, actual_far=.00009)
+    assert conservative_roc_point(fpr[::-1], tpr[::-1], .0001) == result
 
 
 def test_audit_counts_actual_full_and_remainder_forwards():
