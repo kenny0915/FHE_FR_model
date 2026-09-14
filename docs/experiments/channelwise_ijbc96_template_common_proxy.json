@@ -1,0 +1,125 @@
+{
+  "uses_pair_labels": false,
+  "description": "Fixed common validation masks across three completed arms; CPU cache-only diagnostic",
+  "sampling": {
+    "fit": {
+      "templates": 2048,
+      "all_pairs": 2096128,
+      "tails": {
+        "0.1": {
+          "unique_pairs": 105029,
+          "fraction": 0.05010619580483634,
+          "expected_pairs_in_256_draws_with_replacement": 1634.6676635742188
+        },
+        "0.2": {
+          "unique_pairs": 4266,
+          "fraction": 0.0020351810576453347,
+          "expected_pairs_in_256_draws_with_replacement": 66.3958740234375
+        },
+        "0.3": {
+          "unique_pairs": 734,
+          "fraction": 0.00035016945530043966,
+          "expected_pairs_in_256_draws_with_replacement": 11.4239501953125
+        }
+      }
+    },
+    "validation": {
+      "templates": 512,
+      "all_pairs": 130816,
+      "tails": {
+        "0.1": {
+          "unique_pairs": 6419,
+          "fraction": 0.04906892123287671,
+          "expected_pairs_in_256_draws_with_replacement": 1598.4814453125
+        },
+        "0.2": {
+          "unique_pairs": 230,
+          "fraction": 0.0017581947162426614,
+          "expected_pairs_in_256_draws_with_replacement": 57.275390625
+        },
+        "0.3": {
+          "unique_pairs": 54,
+          "fraction": 0.00041279354207436397,
+          "expected_pairs_in_256_draws_with_replacement": 13.447265625
+        }
+      }
+    }
+  },
+  "validation": {
+    "source": {
+      "all_mse": 0.0005966859753243625,
+      "common_tails": {
+        "0.1": {
+          "mse": 0.0010832539992406964,
+          "signed_error": 0.00550872553139925
+        },
+        "0.2": {
+          "mse": 0.0017905853455886245,
+          "signed_error": 0.011648315005004406
+        },
+        "0.3": {
+          "mse": 0.0015050633810460567,
+          "signed_error": 0.009797303937375546
+        }
+      }
+    },
+    "tail01": {
+      "all_mse": 0.0005548331537283957,
+      "common_tails": {
+        "0.1": {
+          "mse": 0.0009339398238807917,
+          "signed_error": 0.0035567968152463436
+        },
+        "0.2": {
+          "mse": 0.0014297021552920341,
+          "signed_error": 0.009777081198990345
+        },
+        "0.3": {
+          "mse": 0.0014199843863025308,
+          "signed_error": 0.008104302920401096
+        }
+      }
+    },
+    "tail02": {
+      "all_mse": 0.0005713513237424195,
+      "common_tails": {
+        "0.1": {
+          "mse": 0.0009359451942145824,
+          "signed_error": 0.00337366689927876
+        },
+        "0.2": {
+          "mse": 0.0013784670736640692,
+          "signed_error": 0.01037573255598545
+        },
+        "0.3": {
+          "mse": 0.0012421144638210535,
+          "signed_error": 0.007385575212538242
+        }
+      }
+    },
+    "tail03": {
+      "all_mse": 0.0005472770426422358,
+      "common_tails": {
+        "0.1": {
+          "mse": 0.0009600173216313124,
+          "signed_error": 0.0047947801649570465
+        },
+        "0.2": {
+          "mse": 0.0015404800651594996,
+          "signed_error": 0.011798105202615261
+        },
+        "0.3": {
+          "mse": 0.0013962947996333241,
+          "signed_error": 0.010940619744360447
+        }
+      }
+    }
+  },
+  "artifact_sha256": {
+    "work_dirs/channelwise_template_cache_20260915/template_cache.pt": "c5be8c7fed98899685544f11e7622017830307d95102953b03700c4491d54075",
+    "work_dirs/channelwise_template_tail01_20260915/alignment.pt": "35560f0a04906adce9d7eacaa962c1b8580861e3d41a15c4a0643b71fc5626a7",
+    "work_dirs/channelwise_template_tail02_20260915/alignment.pt": "fe5b714b8a395488ad688d2958c6c7ce228f4cde03a0d1fad57b3f52e9a93b59",
+    "work_dirs/channelwise_template_geometry_20260915/alignment.pt": "63aa6fb5366a4a50bec2f72f12df631655d63d2e1899ce1dd92fbffe68cd7884"
+  },
+  "method": "Float32 CPU; z=x @ matrix.T+bias; L2-normalized Gram error versus teacher; upper-triangle masks fixed by teacher OR source similarity >= threshold. Expected minibatch tail count = unique_tail_pairs * 2/N^2 * choose(256,2), including repeated draws but excluding self pairs."
+}

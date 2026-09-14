@@ -1448,3 +1448,21 @@ not achieved. Any further experiment needs a reviewed change in method
 supported by diagnostics, rather than more training time or threshold sweeps.
 All scores are IJB-C calibration-set performance; no verification-pair or
 identity labels were used for gradient fitting in these trials.
+
+### Common-proxy diagnostic after stopping threshold trials
+
+CPU-only comparison of the same 512 validation templates and fixed masks
+across all three saved affine mappings finds that .20 has the best .20-tail
+MSE (.00137847) and .30-tail MSE (.00124211), consistent with its best full
+TAR. Overall MSE instead favors .30 (.00054728), and .10-tail MSE favors
+.10 (.00093394); these proxies would select a worse full-TAR candidate.
+See [channelwise_ijbc96_template_common_proxy.json](channelwise_ijbc96_template_common_proxy.json),
+including source cache/alignment hashes and the computation definition.
+
+The fitting cache has 4,266 fixed .20-tail pairs among 2,096,128 pairs.
+Uniform 256-template sampling yields only 66.40 tail pair occurrences in
+expectation per update (.30: 11.42; .10: 1,634.67). The validation .20 tail
+contains only 230 pairs, .30 only 54. These counts motivate inspecting
+sampling variance and validation coverage before another training recipe;
+they do not establish that changing sampling will improve TAR. No pair labels
+or GPU training were used for this diagnostic. No new GPU job is submitted.
