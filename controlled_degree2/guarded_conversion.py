@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 from controlled_degree2.recipe_a_recovery import finite_prefix_loss
+from controlled_degree2.model import quadratic_modules
 
 
 class GuardedConversion(nn.Module):
@@ -47,6 +48,7 @@ class GuardedConversion(nn.Module):
             repair = repair + torch.log1p(loss / self.guard**2) * (len(rows)/len(images))
         if len(pending):
             features = self.backbone(images[pending])
+            scores[pending] = torch.stack([m.last_sample_ratio for m in quadratic_modules(self.backbone)]).amax(0)
             if not torch.isfinite(features).all() or not torch.isfinite(features.norm(dim=1)).all():
                 raise FloatingPointError('guarded full rows produced nonfinite features/norms')
         else:

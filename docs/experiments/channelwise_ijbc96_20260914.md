@@ -397,3 +397,23 @@ batch: 127 full rows, one prefix-repair row, finite loss 0.610792, repair
 Code `ce610d9`; `guarded_backward.json` records the outcome. This establishes
 single-GPU backward viability only; distributed integration and full target
 accuracy remain unproven.
+
+
+### Distributed training integration of prefix routing
+
+Optional `--training-prefix-guard 4 --training-prefix-target 2` now routes
+training rows before unsafe squaring. Safe rows retain ArcFace, stage KD and
+range losses, scaled by their batch fraction; repair rows contribute a
+weighted log-prefix penalty. Entirely repaired ranks call the head with a
+zero-weight dummy row solely for DDP synchronization. The backbone wrapper
+uses unused-parameter detection because repair-only ranks touch BN affines
+but not all convolutions. All actual repair rows remain in the training-tail
+replay cache with their measured escape scores. Validation/checkpoint export
+use the original backbone and never the router. Enabling the policy on resume
+requires an explicit revision record. Frozen BN running statistics and the
+current per-site conversion schedule are preserved.
+
+A two-process Gloo test alternates which rank receives only overflowing
+inputs, performs three optimizer updates, and verifies exact synchronized
+backbone/head weights after each. Additional coverage checks repaired-row
+retention in replay, all-repair gradients, and unchanged ordinary outputs.

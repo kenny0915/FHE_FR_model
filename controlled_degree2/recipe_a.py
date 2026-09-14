@@ -303,8 +303,9 @@ class TrainingTailReplay:
         return images, labels, mask
 
     @torch.no_grad()
-    def update(self, images, labels, mask, modules):
-        scores = torch.stack([m.last_sample_ratio for m in modules]).amax(0)
+    def update(self, images, labels, mask, modules, scores=None):
+        if scores is None:
+            scores = torch.stack([m.last_sample_ratio for m in modules]).amax(0)
         images, labels, scores = images[mask].detach(), labels[mask].detach(), scores[mask]
         if self.images is not None:
             images, labels, scores = (torch.cat((old, new)) for old, new in
@@ -484,7 +485,8 @@ def check_resume_policy(config, args):
     # Legacy recovery constructs its namespace from the original checkpoint;
     # newly added optional flags can be absent on both sides.
     current = vars(args)
-    for key, default in (('pathological_fraction', .02), ('stress_probability', .1)):
+    for key, default in (('pathological_fraction', .02), ('stress_probability', .1),
+                         ('training_prefix_guard', 0.), ('training_prefix_target', 2.)):
         if config.get(key, default) != current.get(key, default):
             if not current.get('resume_policy_revision', '').strip():
                 raise ValueError(f'resume changes {key} without an explicit policy revision')
@@ -554,7 +556,13 @@ def train(args, rank, world, device):
         head.load_state_dict(state['head'])
         optimizer.load_state_dict(state['optimizer'])
         start, best = state['epoch']+1, state['best']
-    model = DDP(student, device_ids=[device.index] if device.type == 'cuda' else None, broadcast_buffers=False) if world > 1 else student
+    guarded = getattr(args, 'training_prefix_guard', 0.) > 0
+    training_model = student
+    if guarded:
+        from controlled_degree2.guarded_conversion import GuardedConversion
+        training_model = GuardedConversion(student, args.training_prefix_guard, args.training_prefix_target)
+    model = DDP(training_model, device_ids=[device.index] if device.type == 'cuda' else None,
+                broadcast_buffers=False, find_unused_parameters=guarded) if world > 1 else training_model
     classifier = DDP(head, device_ids=[device.index] if device.type == 'cuda' else None) if world > 1 else head
     train_rows = split['train']
     if args.smoke and len(train_rows) < 2*args.global_batch:
@@ -604,7 +612,11 @@ def train(args, rank, world, device):
             # FP32 is intentional for both optimization and deployment consistency.
             with torch.no_grad():
                 target = teacher(images)
-            features = model(images)
+            replay_scores = None
+            if guarded:
+                features, full_rows, prefix_repair, replay_scores = model(images)
+            else:
+                features = model(images)
             try:
                 require_finite(features, device, 'training embeddings')
             except FloatingPointError:
@@ -613,9 +625,20 @@ def train(args, rank, world, device):
                                     epoch, step, progress, images, labels, mask,
                                     dict(features=features, target=target), student_hints)
                 raise
-            classification = classifier(features, labels, mask, margin=.5*min(1., progress+0.1))
-            kd, boundary = recipe_loss(features, target, student_hints, teacher_hints, mask, modules,
-                                       elements, hint_weight=.3*(1-progress/args.epochs))
+            if guarded and not len(full_rows):
+                classification = classifier(features, labels[:1], torch.zeros_like(mask[:1]),
+                                            margin=.5*min(1., progress+0.1))
+                kd, boundary = features.sum()*0, prefix_repair
+            else:
+                selected = full_rows if guarded else slice(None)
+                classification = classifier(features, labels[selected], mask[selected], margin=.5*min(1., progress+0.1))
+                kd, boundary = recipe_loss(features, target[selected], student_hints,
+                                           {k:v[selected] for k,v in teacher_hints.items()}, mask[selected], modules,
+                                           elements, hint_weight=.3*(1-progress/args.epochs))
+                if guarded:
+                    fraction = len(full_rows)/len(images)
+                    classification, kd = classification*fraction, kd*fraction
+                    boundary = boundary*fraction + prefix_repair
             beta = args.range_weight*min(1., (progress+.05)/2.)
             loss = classification+kd+beta*boundary
             try:
@@ -642,7 +665,12 @@ def train(args, rank, world, device):
             optimizer.step()
             if getattr(args, 'unclipped_continuation', False):
                 project_coefficients(student, args.curvature_cap)
-            replay.update(images, labels, mask, modules)
+            replay.update(images, labels, mask, modules, scores=replay_scores)
+            if guarded and step % 25 == 0:
+                counts = torch.tensor([len(full_rows), len(images)-len(full_rows)], device=device)
+                reduce(counts, dist.ReduceOp.SUM)
+                if rank == 0:
+                    print(f'GUARDED_ROWS full={int(counts[0])} repair={int(counts[1])}', flush=True)
             if rank == 0 and step % 25 == 0:
                 print(f'epoch={epoch} step={step}/{steps} loss={loss.item():.4f} arc={classification.item():.4f} kd={kd.item():.4f} range={boundary.item():.4f} alpha={alphas} clipped={clipped}', flush=True)
             student_hints.clear()
@@ -718,6 +746,8 @@ def parse_args():
     p.add_argument('--range-weight', type=float, default=1.)
     p.add_argument('--pathological-fraction', type=float, default=.02)
     p.add_argument('--stress-probability', type=float, default=.1)
+    p.add_argument('--training-prefix-guard', type=float, default=0., help='training-only routing; zero disables')
+    p.add_argument('--training-prefix-target', type=float, default=2.)
     p.add_argument('--resume-policy-revision', default='',
                    help='record explicit justification for changing augmentation probabilities on resume')
     p.add_argument('--negative-pairs', type=int, default=2000000)
@@ -746,6 +776,10 @@ def parse_args():
         p.error('pathological fraction must lie in [0, 1)')
     if not 0 <= args.stress_probability <= 1:
         p.error('stress probability must lie in [0, 1]')
+    if args.training_prefix_guard < 0 or (args.training_prefix_guard and not (
+            0 < args.training_prefix_target < args.training_prefix_guard
+            and args.sitewise_unclipped and args.batchnorm_mode == 'frozen')):
+        p.error('prefix routing requires sitewise unclipped, frozen BN and 0 < target < guard')
     if args.sitewise_unclipped and (args.shared or args.inference_bound or args.all_quadratic_start):
         p.error('sitewise unclipped conversion requires a fresh channelwise teacher conversion')
     if args.train_channel_coefficients and args.shared:
