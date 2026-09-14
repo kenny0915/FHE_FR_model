@@ -1714,3 +1714,22 @@ on that proxy. Retain best 95.96563890167204% / zero nonfinite, seven accepts
 short of 96%. Only TAR fails acceptance; Slurm FAILED is not a runtime crash.
 All results are IJB-C calibration-set performance, with no pair labels in
 gradient fitting. No further GPU job submitted with this result record.
+
+### Direct validation ROC cannot resolve close candidates
+
+The expanded validation split contains 115,309 official verification pairs:
+144 genuine / 115,165 impostor. Applying each saved affine mapping to cached
+validation template barycenters gives 134/144 genuine accepts for both .01
+and .03 anchors at conservative FAR <=1e-4, versus 133 for the source.
+Their actual FAR values are 6.9466e-5 and 8.6832e-5. Thus direct validation
+TAR ties candidates that differ by three genuine accepts on full IJB-C.
+[Diagnostic with artifact hashes](channelwise_ijbc96_validation_roc_diagnostic.json).
+
+One validation genuine pair represents .6944 percentage points, far coarser
+than the remaining .03436-point full-set gap. Replacing the existing proxy
+with this small-split TAR alone cannot resolve such close differences. These
+are cache-only diagnostic scores, not new full-model results. Labels were
+used only to measure ROC, not to fit weights. No new GPU job is submitted.
+This rules out a simple selection-metric substitution as a supported next
+step; further work must improve the learned representation or provide more
+relevant calibration supervision, with its use clearly documented.

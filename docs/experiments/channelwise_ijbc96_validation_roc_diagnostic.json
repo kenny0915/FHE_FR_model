@@ -1,0 +1,36 @@
+{
+  "scope": "official pairs with both endpoints in expanded validation split; labels used only for diagnostic ROC",
+  "validation_templates": 2048,
+  "pairs": 115309,
+  "genuine": 144,
+  "impostor": 115165,
+  "models": {
+    "source": {
+      "tar_percent": 92.36111111111111,
+      "actual_far": 4.341596839317501e-05,
+      "threshold": 0.30061590671539307,
+      "true_accepts": 133,
+      "false_accepts": 5
+    },
+    "anchor01": {
+      "tar_percent": 93.05555555555556,
+      "actual_far": 6.946554942908002e-05,
+      "threshold": 0.27571409940719604,
+      "true_accepts": 134,
+      "false_accepts": 8
+    },
+    "anchor03": {
+      "tar_percent": 93.05555555555556,
+      "actual_far": 8.683193678635003e-05,
+      "threshold": 0.2739381194114685,
+      "true_accepts": 134,
+      "false_accepts": 10
+    }
+  },
+  "artifact_sha256": {
+    "work_dirs/channelwise_template_cache_expanded_20260915/template_cache.pt": "bbea6466eaf5e79209f797fc2b1fd3609511f636d7e92bd27ae75f6b74fc60df",
+    "work_dirs/channelwise_template_population_expanded_20260915/alignment.pt": "7f5f0ba689b34b1550d57304f2076df45b6fa16158390ff220bf266919e2314d",
+    "work_dirs/channelwise_template_anchor03_20260915/alignment.pt": "fca84c3244a013a4e54be077605da868d54b6d8eabaf9ff91e9cb7d447700d6a"
+  },
+  "method": "Use cached validation barycenters in float32, affine mapping then L2 normalization, dot products for official pairs whose two endpoints are in validation. sklearn roc_curve default pruning; choose last point at FAR <= 1e-4. Cache-only diagnostic; not full-model inference or independent benchmark."
+}
