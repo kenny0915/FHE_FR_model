@@ -1,0 +1,184 @@
+{
+  "result_directory": "work_dirs/channelwise_template_geometry_20260915/ijbc_full",
+  "slurm_job": "386141",
+  "elapsed": "00:22:12",
+  "acceptance": {
+    "target_met": false,
+    "checks": {
+      "tar": false,
+      "requested_roc_point": true,
+      "full_ijbc": true,
+      "finite": true,
+      "graph": true,
+      "checkpoint": true
+    },
+    "tar_percent": 95.89405328015545,
+    "actual_far": 9.975105716937703e-05,
+    "requested_far": 0.0001,
+    "checkpoint_sha256": "bc403a2b8b50eb199b3dad4d7fe9a65c787ea596e8b506746d77f25aec84ff1e",
+    "interpretation": "IJB-C calibration-set performance; not untouched test accuracy"
+  },
+  "polynomial_certificate": {
+    "pure_polynomial": true,
+    "quadratic_sites": 25,
+    "coefficients": 17664,
+    "coefficient_mode": "channelwise",
+    "operations": [
+      "addition",
+      "multiplication",
+      "affine convolution/linear",
+      "reshape"
+    ],
+    "batchnorm": "fixed scale/offset constants",
+    "inference_clipping": false,
+    "scope": "image-to-embedding backbone before plaintext normalization/scoring",
+    "checkpoint_sha256": "bc403a2b8b50eb199b3dad4d7fe9a65c787ea596e8b506746d77f25aec84ff1e"
+  },
+  "finite_audit_summary": {
+    "nonfinite_values": 0,
+    "embedding_nonfinite_rows": 0,
+    "source_images": 469375,
+    "augmented_embeddings": 938750,
+    "target": "IJBC",
+    "audited_input_rows": 938750,
+    "audited_output_rows": 938750,
+    "scope": "all module inputs and outputs, original and flip, including remainder"
+  },
+  "calibration": {
+    "config": {
+      "cache_root": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_template_cache_20260915",
+      "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_template_geometry_20260915",
+      "steps": 2000,
+      "lr": 0.0001,
+      "seed": 20260926
+    },
+    "source_sha256": "e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d",
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "split_sha256": "01389115a7386d1d7109cb4b5df2fcb82c6107baa8cc18c3b8071fbe782f348a",
+    "cache_sha256": "c5be8c7fed98899685544f11e7622017830307d95102953b03700c4491d54075",
+    "uses_ijbc_pair_labels": false,
+    "cache_layout": "complete_template_barycenters",
+    "inference_clipping": false,
+    "tail_threshold": 0.3,
+    "point_anchor_weight": 0.01,
+    "identity_penalty": 0.001
+  },
+  "selection": {
+    "baseline": {
+      "all_mse": 0.0005966859753243625,
+      "tail_mse": 0.0015050647780299187
+    },
+    "validation": [
+      {
+        "step": 100,
+        "all_mse": 0.0005943692522123456,
+        "tail_mse": 0.001485949382185936
+      },
+      {
+        "step": 200,
+        "all_mse": 0.0005920425755903125,
+        "tail_mse": 0.0014863044489175081
+      },
+      {
+        "step": 300,
+        "all_mse": 0.0005862294929102063,
+        "tail_mse": 0.0014874254120513797
+      },
+      {
+        "step": 400,
+        "all_mse": 0.0005806810222566128,
+        "tail_mse": 0.0014799770433455706
+      },
+      {
+        "step": 500,
+        "all_mse": 0.000574440520722419,
+        "tail_mse": 0.0014571142382919788
+      },
+      {
+        "step": 600,
+        "all_mse": 0.0005693015409633517,
+        "tail_mse": 0.0014413095777854323
+      },
+      {
+        "step": 700,
+        "all_mse": 0.0005640365416184068,
+        "tail_mse": 0.001427004928700626
+      },
+      {
+        "step": 800,
+        "all_mse": 0.000563074485398829,
+        "tail_mse": 0.0014531974447891116
+      },
+      {
+        "step": 900,
+        "all_mse": 0.0005579597782343626,
+        "tail_mse": 0.0014341467758640647
+      },
+      {
+        "step": 1000,
+        "all_mse": 0.0005566433537751436,
+        "tail_mse": 0.0014277980662882328
+      },
+      {
+        "step": 1100,
+        "all_mse": 0.0005536095704883337,
+        "tail_mse": 0.001413150574080646
+      },
+      {
+        "step": 1200,
+        "all_mse": 0.0005498667014762759,
+        "tail_mse": 0.001409864635206759
+      },
+      {
+        "step": 1300,
+        "all_mse": 0.0005479424144141376,
+        "tail_mse": 0.0014112717472016811
+      },
+      {
+        "step": 1400,
+        "all_mse": 0.000546092982403934,
+        "tail_mse": 0.0014010497834533453
+      },
+      {
+        "step": 1500,
+        "all_mse": 0.000546569935977459,
+        "tail_mse": 0.0014007671270519495
+      },
+      {
+        "step": 1600,
+        "all_mse": 0.0005472771008498967,
+        "tail_mse": 0.001396295498125255
+      },
+      {
+        "step": 1700,
+        "all_mse": 0.0005448305164463818,
+        "tail_mse": 0.0014076073421165347
+      },
+      {
+        "step": 1800,
+        "all_mse": 0.0005449197487905622,
+        "tail_mse": 0.001405538059771061
+      },
+      {
+        "step": 1900,
+        "all_mse": 0.0005450256867334247,
+        "tail_mse": 0.0014022851828485727
+      },
+      {
+        "step": 2000,
+        "all_mse": 0.0005441142129711807,
+        "tail_mse": 0.001419318257831037
+      }
+    ],
+    "improved": true,
+    "selected_step": 1600,
+    "selection": "held-out cross-template all-pair MSE plus fixed high-similarity-pair MSE",
+    "head_fold_probe_rows": 16,
+    "head_fold_max_abs_error": 1.564621925354004e-07
+  },
+  "report_sha256": {
+    "finite_audit.json": "f923b4e86905676b3dc5a02b45daf4a7cfbff1084a4f83517c5813c34782d92d",
+    "acceptance.json": "d71a62267dcdf836f14ff66d32210bdc4e7b0003bb8e1937336a7da2ff5351a5",
+    "ijbc_tar_at_far_raw.json": "955aacd7e8c3251d3374fdc3ed842ceb5f2e95a44d816bdb27efe64d7a3a7682"
+  }
+}

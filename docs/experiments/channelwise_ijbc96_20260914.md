@@ -1,11 +1,11 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best fully finite IJB-C calibration-set TAR is 95.88382676279593%,
-actual FAR 9.879191238890226e-5, from pair-geometry job 385987. Full original
-and flip intermediate/embedding nonfinite counts are zero. All 25 sites
-remain channelwise pure quadratics with no inference clipping. The 96% target
-is unmet: 23 additional genuine accepts are needed. Main training is stopped;
-385987 finished evaluation, with FAILED status caused only by the accuracy gate.
+Status: best fully finite IJB-C calibration-set TAR is 95.89405328015545%,
+actual FAR 9.975105716937703e-5, from template-geometry job 386141. Full original
+and flip intermediate/embedding nonfinite counts are zero. All 25 sites remain
+channelwise pure quadratics with no inference clipping. The 96% target is
+unmet: 21 additional genuine accepts are needed. Main training is stopped;
+386141 finished evaluation, with FAILED status caused only by the accuracy gate.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1348,3 +1348,21 @@ by held-out template pair geometry. Only FC parameters may change. Full
 exported IJB-C TAR/finite/graph acceptance follows if the proxy improves.
 No identity/pair labels are used for gradient fitting. Main training stays
 stopped; the queue was empty before this single fitting submission.
+
+### Template geometry full result: small improvement, target unmet
+
+Job **386141** completed in **22m12s**. Full exported TAR is
+**95.89405328015545%**, actual FAR **9.975105716937703e-5**. Full coverage of
+469,375 source images / 938,750 original-and-flip rows, including remainder,
+confirms zero nonfinite module-boundary values and embeddings. Certificate
+confirms 25 channelwise quadratics / 17,664 coefficients and no clipping.
+Evaluated checkpoint hash was independently recomputed:
+`bc403a2b8b50eb199b3dad4d7fe9a65c787ea596e8b506746d77f25aec84ff1e`.
+See [channelwise_ijbc96_template_geometry_result.json](channelwise_ijbc96_template_geometry_result.json).
+
+This accepts 18,754 genuine pairs, two more than the prior 18,752 best;
+18,775 are needed for 96%, leaving 21. Only TAR fails the acceptance gate;
+Slurm FAILED does not indicate a runtime crash. The small change does not
+establish statistical significance or justify expanding training resources.
+This is calibration-set performance, with no pair labels in gradient fitting.
+The cache and source provenance are retained for reproducible further work.
