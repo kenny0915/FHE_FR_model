@@ -1179,3 +1179,11 @@ remain fixed. Affine folding preserves the inference graph. One H200 / 45
 minutes includes full exported evaluation; full TAR and finite gates remain
 mandatory. `CHANNEL_GEOMETRY_STEPS` exposes the existing CLI step count in the
 Slurm wrapper (default remains 2,000).
+
+Submitted duration ablation as **386049**, job name
+`channelwise-pair-geometry-8000-20260915`, one H200 / 45 minutes, MST114196.
+Output `work_dirs/channelwise_pair_geometry_8000_20260915`, source cache
+`work_dirs/channelwise_linear_head_20260915`, `CHANNEL_GEOMETRY_STEPS=8000`.
+Implementation **431cf2a** is pushed. All 25 pair/linear/campaign CPU tests
+pass; Slurm syntax and whitespace checks pass. Scheduler was empty before
+this single submission; original main training remains stopped.
