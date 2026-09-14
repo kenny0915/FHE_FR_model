@@ -1,15 +1,11 @@
 # Reproducible PReLU-to-quadratic IJB-C 96% goal
 
-Status: best fully finite fresh-campaign IJB-C calibration-set TAR is
-95.79690136524007%, from exact-path cosine-only head calibration, with zero
-nonfinite intermediate values and embeddings. The higher historical diagnostic
-95.9145% has 104 nonfinite embeddings and is ineligible. The 96% target remains
-unmet. Main training is stopped. The paired magnitude-loss arm completed at
-95.69974945032469%, also fully finite, and did not improve TAR. One-GPU ablation
-385638 has finished. Original-PReLU baseline 385651 is verified at 96.5537%
-and zero nonfinite. Linear-alignment test 385889 finished at 95.7662%, fully
-finite but below its source. One-H200 pair-geometry test 385987 is running
-full evaluation; its 45-minute allocation does not resume main training.
+Status: best fully finite IJB-C calibration-set TAR is 95.88382676279593%,
+actual FAR 9.879191238890226e-5, from pair-geometry job 385987. Full original
+and flip intermediate/embedding nonfinite counts are zero. All 25 sites
+remain channelwise pure quadratics with no inference clipping. The 96% target
+is unmet: 23 additional genuine accepts are needed. Main training is stopped;
+385987 finished evaluation, with FAILED status caused only by the accuracy gate.
 
 User-authorized objective: start from original PReLU iResNet50, use an exact
 degree-two polynomial at all 25 activation sites, no inference clipping,
@@ -1149,3 +1145,22 @@ is underway; these proxy improvements do not establish a TAR improvement.
 The existing repair recipe has insufficient evidence to justify extending
 the stopped 16-GPU main run. Retain the fully finite best checkpoint and
 finish this bounded evaluation before judging this distinct loss hypothesis.
+
+### Pair-geometry full result: improved, target unmet
+
+Job **385987** finished in **24m24s**. Full exported evaluation yields
+**95.88382676279593% TAR**, actual FAR **9.879191238890226e-5**.
+All 469,375 images / 938,750 orientations, including the remainder batch,
+have zero nonfinite audited intermediate values and embedding rows.
+The certificate confirms 25 channelwise quadratics / 17,664 coefficients,
+fixed BN, and no inference clipping. Evaluated checkpoint SHA independently
+recomputed: `e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d`.
+See [channelwise_ijbc96_pair_geometry_result.json](channelwise_ijbc96_pair_geometry_result.json).
+
+The new eligible best accepts 18,752 / 19,557 genuine pairs, 17 more than
+its exact-cosine source. At least 18,775 are needed for 96%, leaving 23.
+Only the accuracy gate fails; graph, checkpoint identity, full coverage,
+finite checks and FAR selection pass. This is IJB-C calibration-set
+performance; no verification-pair labels were used in gradient fitting.
+This supports further analysis of pair geometry, not resuming the stopped
+main repair recipe. No follow-up GPU job accompanies this result record.
