@@ -1,0 +1,188 @@
+{
+  "result_directory": "work_dirs/channelwise_template_anchor03_20260915/ijbc_full",
+  "slurm_job": "386695",
+  "elapsed": "00:17:01",
+  "acceptance": {
+    "target_met": false,
+    "checks": {
+      "tar": false,
+      "requested_roc_point": true,
+      "full_ijbc": true,
+      "finite": true,
+      "graph": true,
+      "checkpoint": true
+    },
+    "tar_percent": 95.95029912563277,
+    "actual_far": 9.987894314010701e-05,
+    "requested_far": 0.0001,
+    "checkpoint_sha256": "f99f933f8a2947c88273b50cdbe7f1b861ce23950397b5a0311e0c09806714fa",
+    "interpretation": "IJB-C calibration-set performance; not untouched test accuracy"
+  },
+  "polynomial_certificate": {
+    "pure_polynomial": true,
+    "quadratic_sites": 25,
+    "coefficients": 17664,
+    "coefficient_mode": "channelwise",
+    "operations": [
+      "addition",
+      "multiplication",
+      "affine convolution/linear",
+      "reshape"
+    ],
+    "batchnorm": "fixed scale/offset constants",
+    "inference_clipping": false,
+    "scope": "image-to-embedding backbone before plaintext normalization/scoring",
+    "checkpoint_sha256": "f99f933f8a2947c88273b50cdbe7f1b861ce23950397b5a0311e0c09806714fa"
+  },
+  "finite_audit_summary": {
+    "nonfinite_values": 0,
+    "embedding_nonfinite_rows": 0,
+    "source_images": 469375,
+    "augmented_embeddings": 938750,
+    "target": "IJBC",
+    "audited_input_rows": 938750,
+    "audited_output_rows": 938750,
+    "scope": "all module inputs and outputs, original and flip, including remainder"
+  },
+  "calibration": {
+    "config": {
+      "cache_root": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_template_cache_expanded_20260915",
+      "output": "/work/u8798807/FHE_FR_model/work_dirs/channelwise_template_anchor03_20260915",
+      "steps": 2000,
+      "lr": 0.0001,
+      "seed": 20260926,
+      "tail_threshold": 0.2,
+      "point_anchor_weight": 0.03,
+      "full_template_batch": true
+    },
+    "source_sha256": "e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d",
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "split_sha256": "5540c41268d6b331dc109ea07afc22a00d8476761aba9218625387f8694830b6",
+    "cache_sha256": "bbea6466eaf5e79209f797fc2b1fd3609511f636d7e92bd27ae75f6b74fc60df",
+    "uses_ijbc_pair_labels": false,
+    "validation_pair_scope": "all unordered distinct-source pairs including cross-block pairs",
+    "cache_layout": "complete_template_barycenters",
+    "inference_clipping": false,
+    "tail_threshold": 0.2,
+    "point_anchor_weight": 0.03,
+    "identity_penalty": 0.001
+  },
+  "selection": {
+    "baseline": {
+      "all_mse": 0.0005890622728756441,
+      "tail_mse": 0.0017651357894469361
+    },
+    "validation": [
+      {
+        "step": 100,
+        "all_mse": 0.0005594093081344822,
+        "tail_mse": 0.0013524777086511301
+      },
+      {
+        "step": 200,
+        "all_mse": 0.0005614361226077081,
+        "tail_mse": 0.0013035719055467165
+      },
+      {
+        "step": 300,
+        "all_mse": 0.000565334625855714,
+        "tail_mse": 0.0012827168828760198
+      },
+      {
+        "step": 400,
+        "all_mse": 0.0005679623382738011,
+        "tail_mse": 0.0012711587195954664
+      },
+      {
+        "step": 500,
+        "all_mse": 0.0005694735177744674,
+        "tail_mse": 0.00126402283773207
+      },
+      {
+        "step": 600,
+        "all_mse": 0.0005702723059767858,
+        "tail_mse": 0.001259418027140191
+      },
+      {
+        "step": 700,
+        "all_mse": 0.0005706593065566175,
+        "tail_mse": 0.0012563914926467929
+      },
+      {
+        "step": 800,
+        "all_mse": 0.0005708213682112194,
+        "tail_mse": 0.0012543955689224755
+      },
+      {
+        "step": 900,
+        "all_mse": 0.0005708665607802826,
+        "tail_mse": 0.0012530849676010215
+      },
+      {
+        "step": 1000,
+        "all_mse": 0.0005708549326624445,
+        "tail_mse": 0.001252230422541076
+      },
+      {
+        "step": 1100,
+        "all_mse": 0.0005708188260324192,
+        "tail_mse": 0.0012516763730772537
+      },
+      {
+        "step": 1200,
+        "all_mse": 0.0005707751235397702,
+        "tail_mse": 0.0012513175631691806
+      },
+      {
+        "step": 1300,
+        "all_mse": 0.000570732215896867,
+        "tail_mse": 0.001251083095294647
+      },
+      {
+        "step": 1400,
+        "all_mse": 0.0005706939678381249,
+        "tail_mse": 0.0012509273642342775
+      },
+      {
+        "step": 1500,
+        "all_mse": 0.0005706617988940958,
+        "tail_mse": 0.001250820324680805
+      },
+      {
+        "step": 1600,
+        "all_mse": 0.000570635920654605,
+        "tail_mse": 0.0012507433834719332
+      },
+      {
+        "step": 1700,
+        "all_mse": 0.0005706159066263146,
+        "tail_mse": 0.0012506851717573595
+      },
+      {
+        "step": 1800,
+        "all_mse": 0.0005706010590864855,
+        "tail_mse": 0.0012506388393389047
+      },
+      {
+        "step": 1900,
+        "all_mse": 0.0005705905956739611,
+        "tail_mse": 0.0012506004516959445
+      },
+      {
+        "step": 2000,
+        "all_mse": 0.0005705837183252639,
+        "tail_mse": 0.0012505676515236796
+      }
+    ],
+    "improved": true,
+    "selected_step": 2000,
+    "selection": "held-out cross-template all-pair MSE plus fixed high-similarity-pair MSE",
+    "head_fold_probe_rows": 16,
+    "head_fold_max_abs_error": 1.9371509552001953e-07
+  },
+  "report_sha256": {
+    "finite_audit.json": "25d0dbaaa897cf076bcf28e4fd3033e1d08d60add5936edc77776c2bd8eec5a2",
+    "acceptance.json": "6c140a05582eadfca34cf7c854492a1823d47ab4c1435c2590c780aeb1881f1e",
+    "ijbc_tar_at_far_raw.json": "2d3a5c87f315deca4d0d67560ce3c930b9c26397a71090baece07dcabadfffe4"
+  }
+}

@@ -1695,3 +1695,22 @@ Submitted **386695**, `channelwise-template-anchor03`, one H200 / 45 minutes,
 MST114196, recipe **181ab7e**. Output
 `work_dirs/channelwise_template_anchor03_20260915`; anchor .03, expanded
 cache, full-template mode, .20 tail threshold, 2,000 updates.
+
+### Stronger anchor result: proxy improves, TAR decreases
+
+Job **386695** finished in **17m01s**. Full exported conservative TAR is
+**95.95029912563277%**, actual FAR **9.987894314010701e-5**. Full coverage of
+469,375 source images / 938,750 original-and-flip rows confirms zero
+nonfinite module-boundary values and embeddings, including remainder.
+Certificate confirms 25 channelwise quadratics / 17,664 coefficients with
+no inference clipping. Checkpoint hash independently verified:
+`f99f933f8a2947c88273b50cdbe7f1b861ce23950397b5a0311e0c09806714fa`.
+[Verified result](channelwise_ijbc96_anchor03_result.json).
+
+This accepts 18,765 genuine pairs, three fewer than the .01-anchor control.
+The lower held-out geometry proxy does not translate to better full TAR.
+Do not promote this candidate or continue increasing the anchor based only
+on that proxy. Retain best 95.96563890167204% / zero nonfinite, seven accepts
+short of 96%. Only TAR fails acceptance; Slurm FAILED is not a runtime crash.
+All results are IJB-C calibration-set performance, with no pair labels in
+gradient fitting. No further GPU job submitted with this result record.
