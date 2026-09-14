@@ -123,3 +123,13 @@ counts alone do not certify complete inference. The final script writes
 `acceptance.json` and exits nonzero when the 96%/finite/coverage gate is unmet;
 that report distinguishes a completed below-target evaluation from a runtime
 failure. Additional focused audit/export tests: 35 passed.
+
+IJB-C evaluation job **383314** is queued with `afterok:383299` and
+`--kill-on-invalid-dep=yes`. It requests one GPU only after the training
+allocation succeeds. It snapshots `student_best.pt` into
+`work_dirs/channelwise_ijbc96_20260914/first_ijbc/evaluated_checkpoint.pt`,
+then evaluates the exported graph and writes strict acceptance. A missing
+selected checkpoint fails before image inference. This is the first
+uncalibrated candidate assessment; any subsequent IJB-C-guided adjustments
+and selection will be recorded as calibration-set work. Current training
+is still in head warmup; no final student verification metric exists yet.
