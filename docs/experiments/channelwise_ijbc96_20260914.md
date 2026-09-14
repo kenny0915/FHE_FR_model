@@ -483,3 +483,23 @@ all exact batches before aborting. A regression test exercises a row that
 rounds below the guard but remains above the repair target. All 33 routing,
 recovery and campaign tests passed. This addresses a plausible routing cause,
 not a proven diagnosis of the uncaptured real batch; resumed evidence is needed.
+
+
+### GPU credit rejection on corrected continuation
+
+Epoch-6 source SHA-256 is
+`fe522be8f8b7908ef4cdd6927214131b1e2aaa50c5be262a8f0532cf37232601`;
+all source backbone tensors are finite. Corrected continuation is prepared
+in `work_dirs/channelwise_ijbc96_guarded_resume_20260914`, code `e23ce2c`,
+with unchanged guard/target, augmentation, optimizer and conversion policy.
+The replay cache is rebuilt, so the resumed epoch is not bit-exact.
+
+Slurm rejected the submission (return code 1, no new job ID):
+`You do not have enough credits in your iService wallet -397.5509`.
+383686 and 383719 are confirmed cancelled. No GPU training or evaluation
+for this campaign remains running. The user has been asked to replenish
+MST114196 or identify an authorized alternative account. Read-only association
+lookup also lists mst113064, but no work was charged to that other project.
+The saved absolute deadline must be refreshed if it expires before credits
+are restored. This is an external resource dependency; no full-conversion
+IJB-C result or 96% achievement is claimed.
