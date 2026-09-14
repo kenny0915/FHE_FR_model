@@ -1024,3 +1024,35 @@ See [channelwise_ijbc96_pair_diagnostics.json](channelwise_ijbc96_pair_diagnosti
 These are diagnostic analyses of evaluation labels, not a change to the
 no-label gradient-training policy. They identify a recognition-quality gap;
 full numerical stability of the eligible candidates is already established.
+
+### Distinct bounded test: regularized linear teacher alignment
+
+The SGD head experiments did not reach 96%. A new hypothesis tests whether a
+closed-form linear correction of the fixed student embedding can recover
+teacher geometry better. `calibrate_linear_head.py` fits an identity-anchored
+affine correction in FP64. Its weighted least-squares residual is teacher
+unit embedding minus source unit embedding; the design matrix is the source
+embedding plus an intercept, divided by the fixed source embedding norm.
+This retains source-dependent magnitude weighting rather than imposing raw
+teacher magnitudes as in the failed MSE arm.
+
+Use the best exact-cosine source. Sample 32,768 fitting and 8,192 validation
+source images without replacement (seed 20260925), with both orientations;
+the split is disjoint by source image. Choose ridge from 1e-4 through 100 by
+held-out teacher cosine loss, with the unchanged identity mapping as a
+candidate. No improvement skips full evaluation. No pair/identity labels are
+used. This is still IJB-C calibration, not independent benchmark validation.
+
+The fitted output affine is algebraically composed into the existing FC,
+accounting for the fixed output BN. No inference layer is added; only
+`fc.weight` and `fc.bias` may change. All BN buffers, spatial layers and 25
+per-channel quadratics, including their PReLU targets/lam_fit intervals, stay
+fixed. A real 64-orientation fold-equivalence check precedes checkpoint save.
+Full exported IJB-C acceptance is still required. Embedding cache, source
+split/hash, candidate ridge scores and affine parameters are retained.
+
+The job script `channelwise_linear_head.slurm` limits this test to one H200
+and 45 minutes. CPU tests verify recovery of known rotations on unseen data,
+identity anchoring, fixed-BN affine folding (including negative BN scales),
+singular-scale rejection and disjoint deterministic sampling. All 22 linear
+head/campaign tests pass; Slurm syntax and diff whitespace checks pass.
