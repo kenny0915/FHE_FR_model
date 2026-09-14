@@ -263,3 +263,19 @@ output directory, with the original preparation, optimizer and other policy.
 A read-only active-row backward check precedes this run. No IJB-C row may be
 excluded from final evaluation. Validation: 60 related CPU tests passed;
 after adding the backward diagnostic, all 11 campaign tests passed again.
+
+
+Active-row GPU backward diagnostic **383543** completed in 9 seconds.
+All 125 retained identity rows produced finite loss 113.984436, KD 56.256958
+and range penalty 49.497391. All 238 gradient tensors were finite; there
+were zero optimizer updates. The historical full batch still reproduced
+its original NaN/Inf losses in the same diagnostic.
+
+Ablation job **383545** is submitted on 16 H200s, with a 4h35m allocation
+cap and the original absolute deadline 1789385375. Output:
+`work_dirs/channelwise_ijbc96_nopath_20260914`. It resumes the original
+preserved epoch-4 state, sets pathological fraction to zero, uses active-row
+loss masking, and preserves the remaining optimization/conversion policy.
+`ablation_provenance.json` records the source hash, policy revision,
+submission and diagnostic. Code commit: `f266f49`. No new student IJB-C
+score or successful fully converted checkpoint is available yet.
