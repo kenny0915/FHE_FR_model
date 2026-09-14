@@ -1164,3 +1164,18 @@ finite checks and FAR selection pass. This is IJB-C calibration-set
 performance; no verification-pair labels were used in gradient fitting.
 This supports further analysis of pair geometry, not resuming the stopped
 main repair recipe. No follow-up GPU job accompanies this result record.
+
+### Bounded pair-geometry duration ablation
+
+The 2,000-step run improves full TAR by 17 genuine accepts. Its best held-out
+selection occurs at step 1,800, with similarly low tail error at step 2,000;
+convergence is not established. Test 8,000 updates using the same source
+embedding cache, split, seed, LR and loss. This starts from the same identity
+correction, retaining earlier selection candidates; it does not continue the
+stopped spatial repair run. Only update count changes. Selection remains
+held-out pair-geometry error, without identity/pair-label gradient training.
+All PReLU approximation targets/intervals and spatial quadratic coefficients
+remain fixed. Affine folding preserves the inference graph. One H200 / 45
+minutes includes full exported evaluation; full TAR and finite gates remain
+mandatory. `CHANNEL_GEOMETRY_STEPS` exposes the existing CLI step count in the
+Slurm wrapper (default remains 2,000).
