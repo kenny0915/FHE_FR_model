@@ -1,0 +1,34 @@
+{
+  "scope": "official genuine-pair diagnostic only; no labels used in fitting",
+  "teacher_threshold": 0.267762704546643,
+  "all_genuine": {
+    "pairs": 19557,
+    "unique_templates": 23088,
+    "both_fit": 146,
+    "either_fit": 3278,
+    "both_validation": 15,
+    "both_any_cache": 238,
+    "neither_any_cache": 15442
+  },
+  "common_rejected": {
+    "pairs": 785,
+    "unique_templates": 1254,
+    "both_fit": 7,
+    "either_fit": 127,
+    "both_validation": 1,
+    "both_any_cache": 13,
+    "neither_any_cache": 630
+  },
+  "common_rejected_teacher_accepts": {
+    "pairs": 137,
+    "unique_templates": 246,
+    "both_fit": 1,
+    "either_fit": 23,
+    "both_validation": 0,
+    "both_any_cache": 2,
+    "neither_any_cache": 105
+  },
+  "common_rejected_teacher_rejects": 648,
+  "fit_templates": 2048,
+  "validation_templates": 512
+}

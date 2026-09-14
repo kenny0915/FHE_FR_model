@@ -1561,3 +1561,24 @@ It offers weak evidence for immediately testing weight averaging: most
 remaining errors are shared. No averaging job is submitted. Further work
 should address these shared errors rather than assume the two heads provide
 enough complementarity to reach 96%.
+
+### Shared errors versus teacher and calibration coverage
+
+Among 785 genuine pairs rejected by both best heads, the original PReLU
+teacher accepts 137 at its independently verified conservative threshold.
+Only one of these 137 has both template endpoints in the 2,048-template
+fitting cache; two have both endpoints anywhere in the fit/validation cache;
+105 have neither endpoint cached. The remaining 648 common rejects are also
+rejected by the teacher. Across all 19,557 genuine pairs, only 146 have both
+endpoints in fitting and 15 both in the 512-template validation partition.
+[Coverage diagnostic](channelwise_ijbc96_shared_error_coverage.json).
+
+These label-based diagnostic counts identify limited exposure to teacher-
+recoverable cases, but do not prove that exposure alone will solve them.
+A justified next method change is a larger random complete-template cache,
+selected without pair labels, with larger validation coverage. Avoid selecting
+only the 137 known test errors for fitting. Before extraction, ensure held-out
+pair evaluation includes cross-chunk pairs when validation exceeds 1,024
+templates: the current evaluator averages within-chunk losses, so merely
+increasing its input would omit those comparisons. No GPU job is submitted
+in this diagnostic step; main training stays stopped and 96% is unmet.
