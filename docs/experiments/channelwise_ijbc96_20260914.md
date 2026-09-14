@@ -1582,3 +1582,19 @@ pair evaluation includes cross-chunk pairs when validation exceeds 1,024
 templates: the current evaluator averages within-chunk losses, so merely
 increasing its input would omit those comparisons. No GPU job is submitted
 in this diagnostic step; main training stays stopped and 96% is unmet.
+
+### Validation now covers cross-block pairs
+
+Pair-geometry validation computes every unordered distinct-source pair using
+1,024-row tiles, including off-diagonal tiles. Losses are summed and divided
+by actual pair counts rather than averaging within-block means. Fixed
+teacher/source tail membership and same-source exclusions are preserved.
+Configuration records the complete validation-pair scope. This corrects
+future large-cache model selection; historical full IJB-C ROC results are
+unchanged, and the previous 512-template validation fit in a single tile.
+
+Tests compare tiled results with the complete Gram matrix for tile sizes
+1/3/5/20, repeated IDs across tiles and uneven remainders. Another test puts
+the only high-similarity pair across a tile boundary, where the old evaluator
+would omit it. All four relevant suites pass: **36 tests**, with only existing
+PyTorch deprecation warnings. Whitespace checks pass. No GPU job submitted.

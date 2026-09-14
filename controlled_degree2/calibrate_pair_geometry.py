@@ -62,16 +62,32 @@ def pair_geometry_loss(output, teacher, source, source_ids, threshold=.3):
 
 
 @torch.no_grad()
-def evaluate(matrix, bias, source, teacher, source_ids, threshold=.3):
-    totals = dict(all_mse=0., tail_mse=0.)
-    batches = 0
-    for start in range(0, len(source), 1024):
-        x, y, ids = source[start:start+1024], teacher[start:start+1024], source_ids[start:start+1024]
-        _, stats = pair_geometry_loss(x @ matrix.T+bias, y, x, ids, threshold)
-        for k in totals:
-            totals[k] += float(stats[k])
-        batches += 1
-    return {k:v/batches for k,v in totals.items()}
+def evaluate(matrix, bias, source, teacher, source_ids, threshold=.3, block_size=1024):
+    """Evaluate every unordered pair, including cross-block pairs, in bounded tiles."""
+    if block_size <= 0:
+        raise ValueError('positive block size required')
+    output = F.normalize(source @ matrix.T+bias, dim=1)
+    target = F.normalize(teacher, dim=1)
+    baseline = F.normalize(source, dim=1)
+    total, high, count, high_count = 0., 0., 0, 0
+    for start in range(0, len(source), block_size):
+        left = slice(start, start+block_size)
+        for other in range(start, len(source), block_size):
+            right = slice(other, other+block_size)
+            valid = source_ids[left, None] != source_ids[None, right]
+            if start == other:
+                valid = torch.triu(valid, diagonal=1)
+            target_sim = target[left] @ target[right].T
+            source_sim = baseline[left] @ baseline[right].T
+            tail = valid & ((target_sim >= threshold) | (source_sim >= threshold))
+            error = (output[left] @ output[right].T-target_sim).square()
+            total += float(error[valid].sum(dtype=torch.float64))
+            high += float(error[tail].sum(dtype=torch.float64))
+            count += int(valid.sum())
+            high_count += int(tail.sum())
+    if count == 0:
+        raise ValueError('need pairs from different source images')
+    return dict(all_mse=total/count, tail_mse=high/high_count if high_count else 0.)
 
 
 def main():
@@ -173,6 +189,7 @@ def main():
     record = dict(config=vars(args),source_sha256=config['source_sha256'],
                   teacher_sha256=config['teacher_sha256'],split_sha256=config['split_sha256'],
                   cache_sha256=digest(cache_path),uses_ijbc_pair_labels=False,
+                  validation_pair_scope='all unordered distinct-source pairs including cross-block pairs',
                   cache_layout=config.get('cache_layout','paired_image_orientations'),
                   inference_clipping=False,tail_threshold=args.tail_threshold,point_anchor_weight=.01,identity_penalty=.001)
     (root/'calibration_config.json').write_text(json.dumps(record,indent=2))

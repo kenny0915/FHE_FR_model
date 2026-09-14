@@ -74,3 +74,30 @@ def test_population_loss_and_affine_gradients_match_explicit_pairs():
     expected_grad = torch.autograd.grad(reference, (matrix, bias))
     for actual, expected in zip(actual_grad, expected_grad):
         torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize('block_size', [1, 3, 5, 20])
+def test_tiled_validation_matches_all_pairs_with_repeated_ids(block_size):
+    from controlled_degree2.calibrate_pair_geometry import evaluate
+    torch.manual_seed(51)
+    source = torch.randn(11, 4, dtype=torch.float64)
+    teacher = torch.randn_like(source)
+    matrix = torch.randn(4, 4, dtype=torch.float64)
+    bias = torch.randn(4, dtype=torch.float64)
+    # Same-source pairs cross tile boundaries; final tiles have unequal sizes.
+    ids = torch.tensor([0, 1, 2, 0, 3, 4, 1, 5, 2, 6, 7])
+    _, expected = pair_geometry_loss(source @ matrix.T+bias, teacher, source, ids, .2)
+    actual = evaluate(matrix, bias, source, teacher, ids, .2, block_size)
+    for key in actual:
+        assert actual[key] == pytest.approx(float(expected[key]), abs=1e-12)
+
+
+def test_tiled_validation_includes_tail_existing_only_between_tiles():
+    from controlled_degree2.calibrate_pair_geometry import evaluate
+    source = torch.eye(4, dtype=torch.float64)
+    teacher = source.clone()
+    teacher[2] = teacher[0]
+    actual = evaluate(torch.eye(4, dtype=torch.float64), torch.zeros(4),
+                      source, teacher, torch.arange(4), .2, block_size=2)
+    assert actual['all_mse'] == pytest.approx(1/6)
+    assert actual['tail_mse'] == pytest.approx(1.)
