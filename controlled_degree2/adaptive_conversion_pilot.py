@@ -179,7 +179,7 @@ def run_arm(args, arm, prepared, split, root):
                     hint = torch.stack([((student_hints[i]-teacher_hints[i]).square().flatten(1).mean(1)
                         /teacher_hints[i].square().flatten(1).mean(1).clamp_min(1e-6)).mean() for i in range(1, 5)]).mean()
                     tail = torch.stack(penalties).mean()
-                    loss = arc+kd+.3*hint+tail
+                    loss = arc+args.embedding_kd_weight*kd+.3*hint+tail
                     if not torch.isfinite(loss):
                         raise FloatingPointError('nonfinite loss')
                     loss.backward()
@@ -211,6 +211,7 @@ def run_arm(args, arm, prepared, split, root):
                     ready = gate.observe(report)
                     record = dict(step=step, site=index, alpha=alpha, phase_step=local_step,
                                   gate_ready=ready, arc=float(arc), train_kd=float(kd), tail=float(tail),
+                                  gate_baseline=baseline,
                                   probe=report if finite else dict(nonfinite=report['nonfinite'], invalid_metrics=True))
                     records.append(record); print(arm, json.dumps(record), flush=True)
                     write(root/f'{arm}_progress.json', records)
@@ -235,6 +236,8 @@ def run_arm(args, arm, prepared, split, root):
                     pure_quadratic=False, diagnostic_only=True, config=vars(args),
                     teacher_sha256=digest(args.teacher)), root/f'{arm}_diagnostic.pt')
     report = dict(arm=arm, status=status, converted_sites=converted, steps=step,
+                  accepted_sites=converted, fully_quadratic_sites=sum(q.alpha == 1 for q in sites),
+                  alphas=[q.alpha for q in sites],
                   pure_quadratic=False, ijbc_evaluated=False, final_probe=final,
                   profiles=profiles, records=records)
     write(root/f'{arm}_result.json', report)
@@ -256,7 +259,10 @@ def main():
     p.add_argument('--max-phase-steps', type=int, default=300)
     p.add_argument('--check-every', type=int, default=25)
     p.add_argument('--seed', type=int, default=20260928)
+    p.add_argument('--embedding-kd-weight', type=float, default=1.)
     args = p.parse_args()
+    if not np.isfinite(args.embedding_kd_weight) or args.embedding_kd_weight <= 0:
+        p.error('embedding KD weight must be positive and finite')
     if not 1 <= args.sites <= 24 or args.max_phase_steps < args.min_phase_steps:
         p.error('pilot requires 1..24 sites and max phase steps >= min')
     if min(args.batch_size, args.calibration_images, args.gate_images, args.min_phase_steps, args.check_every) <= 0:

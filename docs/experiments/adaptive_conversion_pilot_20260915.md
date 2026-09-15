@@ -66,3 +66,23 @@ an integration smoke, not evidence of an accuracy advantage.
 Before the longer pilot, deterministic gate images are cached in CPU memory
 to avoid restarting RecordIO workers at each check. No image or probe arithmetic
 changes. Added an export rejection for incomplete hybrids; 22 CPU tests pass.
+
+## First bounded pilot result and next controlled hypothesis
+
+Job 387411 (recipe 3dd1350) completed in 4m31s. At the same stem-alpha=1,
+400-update point, fixed KD=.02002189 and adaptive KD=.02017700; both are
+finite. Adaptive does not pass the .02 KD gate, and extending to 600 updates
+worsens KD to .02117412. Fixed advances without that gate and finishes two
+sites with KD=.02916465. These final depths are different and cannot establish
+an adaptive precision advantage. `converted_sites=0` in the original adaptive
+report counts gate-accepted sites: its stem is actually alpha=1.
+[Recorded comparison](adaptive_conversion_pilot_result_20260915.json).
+
+This does not yet test refitting after a changed prefix: adaptive stalled at
+the stem. Waiting longer alone did not restore teacher agreement. A second
+controlled pilot will change embedding KD weight from 1 to 5 in **both** arms,
+keeping all gates, LRs and seeds fixed, and allow up to eight sites so a
+successful stem can test refitting deeper student distributions. Maximum
+phase updates stay 300; do not loosen the .02 gate after seeing results. This
+is a new loss-weight hypothesis, not a claimed improvement. It remains one
+H200 / 45 minutes, MS1MV3-only, without IJB-C or an independent accuracy claim.

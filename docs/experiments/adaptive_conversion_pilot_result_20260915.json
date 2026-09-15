@@ -1,0 +1,141 @@
+{
+  "job": 387411,
+  "elapsed": "00:04:31",
+  "config": {
+    "config": {
+      "output": "work_dirs/adaptive_conversion_pilot_20260915",
+      "teacher": "work_dirs/ms1mv3_r50/model.pt",
+      "prepared_root": "work_dirs/channelwise_ijbc96_20260914",
+      "dataset_root": "ms1m-retinaface-t1",
+      "sites": 2,
+      "batch_size": 64,
+      "workers": 4,
+      "calibration_images": 2048,
+      "gate_images": 512,
+      "min_phase_steps": 100,
+      "max_phase_steps": 300,
+      "check_every": 25,
+      "seed": 20260928
+    },
+    "code_commit": "3dd1350f24497b4292275651547464fa5cd2f449",
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "prepared_sha256": "e376e9b285d6a45fd8a1e7fe7a4b02882b0c54d9779ac70c0c1103516e331d68",
+    "split_sha256": "455e94feb2e8470192035c3295ff614da04085bb512c63985b4c5e5ad947718c",
+    "uses_ijbc_images": false,
+    "uses_ijbc_pair_labels": false,
+    "comparison": "fixed teacher fit/time schedule versus refreshed student fit/consecutive quality gates"
+  },
+  "comparison": [
+    {
+      "arm": "fixed",
+      "status": "pilot_completed",
+      "converted_sites": 2,
+      "steps": 800,
+      "pure_quadratic": false,
+      "ijbc_evaluated": false,
+      "final_probe": {
+        "kd": 0.029164646053686738,
+        "max_ratio": 3.0734739303588867,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    },
+    {
+      "arm": "adaptive",
+      "status": "gate_stalled",
+      "converted_sites": 0,
+      "steps": 600,
+      "pure_quadratic": false,
+      "ijbc_evaluated": false,
+      "final_probe": {
+        "kd": 0.021174115128815174,
+        "max_ratio": 1.7816601991653442,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    }
+  ],
+  "same_site_comparison": [
+    {
+      "arm": "fixed",
+      "step": 400,
+      "site": 0,
+      "alpha": 1.0,
+      "phase_step": 100,
+      "gate_ready": false,
+      "arc": 9.536877632141113,
+      "train_kd": 0.040238406509160995,
+      "tail": 0.0015486213378608227,
+      "probe": {
+        "kd": 0.020021886564791203,
+        "max_ratio": 1.7307666540145874,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    },
+    {
+      "arm": "adaptive",
+      "step": 400,
+      "site": 0,
+      "alpha": 1.0,
+      "phase_step": 100,
+      "gate_ready": false,
+      "arc": 9.533851623535156,
+      "train_kd": 0.04018206149339676,
+      "tail": 0.0015651165740564466,
+      "probe": {
+        "kd": 0.020176998572424054,
+        "max_ratio": 1.7337452173233032,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    },
+    {
+      "arm": "adaptive",
+      "step": 500,
+      "site": 0,
+      "alpha": 1.0,
+      "phase_step": 200,
+      "gate_ready": false,
+      "arc": 8.252532005310059,
+      "train_kd": 0.03221607208251953,
+      "tail": 0.0017682753968983889,
+      "probe": {
+        "kd": 0.020407871808856726,
+        "max_ratio": 1.7699776887893677,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    },
+    {
+      "arm": "adaptive",
+      "step": 600,
+      "site": 0,
+      "alpha": 1.0,
+      "phase_step": 300,
+      "gate_ready": false,
+      "arc": 9.39842414855957,
+      "train_kd": 0.03881239891052246,
+      "tail": 0.0016143826069310308,
+      "probe": {
+        "kd": 0.021174115128815174,
+        "max_ratio": 1.7816601991653442,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    }
+  ],
+  "artifact_sha256": {
+    "work_dirs/adaptive_conversion_pilot_20260915/fixed_result.json": "0e59616c11fcfea2dd61cdd7fcdedd4870ea3e81621461c8b1f2b41624d8d595",
+    "work_dirs/adaptive_conversion_pilot_20260915/adaptive_result.json": "aa47519ea69c1dbc7df0e7f11a6099eb435c9ea4e9431098645a2aa4529c7cd3",
+    "work_dirs/adaptive_conversion_pilot_20260915/fixed_diagnostic.pt": "2c5d01294c95c9b31f4f28f6b82f5bd328e461b7366b1e2cb9a6a709fe1cf960",
+    "work_dirs/adaptive_conversion_pilot_20260915/adaptive_diagnostic.pt": "18079021bf45a3aff1b5d246a0844a8b115aa7e95d57f50af77976a4a040731e"
+  },
+  "interpretation": "No evidence of advantage in this pilot. Adaptive stopped on KD, not nonfinite. converted_sites counts accepted sites; the stalled adaptive checkpoint has stem alpha=1 but has not passed its gate. Different-depth final metrics must not be compared as an accuracy improvement."
+}
