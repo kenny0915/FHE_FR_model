@@ -1,0 +1,147 @@
+{
+  "cpu_tests_passed": 40,
+  "initial_smoke_job": "388762",
+  "real_batch_smoke_job": "388784",
+  "real_batch_smoke_state": "COMPLETED",
+  "elapsed": "00:04:25",
+  "arms": {
+    "A": {
+      "completed": {
+        "arm": "A",
+        "steps": 2,
+        "epochs": 1,
+        "smoke": true,
+        "finite_updates": true
+      },
+      "microbatch": 128,
+      "global_batch": 2048,
+      "world_size": 4,
+      "checkpoint_sha256": "af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f",
+      "trend": [
+        {
+          "epoch": 0,
+          "step": 0,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        },
+        {
+          "epoch": 1,
+          "step": 2,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        }
+      ]
+    },
+    "B": {
+      "completed": {
+        "arm": "B",
+        "steps": 2,
+        "epochs": 1,
+        "smoke": true,
+        "finite_updates": true
+      },
+      "microbatch": 128,
+      "global_batch": 2048,
+      "world_size": 4,
+      "checkpoint_sha256": "af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f",
+      "trend": [
+        {
+          "epoch": 0,
+          "step": 0,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        },
+        {
+          "epoch": 1,
+          "step": 2,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        }
+      ]
+    },
+    "C": {
+      "completed": {
+        "arm": "C",
+        "steps": 2,
+        "epochs": 1,
+        "smoke": true,
+        "finite_updates": true
+      },
+      "microbatch": 128,
+      "global_batch": 2048,
+      "world_size": 4,
+      "checkpoint_sha256": "af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f",
+      "trend": [
+        {
+          "epoch": 0,
+          "step": 0,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        },
+        {
+          "epoch": 1,
+          "step": 2,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        }
+      ]
+    },
+    "D": {
+      "completed": {
+        "arm": "D",
+        "steps": 2,
+        "epochs": 1,
+        "smoke": true,
+        "finite_updates": true
+      },
+      "microbatch": 128,
+      "global_batch": 2048,
+      "world_size": 4,
+      "checkpoint_sha256": "af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f",
+      "trend": [
+        {
+          "epoch": 0,
+          "step": 0,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        },
+        {
+          "epoch": 1,
+          "step": 2,
+          "lfw": null,
+          "nonfinite_rows": 0,
+          "nonfinite_values": 0,
+          "baseline_tail_nonfinite_rows": null
+        }
+      ]
+    }
+  },
+  "forced_prefix_routing": {
+    "finite_gradients": true,
+    "optimizer_update": false,
+    "cosine": 0.0,
+    "hint": 0.0,
+    "range": 0.0,
+    "causal": 0.0,
+    "safe_rows": 0,
+    "repair_rows": 128,
+    "prefix": 0.0,
+    "bound": 0.0,
+    "loss": 0.0
+  },
+  "limitations": "Two-update execution smoke, not convergence evidence. Forced prefix smoke exercised all-prefix graph without optimizer update; positive repair gradients are separately tested on CPU. No full IJBC run during smoke."
+}
