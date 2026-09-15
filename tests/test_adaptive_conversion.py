@@ -37,3 +37,18 @@ def test_tail_penalty_pushes_extremes_towards_range_and_rejects_overflow():
     for value in (float('inf'), float('nan'), 33.):
         with pytest.raises(FloatingPointError):
             tail_penalty(torch.full((1, 1, 1, 1), value), torch.ones(1))
+
+
+def test_export_refuses_hybrid_but_accepts_completed_conversion():
+    import pytest
+    from controlled_degree2.polynomial_export import export_graph
+    q = ConversionQuadratic(channels=1, coeffs=torch.tensor([[.1, .6, .2]]))
+    model = torch.nn.Sequential(q).eval()
+    q.alpha = .75
+    with pytest.raises(ValueError, match='incompletely converted'):
+        export_graph(model, expected_sites=1, coefficient_mode='channelwise')
+    q.alpha = 1.
+    graph, certificate = export_graph(model, expected_sites=1, coefficient_mode='channelwise')
+    x = torch.tensor([[[[-3., 2.]]]])
+    torch.testing.assert_close(graph(x), model(x))
+    assert certificate['pure_polynomial']

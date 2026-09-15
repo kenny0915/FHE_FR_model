@@ -11,6 +11,8 @@ from controlled_degree2.model import DirectQuadratic
 
 
 class ConversionQuadratic(DirectQuadratic):
+    requires_complete_conversion = True
+
     def forward(self, x):
         # Unlike the legacy training-only blend, eval probes must evaluate
         # exactly the current hybrid, including unopened PReLU suffixes.

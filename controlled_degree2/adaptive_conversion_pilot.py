@@ -63,7 +63,7 @@ def refit(args, model, site, rows, labels):
 
 
 @torch.no_grad()
-def probe(args, model, teacher, sites, rows, labels, current):
+def probe(args, model, teacher, sites, rows, labels, current, cached_images=None):
     audit = FiniteAudit(model)
     peak = 0.
     def observe(module, inputs):
@@ -73,7 +73,9 @@ def probe(args, model, teacher, sites, rows, labels, current):
     handles = [q.register_forward_pre_hook(observe) for q in sites[:current+1]]
     total, count = 0., 0
     try:
-        for images, _, _ in batches(args, rows, labels):
+        image_batches = (cached_images if cached_images is not None else
+                         (images for images, _, _ in batches(args, rows, labels)))
+        for images in image_batches:
             images = images.cuda()
             images = torch.cat((images, images.flip(-1)))
             output, target = model(images), teacher(images)
@@ -121,6 +123,9 @@ def run_arm(args, arm, prepared, split, root):
     rng = np.random.default_rng(args.seed)
     calibration_rows = rng.permutation(train_rows)[:args.calibration_images]
     gate_rows = rng.permutation(split['dev'])[:args.gate_images]
+    # Gate images are deterministic. Reuse their CPU tensors rather than
+    # launching RecordIO workers at every check; this does not change probes.
+    gate_images = [images for images, _, _ in batches(args, gate_rows, labels)]
     # Fixed sequence shared by both arms, regardless of conversion speed.
     sample_rows = rng.choice(train_rows, args.sites*4*args.max_phase_steps*args.batch_size)
     iterator = iter(batches(args, sample_rows, labels, deterministic=False))
@@ -138,7 +143,7 @@ def run_arm(args, arm, prepared, split, root):
         if arm == 'adaptive':
             profiles.append(refit(args, model, sites[index], calibration_rows, labels))
             optimizer.state.pop(sites[index].coeffs, None)
-        baseline = probe(args, model, teacher, sites, gate_rows, labels, index)
+        baseline = probe(args, model, teacher, sites, gate_rows, labels, index, gate_images)
         if baseline['nonfinite'] or not np.isfinite([baseline['kd'], baseline['max_ratio']]).all():
             status = 'unsafe_baseline'; break
         for alpha in (.25, .5, .75, 1.):
@@ -201,7 +206,7 @@ def run_arm(args, arm, prepared, split, root):
                 step += 1
                 student_hints.clear(); teacher_hints.clear()
                 if local_step % args.check_every == 0:
-                    report = probe(args, model, teacher, sites, gate_rows, labels, index)
+                    report = probe(args, model, teacher, sites, gate_rows, labels, index, gate_images)
                     finite = np.isfinite([report['kd'], report['max_ratio']]).all()
                     ready = gate.observe(report)
                     record = dict(step=step, site=index, alpha=alpha, phase_step=local_step,
@@ -221,7 +226,7 @@ def run_arm(args, arm, prepared, split, root):
         if status != 'pilot_completed': break
         converted += 1
     for hook in hooks: hook.remove()
-    final = probe(args, model, teacher, sites, gate_rows, labels, index)
+    final = probe(args, model, teacher, sites, gate_rows, labels, index, gate_images)
     for key in ('kd', 'max_ratio'):
         if not np.isfinite(final[key]):
             final[key] = None

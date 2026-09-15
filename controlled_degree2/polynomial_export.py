@@ -48,6 +48,8 @@ def export_graph(model, expected_sites=25, coefficient_mode='shared'):
     if coefficient_mode not in ('shared', 'channelwise'):
         raise ValueError('unknown coefficient mode')
     sites = [m for m in model.modules() if isinstance(m, DirectQuadratic)]
+    if any(getattr(m, 'requires_complete_conversion', False) and m.alpha != 1. for m in sites):
+        raise ValueError('cannot export an incompletely converted hybrid as a polynomial')
     if len(sites) != expected_sites or any(
             m.clip_eval or m.coeffs.ndim != 2 or m.coeffs.shape[1] != 3
             or (coefficient_mode == 'shared' and not isinstance(m, SharedQuadratic))

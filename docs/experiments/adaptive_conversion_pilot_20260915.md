@@ -54,3 +54,15 @@ syntax and whitespace checks pass. Run a tiny GPU integration smoke first,
 then the bounded paired pilot. Full IJB-C accuracy cannot be inferred from
 this pilot; successful prefix conversion would justify a separately recorded
 full-network experiment and final independent evaluation.
+
+## GPU integration smoke
+
+Job 387373 completed in 5m43s. Both arms converted the stem through all four
+blend values in 8 updates and audited all 128 original/flip probe rows with
+zero nonfinite values. Final KD fixed=.01986130, adaptive=.01992518; this is
+an integration smoke, not evidence of an accuracy advantage.
+[Smoke record](adaptive_conversion_smoke_20260915.json).
+
+Before the longer pilot, deterministic gate images are cached in CPU memory
+to avoid restarting RecordIO workers at each check. No image or probe arithmetic
+changes. Added an export rejection for incomplete hybrids; 22 CPU tests pass.
