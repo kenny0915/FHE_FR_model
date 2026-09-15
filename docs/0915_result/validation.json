@@ -1,0 +1,43 @@
+{
+  "checks": {
+    "all_readme_links_exist": true,
+    "all_png_decode": true,
+    "score_roc_matches_original_csv": true,
+    "no_ignored_student_in_metrics": true,
+    "two_models_25_sites_5888_nonzero_quadratics_each": true,
+    "calibrated_checkpoint_hash_matches_acceptance": true,
+    "calibrated_full_finite_graph_acceptance": true,
+    "head_only_zero_nonfinite_log_and_empty_manifest": true
+  },
+  "png_files": [
+    "channel_bands_ijbc_calibrated.png",
+    "channel_bands_no_ijbc_head.png",
+    "quadratics_ijbc_calibrated.png",
+    "quadratics_no_ijbc_head.png",
+    "tar_vs_far_curve.png",
+    "tar_vs_far_nearest.png",
+    "tar_vs_far_strict.png",
+    "training_flow.png"
+  ],
+  "head_finite_log": "work_dirs/controlled_degree2_accuracy_recovery_head_only_v3_20260908/ijbc_epoch1/slurm-357754.out",
+  "head_log_sha256": "f602b0838428bf03d6dacbc86c65fe02f2c37a3d976a4f822081194f86a7c15b",
+  "head_manifest_sha256": "7f5abf6be32c7f530fd03649b6d9d1b660227c31b6bf08e5e79f3802b634d2c1",
+  "head_finite_scope": "augmented embeddings; no saved all-module audit",
+  "calibrated_acceptance": {
+    "target_met": true,
+    "checks": {
+      "tar": true,
+      "requested_roc_point": true,
+      "full_ijbc": true,
+      "finite": true,
+      "graph": true,
+      "checkpoint": true
+    },
+    "tar_percent": 96.06279081658741,
+    "actual_far": 9.94952852279171e-05,
+    "requested_far": 0.0001,
+    "checkpoint_sha256": "64e3e65555638cbe43d93f104a9d8e913346bab070e4538cebf950479fb3fddf",
+    "interpretation": "IJB-C calibration-set performance; not untouched test accuracy"
+  },
+  "execution": "CPU score ROC recomputation and checkpoint inspection only; no training or image inference"
+}

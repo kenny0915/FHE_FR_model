@@ -1,0 +1,1156 @@
+[
+  {
+    "tar_csv": "work_dirs/channelwise_template_population_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.12,93.82,95.96,97.36,98.35,99.04",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_template_population_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/quadT12c_ijbc/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,81.21,92.82,95.62,97.10,98.13,98.84",
+    "logs": [
+      {
+        "path": "work_dirs/quadT12c_ijbc/slurm-372445.out",
+        "nonfinite_augmented_embedding_rows": [
+          193
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_prelu_verified_20260915/ijbc_full/original_prelu/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.39,94.86,96.56,97.72,98.55,99.11",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_prelu_verified_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/ms1mv3_r50_layerwise_poly_group4_d2/ijbc_result/ms1mv3_r50_layerwise_poly_group4_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,75.66,90.08,94.51,96.55,97.97,98.77",
+    "logs": [],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_pair_geometry_8000_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.09,93.66,95.87,97.31,98.35,99.04",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_pair_geometry_8000_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/shared_d2_A_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,4.22,7.88,14.16,25.65,43.08,67.99",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/shared_d2_A_20260913/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 10,
+        "nonfinite_values": 146246796,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_template_tail01_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,89.92,93.78,95.84,97.38,98.37,99.04",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_template_tail01_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/shared_d2_D_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,71.54,91.11,96.06,97.56,98.51,99.10",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/shared_d2_D_20260913/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbc_focus1_zero/r50_full_poly_focus1_zero/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,85.86,92.06,94.87,96.68,97.93,98.86",
+    "logs": [
+      {
+        "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbb-339058.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/ijbc_controlled/result/r50_controlled_d2_tail/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,84.50,92.75,95.64,97.14,98.32,99.00",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/ijbc_controlled/slurm-355702.out",
+        "nonfinite_augmented_embedding_rows": [
+          8
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_direct_degree2/ijbc_polish_unclipped/controlled_degree2_polish_unclipped/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,85.86,92.98,95.68,97.10,98.24,98.96",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_direct_degree2/ijbc_polish_unclipped/ijbc-348567.out",
+        "nonfinite_augmented_embedding_rows": [
+          14
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_exact_head_20260915/mse0/ijbc_full/exact_head_mse0/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,87.52,93.41,95.80,97.39,98.39,99.02",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_exact_head_20260915/mse0/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_exact_head_20260915/mse1/ijbc_full/exact_head_mse1/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,86.75,93.22,95.70,97.35,98.38,99.05",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_exact_head_20260915/mse1/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_template_anchor03_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,89.25,93.74,95.95,97.43,98.32,99.03",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_template_anchor03_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_template_tail02_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.16,93.74,95.96,97.40,98.35,99.03",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_template_tail02_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_accuracy_recovery_ms1mv3_v1_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,76.69,87.74,93.38,96.12,97.69,98.89",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_accuracy_recovery_ms1mv3_v1_20260908/ijbc_epoch1/slurm-357611.out",
+        "nonfinite_augmented_embedding_rows": [
+          16
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_source_causal_v16_20260909/candidate_s1_0965/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,49.76,74.44,90.58,95.51,97.75,98.92",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_source_causal_v16_20260909/candidate_s1_0965/ijbc/slurm-362550.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      },
+      {
+        "path": "work_dirs/controlled_degree2_tail_source_causal_v16_20260909/candidate_s1_0965/ijbc/slurm-362546.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_template_geometry_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.14,93.88,95.89,97.35,98.41,99.05",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_template_geometry_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_pair_geometry_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.24,93.83,95.89,97.34,98.37,99.04",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_pair_geometry_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_final_manual/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,84.82,92.98,95.76,97.17,98.33,99.04",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_final_manual/slurm-358333.out",
+        "nonfinite_augmented_embedding_rows": [
+          12
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch2/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,85.56,93.01,95.78,97.19,98.35,99.03",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch2/slurm-358226.out",
+        "nonfinite_augmented_embedding_rows": [
+          13
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,85.52,93.06,95.74,97.19,98.31,99.01",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch1/slurm-357998.out",
+        "nonfinite_augmented_embedding_rows": [
+          9
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_template_population_expanded_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,89.01,93.78,95.97,97.43,98.32,99.02",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_template_population_expanded_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/unclipped_round_20260913/adaptive_prefix/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,0.18,47.87,71.02,74.78,76.32,77.56",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/unclipped_round_20260913/adaptive_prefix/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 337466,
+        "nonfinite_values": 1976240019266,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/unclipped_round_20260913/adaptive_bn/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,25.43,37.80,55.51,74.90,88.33,95.22",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/unclipped_round_20260913/adaptive_bn/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/unclipped_round_20260913/small_curvature/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,8.32,16.39,26.76,40.85,59.59,80.96",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/unclipped_round_20260913/small_curvature/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/unclipped_round_20260913/adaptive_bn_moderate/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,5.55,9.50,16.75,28.36,45.97,69.71",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/unclipped_round_20260913/adaptive_bn_moderate/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 4,
+        "nonfinite_values": 17878542,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/unclipped_round_20260913/adaptive_bn_free_retry/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,8.38,13.33,21.64,34.85,52.32,75.47",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/unclipped_round_20260913/adaptive_bn_free_retry/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 14,
+        "nonfinite_values": 65850110,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/unclipped_round_20260913/projected/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,0.22,1.87,18.91,43.91,57.78,67.35",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/unclipped_round_20260913/projected/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 4287,
+        "nonfinite_values": 1290206600,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/unclipped_round_20260913/gradual/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,0.05,0.17,2.76,74.89,85.64,87.84",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/unclipped_round_20260913/gradual/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 25541,
+        "nonfinite_values": 30625358238,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_accuracy_recovery_head_only_v3_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,80.47,88.70,93.42,95.97,97.64,98.81",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_accuracy_recovery_head_only_v3_20260908/ijbc_epoch1/slurm-357754.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_source_channel_v17_20260909/l10_k2_f09/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,64.72,84.77,93.56,96.26,98.02,98.97",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_source_channel_v17_20260909/l10_k2_f09/ijbc/slurm-362851.out",
+        "nonfinite_augmented_embedding_rows": [
+          4
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/ijbc_controlled/result/r50_controlled_d2_lam4/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,78.63,87.76,92.79,95.65,97.48,98.83",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/ijbc_controlled/slurm-355788.out",
+        "nonfinite_augmented_embedding_rows": [
+          1
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/ijbc_lam8/result/r50_controlled_d2_lam8/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,0.00,0.00,0.00,0.00,0.00,0.00",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/ijbc_lam8/slurm-356133.out",
+        "nonfinite_augmented_embedding_rows": [
+          938750
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_linear_head_20260915/ijbc_full/linear_head/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,89.10,93.39,95.78,97.32,98.39,98.99",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_linear_head_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,83.11,91.89,95.18,96.84,98.22,98.99",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/ijbc_final/slurm-358939.out",
+        "nonfinite_augmented_embedding_rows": [
+          11
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_layer3x2_20260908/ijbc/result/r50_controlled_d2_l3x2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,79.31,88.70,93.04,95.72,97.57,98.80",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_layer3x2_20260908/ijbc/slurm-356239.out",
+        "nonfinite_augmented_embedding_rows": [
+          13
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/shared_d2_C_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,0.00,0.00,0.00,0.00,0.00,0.00",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/shared_d2_C_20260913/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 938647,
+        "nonfinite_values": 27439355249656,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_source_channel_v18_20260909/c093_l10_k1_f085/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,80.27,90.83,94.89,96.71,98.19,98.96",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_source_channel_v18_20260909/c093_l10_k1_f085/ijbc/slurm-363184.out",
+        "nonfinite_augmented_embedding_rows": [
+          4
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/shared_d2_B_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,4.78,7.99,15.68,27.65,46.35,71.37",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/shared_d2_B_20260913/final_ijbc/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_1000_full/channelwise_calibration1000/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.04,93.77,95.64,97.04,98.01,98.68",
+    "logs": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration1000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          7931
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_lr1e4_3000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          110
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head2000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          104
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          9712
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual6_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head_random_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_1000_full/finite_audit.json",
+        "embedding_nonfinite_rows": 7931,
+        "nonfinite_values": 20508091907,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head_random_full/channelwise_head_random/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,86.93,93.15,95.77,97.37,98.39,99.04",
+    "logs": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration1000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          7931
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_lr1e4_3000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          110
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head2000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          104
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          9712
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual6_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head_random_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head_random_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head2000_full/channelwise_head2000/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,89.36,93.74,95.91,97.40,98.41,99.03",
+    "logs": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration1000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          7931
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_lr1e4_3000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          110
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head2000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          104
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          9712
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual6_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head_random_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head2000_full/finite_audit.json",
+        "embedding_nonfinite_rows": 104,
+        "nonfinite_values": 249055795,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000_full/channelwise_calibration_lr1e4_3000/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,88.73,93.36,95.71,97.23,98.35,99.00",
+    "logs": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration1000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          7931
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_lr1e4_3000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          110
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head2000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          104
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          9712
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual6_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head_random_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000_full/finite_audit.json",
+        "embedding_nonfinite_rows": 110,
+        "nonfinite_values": 271960897,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/channelwise_epoch14/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,90.26,93.57,95.54,96.96,97.92,98.57",
+    "logs": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration1000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          7931
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_lr1e4_3000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          110
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head2000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          104
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          9712
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual6_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head_random_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/finite_audit.json",
+        "embedding_nonfinite_rows": 9712,
+        "nonfinite_values": 50205765744,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6_full/channelwise_residual6/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,87.49,93.56,95.78,97.37,98.42,99.05",
+    "logs": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration1000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          7931
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_lr1e4_3000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          110
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head2000_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          104
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/epoch14_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          9712
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_residual6_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      },
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/calibration_head_random_eval_step.out",
+        "nonfinite_augmented_embedding_rows": [
+          0
+        ]
+      }
+    ],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/channelwise_template_supervised01_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,89.23,93.85,96.06,97.49,98.38,99.06",
+    "logs": [],
+    "finite_audits": [
+      {
+        "path": "work_dirs/channelwise_template_supervised01_20260915/ijbc_full/finite_audit.json",
+        "embedding_nonfinite_rows": 0,
+        "nonfinite_values": 0,
+        "keys": [
+          "nonfinite_values",
+          "embedding_nonfinite_rows",
+          "batches",
+          "source_images",
+          "augmented_embeddings",
+          "target",
+          "audited_input_rows",
+          "audited_output_rows",
+          "scope"
+        ]
+      }
+    ]
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/ijbc_best/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,77.72,87.14,92.76,95.81,97.61,98.79",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/ijbc_best/slurm-357472.out",
+        "nonfinite_augmented_embedding_rows": [
+          1
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,79.02,87.71,93.19,95.96,97.70,98.80",
+    "logs": [],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_bn_contract_v14_20260908/candidate_093/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,80.53,91.00,94.94,96.74,98.20,98.97",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_bn_contract_v14_20260908/candidate_093/ijbc/slurm-359653.out",
+        "nonfinite_augmented_embedding_rows": [
+          4
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ms1mv3_focus1/ijbc_ms1mv3_only_zero/r50_full_poly_ms1mv3_only_zero/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,85.57,92.03,94.85,96.63,97.90,98.83",
+    "logs": [],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,84.23,92.67,95.53,97.11,98.31,99.06",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_final/slurm-358338.out",
+        "nonfinite_augmented_embedding_rows": [
+          4
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,83.58,92.51,95.49,97.07,98.30,99.04",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_epoch1/slurm-358424.out",
+        "nonfinite_augmented_embedding_rows": [
+          4
+        ]
+      }
+    ],
+    "finite_audits": []
+  },
+  {
+    "tar_csv": "work_dirs/controlled_degree2_tail_ms1mv3_adversarial_v6_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+    "csv": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\nijbc-IJBC,82.59,91.63,95.05,96.85,98.15,98.96",
+    "logs": [
+      {
+        "path": "work_dirs/controlled_degree2_tail_ms1mv3_adversarial_v6_20260908/ijbc_final/slurm-358595.out",
+        "nonfinite_augmented_embedding_rows": [
+          8
+        ]
+      }
+    ],
+    "finite_audits": []
+  }
+]
