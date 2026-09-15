@@ -86,3 +86,43 @@ successful stem can test refitting deeper student distributions. Maximum
 phase updates stay 300; do not loosen the .02 gate after seeing results. This
 is a new loss-weight hypothesis, not a claimed improvement. It remains one
 H200 / 45 minutes, MS1MV3-only, without IJB-C or an independent accuracy claim.
+
+## Stronger-KD paired result: no demonstrated adaptive advantage
+
+Job **387435**, recipe **8265083**, completed in **11m58s**. Both arms used
+embedding KD weight5. Fixed completed five sites and stopped during site6
+alpha=.25, after 2,033 successful updates. Adaptive completed four sites and
+stopped during site5 alpha=1, after 1,917 updates; rollback retains alpha=.75
+at that site. Both failures are `activation escaped finite conversion guard`.
+
+The guard rejects either a nonfinite input/radius or a finite value >32R.
+Its original generic message does not preserve the offending layer, exact
+ratio, or input. Thus the evidence does **not** prove a measured Inf or locate
+the first causal layer; it establishes that the predefined safety guard
+stopped training. Both restored checkpoints' 1,024-row clean/flip probes
+remain finite, highlighting the limited coverage of those probes relative
+to augmented/replayed training batches. They are hybrid diagnostics, not
+full-quadratic deployment candidates.
+
+At matched four-site / 1,600-update endpoints, fixed KD is .03706870 and
+adaptive .03855590. The adaptive arm has no demonstrated embedding-quality
+advantage. Dynamic fit intervals also mean cross-arm input/radius ratios
+are not directly comparable absolute-activation measurements. Stronger KD
+helped the stem meet the quality gate in both arms but did not prevent later
+safety stops. All four matched prefix comparisons and hashes are recorded in
+[the verified result](adaptive_conversion_kd5_result_20260915.json).
+
+Stop this pilot here; do not loosen gates or launch a long full-network run
+on this evidence. The experiment tests a partial proposed pipeline: student
+refitting, consecutive gates, shared ArcFace/KD/tail objectives and replay.
+It does not test automated finite-prefix repair after a safety stop, direct
+pair-loss preservation, a matched-compute ablation, multiple seeds, or an
+independent final accuracy evaluation. Therefore it cannot reject every
+possible adaptive method or establish generalized zero-nonfinite behavior.
+A future variant needs failure-localized capture and gate coverage aligned
+with the training augmentation distribution before another scale-up.
+
+Total GPU use for smoke + two paired pilots: one H200, 22m12s summed job
+runtime. Existing 96.06279% IJB-C calibration model is unchanged. No further
+GPU submission follows these results. Code validation: 22 CPU tests, Python
+compilation, shell syntax, whitespace and result JSON/hash checks pass.

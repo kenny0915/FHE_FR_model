@@ -1,0 +1,166 @@
+{
+  "job": 387435,
+  "elapsed": "00:11:58",
+  "config": {
+    "config": {
+      "output": "work_dirs/adaptive_conversion_kd5_20260915",
+      "teacher": "work_dirs/ms1mv3_r50/model.pt",
+      "prepared_root": "work_dirs/channelwise_ijbc96_20260914",
+      "dataset_root": "ms1m-retinaface-t1",
+      "sites": 8,
+      "batch_size": 64,
+      "workers": 4,
+      "calibration_images": 2048,
+      "gate_images": 512,
+      "min_phase_steps": 100,
+      "max_phase_steps": 300,
+      "check_every": 25,
+      "seed": 20260928,
+      "embedding_kd_weight": 5.0
+    },
+    "code_commit": "82650831df245b7a6a0574507c52e30562d26072",
+    "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "prepared_sha256": "e376e9b285d6a45fd8a1e7fe7a4b02882b0c54d9779ac70c0c1103516e331d68",
+    "split_sha256": "455e94feb2e8470192035c3295ff614da04085bb512c63985b4c5e5ad947718c",
+    "uses_ijbc_images": false,
+    "uses_ijbc_pair_labels": false,
+    "comparison": "fixed teacher fit/time schedule versus refreshed student fit/consecutive quality gates"
+  },
+  "comparison": [
+    {
+      "arm": "fixed",
+      "status": "stopped_on_failure",
+      "converted_sites": 5,
+      "steps": 2033,
+      "accepted_sites": 5,
+      "fully_quadratic_sites": 5,
+      "alphas": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "pure_quadratic": false,
+      "ijbc_evaluated": false,
+      "final_probe": {
+        "kd": 0.04885486280545592,
+        "max_ratio": 14.604914665222168,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    },
+    {
+      "arm": "adaptive",
+      "status": "stopped_on_failure",
+      "converted_sites": 4,
+      "steps": 1917,
+      "accepted_sites": 4,
+      "fully_quadratic_sites": 4,
+      "alphas": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.75,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "pure_quadratic": false,
+      "ijbc_evaluated": false,
+      "final_probe": {
+        "kd": 0.04489381751045585,
+        "max_ratio": 5.0442047119140625,
+        "nonfinite": 0,
+        "augmented_rows": 1024,
+        "audited_rows": 1024
+      }
+    }
+  ],
+  "last_records": {
+    "fixed": {
+      "step": 2033,
+      "site": 5,
+      "alpha": 0.25,
+      "failure": "activation escaped finite conversion guard"
+    },
+    "adaptive": {
+      "step": 1917,
+      "site": 4,
+      "alpha": 1.0,
+      "failure": "activation escaped finite conversion guard"
+    }
+  },
+  "matched_prefixes": [
+    {
+      "site": 0,
+      "successful_updates": 400,
+      "fixed_kd": 0.017314606113359332,
+      "adaptive_kd": 0.017209996934980154
+    },
+    {
+      "site": 1,
+      "successful_updates": 800,
+      "fixed_kd": 0.025907411240041256,
+      "adaptive_kd": 0.02681200858205557
+    },
+    {
+      "site": 2,
+      "successful_updates": 1200,
+      "fixed_kd": 0.032209964003413916,
+      "adaptive_kd": 0.0329161980189383
+    },
+    {
+      "site": 3,
+      "successful_updates": 1600,
+      "fixed_kd": 0.03706869622692466,
+      "adaptive_kd": 0.038555897772312164
+    }
+  ],
+  "artifact_sha256": {
+    "work_dirs/adaptive_conversion_kd5_20260915/fixed_result.json": "8b375b53678204a41539e34d0abe74c629d9fbd3b1a4486ca0170b67fe2b93fd",
+    "work_dirs/adaptive_conversion_kd5_20260915/adaptive_result.json": "7940f2ec027dda818b2acf8acd64ac1b9b584c84de60ac03c9e48e0d126f8540",
+    "work_dirs/adaptive_conversion_kd5_20260915/fixed_diagnostic.pt": "e45b61c40735bf552f0619c34da342a8976ff2a6d483c6fcacf6454dc1125751",
+    "work_dirs/adaptive_conversion_kd5_20260915/adaptive_diagnostic.pt": "d4be81aaff5665fbd385166d029b8cbfbc8d1bed53c624a4eeb35e63517f4e1a"
+  },
+  "interpretation": "Both arms stopped at the >32R or nonfinite training-input guard. No recorded probe nonfinite values; the generic failure message does not identify the offending layer, exact ratio, or distinguish a finite >32R value from Inf/NaN. No advantage for adaptive at matched prefixes. Different final depths are not comparable accuracy results. No IJB-C result and no 25-site model."
+}
