@@ -1,0 +1,61 @@
+{
+  "output": "/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915",
+  "code_commit": "b15e3e6f6f98eaceb9497d9054525f3d1923b146",
+  "code_snapshot": "/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/source",
+  "smoke_job": "388784",
+  "smoke_root": "work_dirs/polish_abcd_smoke_20260915/run2",
+  "smoke_state": "COMPLETED|0:0",
+  "epochs": 2,
+  "gpus_per_arm": 4,
+  "max_training_gpus": 16,
+  "checkpoint_sha256": "af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f",
+  "teacher_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+  "jobs": {
+    "baseline": {
+      "id": "388816",
+      "command": [
+        "sbatch",
+        "--parsable",
+        "--job-name=polish-abcd-baseline",
+        "--output=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/baseline-%A_%a.out",
+        "--error=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/baseline-%A_%a.err",
+        "--export=ALL,ABCD_OUTPUT=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915,ABCD_CODE_ROOT=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/source,ABCD_MODE=baseline",
+        "/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/source/controlled_degree2/polish_abcd_eval.slurm"
+      ],
+      "submission_stderr": ""
+    },
+    "train": {
+      "id": "388817",
+      "command": [
+        "sbatch",
+        "--parsable",
+        "--job-name=polish-abcd-train",
+        "--output=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/train-%A_%a.out",
+        "--error=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/train-%A_%a.err",
+        "--export=ALL,ABCD_OUTPUT=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915,ABCD_CODE_ROOT=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/source,ABCD_MODE=train",
+        "--array=0-3%4",
+        "--dependency=afterok:388816",
+        "--kill-on-invalid-dep=yes",
+        "/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/source/controlled_degree2/polish_abcd.slurm"
+      ],
+      "submission_stderr": ""
+    },
+    "eval": {
+      "id": "388818",
+      "command": [
+        "sbatch",
+        "--parsable",
+        "--job-name=polish-abcd-eval",
+        "--output=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/eval-%A_%a.out",
+        "--error=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/eval-%A_%a.err",
+        "--export=ALL,ABCD_OUTPUT=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915,ABCD_CODE_ROOT=/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/source,ABCD_MODE=eval",
+        "--array=0-3%4",
+        "--dependency=aftercorr:388817",
+        "--kill-on-invalid-dep=yes",
+        "/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/source/controlled_degree2/polish_abcd_eval.slurm"
+      ],
+      "submission_stderr": ""
+    }
+  },
+  "monitoring": false
+}
