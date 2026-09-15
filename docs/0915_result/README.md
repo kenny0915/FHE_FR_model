@@ -10,6 +10,8 @@
 
 這裡的「無 IJBC 校準」指這條可查證的訓練／微調鏈未拿 IJBC 圖片、標籤或 tail replay 做參數校準。初始區間沿用 run10 的 buffers，而 run10 歷史曾依 **IJB-B** escape 診斷調整區間；IJB-B 與 IJB-C 有樣本重疊。因此它也不適合稱為嚴格 IJB 完全隔離的測試。從歷史 IJBC 結果選出「目前最好」本身也涉及事後比較，並非預先固定的獨立驗證。
 
+補充：[PReLU → 全二次 → v7 的逐階段 non-finite／準確度變化](v7_lineage.md)，包含 v5 best／final 權重對應的更正。
+
 ## 1. TAR vs FAR 圖表
 
 TAR 是真實同人配對被接受的比例；FAR 是不同人配對被錯誤接受的比例。所有 TAR 單位為 %。

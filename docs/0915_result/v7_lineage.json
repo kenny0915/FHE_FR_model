@@ -1,0 +1,101 @@
+{
+  "rows": [
+    [
+      "PReLU teacher",
+      "Reference",
+      "--",
+      "--",
+      "0",
+      "96.56"
+    ],
+    [
+      "Progressive final",
+      "8",
+      "99.7000",
+      "--",
+      "--",
+      "--"
+    ],
+    [
+      "Polish final",
+      "3",
+      "99.7500",
+      "--",
+      "8",
+      "95.64*"
+    ],
+    [
+      "v4 best (= epoch1)",
+      "1 of 3",
+      "99.8000",
+      "--",
+      "9",
+      "95.74*"
+    ],
+    [
+      "v5 best (actual v7 source)",
+      "2",
+      "99.8000",
+      "6",
+      "Not completed",
+      "Not completed"
+    ],
+    [
+      "v7 final",
+      "1",
+      "99.7333",
+      "5",
+      "11",
+      "95.18*"
+    ]
+  ],
+  "polish": {
+    "tar": 95.64,
+    "nonfinite": 8,
+    "csv": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/ijbc_controlled/result/r50_controlled_d2_tail/ijbc_tar_at_far.csv",
+    "log": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/ijbc_controlled/slurm-355702.out"
+  },
+  "v4": {
+    "tar": 95.74,
+    "nonfinite": 9,
+    "csv": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "log": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch1/slurm-357998.out"
+  },
+  "v7": {
+    "tar": 95.18,
+    "nonfinite": 11,
+    "csv": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+    "log": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/ijbc_final/slurm-358939.out"
+  },
+  "v5_other_evaluations": {
+    "epoch1": {
+      "tar": 95.49,
+      "nonfinite": 4,
+      "csv": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+      "log": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_epoch1/slurm-358424.out"
+    },
+    "final": {
+      "tar": 95.53,
+      "nonfinite": 4,
+      "csv": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+      "log": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_final/slurm-358338.out"
+    }
+  },
+  "v5_ms": {
+    "nonfinite": 6,
+    "manifest": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/mine/manifest.json",
+    "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train/student_best.pt"
+  },
+  "v7_ms": {
+    "nonfinite": 5,
+    "manifest": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json",
+    "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt"
+  },
+  "notes": [
+    "IJBC nearest ROC TAR at requested FAR=1e-4; historical convention.",
+    "Nonfinite counts are augmented embedding rows, not scalar values.",
+    "v5 best evaluation job 358339 was cancelled; final and epoch1 differ from current best.",
+    "LFW final-stage numbers are from respective epoch logs, not best_canary metadata.",
+    "Checkpoint comparisons: v4 best equals epoch1; v5 best differs from final in 370 tensors and epoch1 in 449 tensors."
+  ]
+}
