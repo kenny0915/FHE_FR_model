@@ -1,0 +1,16 @@
+{
+  "job_id": "397290",
+  "state": "COMPLETED",
+  "exit_code": "0:0",
+  "elapsed": "00:10:12",
+  "source_images": 469375,
+  "augmented_rows": 938750,
+  "verification_pairs": 15658489,
+  "all_pair_scores_finite": true,
+  "min_pair_score": -0.273914204596568,
+  "max_pair_score": 0.9973987898210339,
+  "failure_manifest_consistent": true,
+  "calibration_manifest_unique_images": 1000,
+  "source_and_scaled_checkpoint_hashes_verified": true,
+  "tests_passed": 19
+}

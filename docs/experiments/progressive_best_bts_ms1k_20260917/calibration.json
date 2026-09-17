@@ -1,0 +1,93 @@
+{
+  "settings": {
+    "checkpoint": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_best.pt",
+    "output_dir": "work_dirs/progressive_best_bts_ms1k_20260917/scaled",
+    "dataset_root": "ms1m-retinaface-t1",
+    "images": 1000,
+    "seed": 42,
+    "batch_size": 64,
+    "target_absmax": 0.8,
+    "device": "cuda"
+  },
+  "provenance": {
+    "source": "/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_best.pt",
+    "source_sha256": "3b3298217fcc54a368b045f50d85e8e0d9c845f305e7f1212640838c160f6b39",
+    "stage_scales": [
+      0.18875518698808677,
+      0.2592094453179323,
+      0.06956599620400201,
+      0.40212774779961513
+    ],
+    "eval_only": true,
+    "calibration_dataset": "MS1MV3",
+    "calibration_images": 1000,
+    "seed": 42,
+    "sampling": "random without replacement, sorted for IO, original orientation only",
+    "image_manifest_sha256": "88a3ab30f3a9d520741f9227efeec0f76bc732e25433f4ba743017e20b88a12d",
+    "recordio_index_sha256": "59c7808ec53c7307d9f1a2d4ce7dcd9858229b805ba88bb3fe3fbd3102471e5b"
+  },
+  "before": {
+    "layer1.2": {
+      "min": -4.221677780151367,
+      "max": 4.2382941246032715
+    },
+    "layer2.3": {
+      "min": -3.0863072872161865,
+      "max": 2.2929232120513916
+    },
+    "layer3.3": {
+      "min": -3.1243746280670166,
+      "max": 3.054206609725952
+    },
+    "layer3.7": {
+      "min": -3.07456636428833,
+      "max": 5.607341289520264
+    },
+    "layer3.11": {
+      "min": -3.14945125579834,
+      "max": 11.499871253967285
+    },
+    "layer4.1": {
+      "min": -1.2182135581970215,
+      "max": 1.989417552947998
+    }
+  },
+  "after": {
+    "layer1.2": {
+      "min": -0.7968636155128479,
+      "max": 0.800000011920929
+    },
+    "layer2.3": {
+      "min": -0.7999992370605469,
+      "max": 0.5943474173545837
+    },
+    "layer3.3": {
+      "min": -0.21735036373138428,
+      "max": 0.2124689519405365
+    },
+    "layer3.7": {
+      "min": -0.21388539671897888,
+      "max": 0.3900802731513977
+    },
+    "layer3.11": {
+      "min": -0.21909482777118683,
+      "max": 0.8000001907348633
+    },
+    "layer4.1": {
+      "min": -0.4898766875267029,
+      "max": 0.7999994158744812
+    }
+  },
+  "equivalence": {
+    "images": 1000,
+    "embedding_max_abs_error": 3.3855438232421875e-05,
+    "embedding_relative_l2_max": 8.691953553352505e-06,
+    "embedding_cosine_min": 0.9999999999628982
+  },
+  "equivalence_passed": true,
+  "approximation_target": "per-channel PReLU; q_new(s*x)=s*q_old(x)",
+  "approximation_interval": "per-channel [-s*lam_fit, s*lam_fit]",
+  "degree": 2,
+  "activation_multiplicative_depth": 1,
+  "checkpoint_sha256": "f6b8fddafc8d8cfca5127d1732781b6eeaa7d9e7727524d5123e002bd1165dc1"
+}

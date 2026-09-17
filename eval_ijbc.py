@@ -100,7 +100,23 @@ parser.add_argument(
 parser.add_argument('--polynomial-export', default=None, help='export and evaluate an audited add/multiply quadratic backbone; JSON certificate path')
 parser.add_argument('--polynomial-coefficient-mode', choices=('shared', 'channelwise'), default='shared')
 parser.add_argument('--finite-audit', default=None, help='JSON audit of all module inputs/outputs; single visible GPU required')
+parser.add_argument('--image-workers', type=int, default=0, help='bounded parallel image decoding/alignment, preserving metadata order')
+parser.add_argument('--bts-failure-report', default=None, help='prefix for six-boundary failure JSONL/summary; zero both source views if either fails')
 args = parser.parse_args()
+if args.image_workers < 0:
+    parser.error('--image-workers must be nonnegative')
+if args.image_workers:
+    cv2.setNumThreads(1)
+bts_failure_audit = None
+if args.bts_failure_report:
+    if args.fail_on_nonfinite or args.nonfinite_manifest or args.polynomial_export:
+        parser.error('--bts-failure-report uses its own nonfinite report and the unfused block graph')
+    if torch.cuda.device_count() != 1:
+        parser.error('--bts-failure-report requires one visible GPU for exact hook accounting')
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    from eval.bts_failure_audit import BTSFailureAudit
+    bts_failure_audit = BTSFailureAudit(args.bts_failure_report)
 finite_audits = []
 
 target = args.target
@@ -188,6 +204,8 @@ class Embedding(object):
             torch.save(resnet.cpu(), certificate_path.with_suffix('.pt'))
             resnet.cuda()
             certificate_path.write_text(json.dumps(certificate, indent=2))
+        if bts_failure_audit is not None:
+            bts_failure_audit.attach(resnet)
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()
@@ -244,6 +262,8 @@ class Embedding(object):
     def forward_db(self, batch_data, source_indices=None, source_names=None):
         imgs = torch.Tensor(batch_data).cuda()
         imgs.div_(255).sub_(0.5).div_(0.5)
+        if bts_failure_audit is not None:
+            bts_failure_audit.start_batch()
         feat = self.model(imgs)
         finite_rows = torch.isfinite(feat).all(dim=1)
         bad_rows = int((~finite_rows).sum().item())
@@ -270,6 +290,8 @@ class Embedding(object):
                         (~torch.isfinite(feat[bad_index])).sum().item()),
                 })
                 self.nonfinite_records.append(record)
+        if bts_failure_audit is not None:
+            feat = bts_failure_audit.filter_embeddings(feat, source_indices, source_names)
         feat = feat.reshape([self.batch_size, 2 * feat.shape[1]])
         return feat.cpu().numpy()
 
@@ -360,14 +382,19 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
     embedding = Embedding(model_path, data_shape, batch_size)
     nonfinite_rows = 0
     nonfinite_records = []
-    for img_index, each_line in enumerate(files[:len(files) - rare_size]):
-        name_lmk_score = each_line.strip().split(' ')
-        img_name = os.path.join(img_path, name_lmk_score[0])
+    from eval.ordered_prefetch import ordered_prefetch
+
+    def read_input(each_line):
+        fields = each_line.strip().split()
+        img_name = os.path.join(img_path, fields[0])
         img = cv2.imread(img_name)
-        lmk = np.array([float(x) for x in name_lmk_score[1:-1]],
-                       dtype=np.float32)
-        lmk = lmk.reshape((5, 2))
-        input_blob = embedding.get(img, lmk)
+        if img is None:
+            raise FileNotFoundError(img_name)
+        lmk = np.array([float(x) for x in fields[1:-1]], dtype=np.float32).reshape((5, 2))
+        return embedding.get(img, lmk), fields[-1]
+
+    for img_index, (input_blob, face_score) in enumerate(ordered_prefetch(
+            read_input, files[:len(files) - rare_size], args.image_workers)):
 
         batch_data[2 * (img_index - batch * batch_size)][:] = input_blob[0]
         batch_data[2 * (img_index - batch * batch_size) + 1][:] = input_blob[1]
@@ -385,21 +412,15 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
                                              source_indices,
                                              source_names)
             batch += 1
-        faceness_scores.append(name_lmk_score[-1])
+        faceness_scores.append(face_score)
     nonfinite_rows += embedding.nonfinite_rows
     nonfinite_records.extend(embedding.nonfinite_records)
 
     if rare_size > 0:
         batch_data = np.empty((2 * rare_size, 3, 112, 112))
         embedding = Embedding(model_path, data_shape, rare_size)
-        for img_index, each_line in enumerate(files[len(files) - rare_size:]):
-            name_lmk_score = each_line.strip().split(' ')
-            img_name = os.path.join(img_path, name_lmk_score[0])
-            img = cv2.imread(img_name)
-            lmk = np.array([float(x) for x in name_lmk_score[1:-1]],
-                           dtype=np.float32)
-            lmk = lmk.reshape((5, 2))
-            input_blob = embedding.get(img, lmk)
+        for img_index, (input_blob, face_score) in enumerate(ordered_prefetch(
+                read_input, files[len(files) - rare_size:], args.image_workers)):
             batch_data[2 * img_index][:] = input_blob[0]
             batch_data[2 * img_index + 1][:] = input_blob[1]
             if (img_index + 1) % rare_size == 0:
@@ -415,7 +436,7 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
                               source_indices,
                               source_names)
                 batch += 1
-            faceness_scores.append(name_lmk_score[-1])
+            faceness_scores.append(face_score)
         nonfinite_rows += embedding.nonfinite_rows
         nonfinite_records.extend(embedding.nonfinite_records)
     print('Non-finite augmented embedding rows: {}'.format(nonfinite_rows))
@@ -458,6 +479,8 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
         print(
             'Non-finite manifest saved to {} ({} augmented rows)'.format(
                 args.nonfinite_manifest, len(nonfinite_records)))
+    if bts_failure_audit is not None:
+        print('BTS failure summary:', json.dumps(bts_failure_audit.finish(len(files))))
     faceness_scores = np.array(faceness_scores).astype(np.float32)
     img_feats = replace_nonfinite('img_feats', img_feats)
     faceness_scores = replace_nonfinite('faceness_scores', faceness_scores)

@@ -1,0 +1,55 @@
+[
+  {
+    "method": "ijbc-IJBC",
+    "points": {
+      "1e-06": {
+        "tar_percent": 84.6806769954492,
+        "actual_far": 1.0230877658397645e-06,
+        "at_or_below_requested_far": {
+          "tar_percent": 83.55576008590275,
+          "actual_far": 9.591447804747792e-07
+        }
+      },
+      "1e-05": {
+        "tar_percent": 92.01820320089993,
+        "actual_far": 9.975105716937703e-06,
+        "at_or_below_requested_far": {
+          "tar_percent": 92.01820320089993,
+          "actual_far": 9.975105716937703e-06
+        }
+      },
+      "0.0001": {
+        "tar_percent": 95.14240425423122,
+        "actual_far": 0.00010026260105229692,
+        "at_or_below_requested_far": {
+          "tar_percent": 95.13729099555147,
+          "actual_far": 9.891979835963223e-05
+        }
+      },
+      "0.001": {
+        "tar_percent": 96.8655724293092,
+        "actual_far": 0.0010011553218595745,
+        "at_or_below_requested_far": {
+          "tar_percent": 96.86045917062944,
+          "actual_far": 0.0009984697164742453
+        }
+      },
+      "0.01": {
+        "tar_percent": 98.15411361660786,
+        "actual_far": 0.010065137440331603,
+        "at_or_below_requested_far": {
+          "tar_percent": 98.1490003579281,
+          "actual_far": 0.009898246248528992
+        }
+      },
+      "0.1": {
+        "tar_percent": 98.96200848800942,
+        "actual_far": 0.09978737678506436,
+        "at_or_below_requested_far": {
+          "tar_percent": 98.96200848800942,
+          "actual_far": 0.09978737678506436
+        }
+      }
+    }
+  }
+]
