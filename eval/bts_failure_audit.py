@@ -9,7 +9,8 @@ from controlled_degree2.rescale_residual_graph import BOUNDARIES
 
 
 class BTSFailureAudit:
-    def __init__(self, prefix):
+    def __init__(self, prefix, check_range=True):
+        self.check_range = bool(check_range)
         self.prefix = Path(prefix)
         self.prefix.parent.mkdir(parents=True, exist_ok=True)
         self.stream = open(str(self.prefix) + '.failures.jsonl', 'x')
@@ -51,7 +52,7 @@ class BTSFailureAudit:
         if limits.shape != (rows, len(BOUNDARIES), 2):
             raise ValueError('BTS hook row count mismatch')
         finite = torch.isfinite(limits).all(2)
-        outside = ((limits[:, :, 0] < -1) | (limits[:, :, 1] > 1))
+        outside = ((limits[:, :, 0] < -1) | (limits[:, :, 1] > 1)) if self.check_range else torch.zeros_like(finite)
         embedding_nonfinite = (~torch.isfinite(features).all(1)).cpu()
         range_bad = outside.any(1)
         nonfinite_bad = (~finite).any(1) | embedding_nonfinite
@@ -104,9 +105,10 @@ class BTSFailureAudit:
         self.stream.close()
         if self.counts['source_images'] != expected_images:
             raise RuntimeError('Incomplete IJB image coverage')
-        summary = dict(self.counts, boundaries=self.boundaries, interval=[-1, 1],
-                       failure_policy='any boundary outside [-1,1] or nonfinite boundary/embedding; '
-                                      'either view fails => zero both views before flip fusion/template aggregation',
+        summary = dict(self.counts, boundaries=self.boundaries, interval=[-1, 1] if self.check_range else None,
+                       range_check_enabled=self.check_range,
+                       failure_policy=('any boundary outside [-1,1] or ' if self.check_range else '')
+                                      + 'nonfinite boundary/embedding; either view fails => zero both views before flip fusion/template aggregation',
                        failed_source_fraction=self.counts['failed_source_images'] / max(1, expected_images))
         Path(str(self.prefix) + '.summary.json').write_text(json.dumps(summary, indent=2, allow_nan=False) + '\n')
         return summary

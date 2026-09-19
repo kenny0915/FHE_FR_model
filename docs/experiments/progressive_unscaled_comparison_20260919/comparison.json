@@ -1,0 +1,77 @@
+{
+  "source_checkpoint": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_best.pt",
+  "source_sha256": "3b3298217fcc54a368b045f50d85e8e0d9c845f305e7f1212640838c160f6b39",
+  "baseline_job_id": "403247",
+  "source_images": 469375,
+  "views": 938750,
+  "pairs": 15658489,
+  "all_scores_finite": true,
+  "unscaled_failed_images": 14,
+  "scaled_failed_images": 21,
+  "nonfinite_failure_ids_identical": true,
+  "extra_scaled_failure_indices": [
+    6428,
+    161961,
+    162055,
+    179366,
+    179430,
+    179480,
+    179496
+  ],
+  "points": [
+    {
+      "far": 1e-06,
+      "unscaled_strict_tar": 83.54553356854323,
+      "scaled_strict_tar": 83.55576008590275,
+      "scaled_minus_unscaled_strict_pp": 0.010226517359512854,
+      "unscaled_nearest_tar": 84.67556373676945,
+      "scaled_nearest_tar": 84.6806769954492,
+      "scaled_minus_unscaled_nearest_pp": 0.005113258679756427
+    },
+    {
+      "far": 1e-05,
+      "unscaled_strict_tar": 92.01820320089993,
+      "scaled_strict_tar": 92.01820320089993,
+      "scaled_minus_unscaled_strict_pp": 0.0,
+      "unscaled_nearest_tar": 92.01820320089993,
+      "scaled_nearest_tar": 92.01820320089993,
+      "scaled_minus_unscaled_nearest_pp": 0.0
+    },
+    {
+      "far": 0.0001,
+      "unscaled_strict_tar": 95.13729099555147,
+      "scaled_strict_tar": 95.13729099555147,
+      "scaled_minus_unscaled_strict_pp": 0.0,
+      "unscaled_nearest_tar": 95.14240425423122,
+      "scaled_nearest_tar": 95.14240425423122,
+      "scaled_minus_unscaled_nearest_pp": 0.0
+    },
+    {
+      "far": 0.001,
+      "unscaled_strict_tar": 96.86045917062944,
+      "scaled_strict_tar": 96.86045917062944,
+      "scaled_minus_unscaled_strict_pp": 0.0,
+      "unscaled_nearest_tar": 96.86045917062944,
+      "scaled_nearest_tar": 96.8655724293092,
+      "scaled_minus_unscaled_nearest_pp": 0.005113258679756427
+    },
+    {
+      "far": 0.01,
+      "unscaled_strict_tar": 98.1490003579281,
+      "scaled_strict_tar": 98.1490003579281,
+      "scaled_minus_unscaled_strict_pp": 0.0,
+      "unscaled_nearest_tar": 98.15411361660786,
+      "scaled_nearest_tar": 98.15411361660786,
+      "scaled_minus_unscaled_nearest_pp": 0.0
+    },
+    {
+      "far": 0.1,
+      "unscaled_strict_tar": 98.96200848800942,
+      "scaled_strict_tar": 98.96200848800942,
+      "scaled_minus_unscaled_strict_pp": 0.0,
+      "unscaled_nearest_tar": 98.96200848800942,
+      "scaled_nearest_tar": 98.96200848800942,
+      "scaled_minus_unscaled_nearest_pp": 0.0
+    }
+  ]
+}

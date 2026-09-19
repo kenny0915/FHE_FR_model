@@ -1,0 +1,58 @@
+{
+  "source_images": 469375,
+  "augmented_rows": 938750,
+  "failed_source_images": 14,
+  "failed_augmented_rows": 14,
+  "range_failed_source_images": 0,
+  "nonfinite_source_images": 14,
+  "embedding_nonfinite_source_images": 14,
+  "zeroed_augmented_rows": 28,
+  "boundaries": {
+    "layer1.2": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 0,
+      "failed_source_images": 0,
+      "finite_row_min": -5.229994773864746,
+      "finite_row_max": 6.5379319190979
+    },
+    "layer2.3": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 0,
+      "failed_source_images": 0,
+      "finite_row_min": -296732.1875,
+      "finite_row_max": 434960.625
+    },
+    "layer3.3": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 4,
+      "failed_source_images": 4,
+      "finite_row_min": -4.4990420804397495e+33,
+      "finite_row_max": 5.615411765592158e+33
+    },
+    "layer3.7": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 14,
+      "failed_source_images": 14,
+      "finite_row_min": -6.0787553787231445,
+      "finite_row_max": 5.745982646942139
+    },
+    "layer3.11": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 14,
+      "failed_source_images": 14,
+      "finite_row_min": -6.025143146514893,
+      "finite_row_max": 11.822122573852539
+    },
+    "layer4.1": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 14,
+      "failed_source_images": 14,
+      "finite_row_min": -1.3660593032836914,
+      "finite_row_max": 2.3331212997436523
+    }
+  },
+  "interval": null,
+  "range_check_enabled": false,
+  "failure_policy": "nonfinite boundary/embedding; either view fails => zero both views before flip fusion/template aggregation",
+  "failed_source_fraction": 2.9826897470039947e-05
+}

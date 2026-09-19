@@ -115,3 +115,19 @@ def test_actual_ijbc_forward_zeroes_before_original_flip_reshape(tmp_path, monke
     assert not result[1:].any()
     assert context.nonfinite_rows == 1
     assert audit.finish(3)['failed_source_images'] == 2
+
+
+def test_nonfinite_only_baseline_does_not_reject_large_finite_ranges(tmp_path):
+    audit = BTSFailureAudit(tmp_path / 'baseline', check_range=False)
+    populate(audit, 4)
+    audit.observe(BOUNDARIES[0], torch.tensor([[-100., 200.]] * 4))
+    features = torch.ones(4, 3)
+    features[3, 0] = float('nan')
+    filtered = audit.filter_embeddings(features, [0, 1], ['finite', 'nonfinite'])
+    assert torch.equal(filtered[:2], features[:2])
+    assert not filtered[2:].any()
+    summary = audit.finish(2)
+    assert summary['interval'] is None
+    assert not summary['range_check_enabled']
+    assert summary['range_failed_source_images'] == 0
+    assert summary['failed_source_images'] == 1

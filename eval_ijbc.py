@@ -102,7 +102,10 @@ parser.add_argument('--polynomial-coefficient-mode', choices=('shared', 'channel
 parser.add_argument('--finite-audit', default=None, help='JSON audit of all module inputs/outputs; single visible GPU required')
 parser.add_argument('--image-workers', type=int, default=0, help='bounded parallel image decoding/alignment, preserving metadata order')
 parser.add_argument('--bts-failure-report', default=None, help='prefix for six-boundary failure JSONL/summary; zero both source views if either fails')
+parser.add_argument('--ignore-bts-range', action='store_true', help='with --bts-failure-report, fail only on nonfinite values; no range threshold')
 args = parser.parse_args()
+if args.ignore_bts_range and not args.bts_failure_report:
+    parser.error('--ignore-bts-range requires --bts-failure-report')
 if args.image_workers < 0:
     parser.error('--image-workers must be nonnegative')
 if args.image_workers:
@@ -116,7 +119,7 @@ if args.bts_failure_report:
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
     from eval.bts_failure_audit import BTSFailureAudit
-    bts_failure_audit = BTSFailureAudit(args.bts_failure_report)
+    bts_failure_audit = BTSFailureAudit(args.bts_failure_report, check_range=not args.ignore_bts_range)
 finite_audits = []
 
 target = args.target
