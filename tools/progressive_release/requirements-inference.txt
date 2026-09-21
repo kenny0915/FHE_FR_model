@@ -1,0 +1,4 @@
+# Tested with Python 3.10.20. Select a PyTorch wheel suitable for your CPU/CUDA.
+torch==2.1.2
+numpy==1.23.5
+pillow==12.2.0

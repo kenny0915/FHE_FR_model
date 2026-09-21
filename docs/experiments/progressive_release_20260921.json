@@ -1,0 +1,21 @@
+{
+  "build": {
+    "zip": "/work/u8798807/FHE_FR_model/outputs/fhe_fr_progressive_ms1k_20260921.zip",
+    "bytes": 163513004,
+    "sha256": "01a4ff27bdb50c32fd434b1d2835518bafb063f41066d489d4c1c4a01c9eef52",
+    "source_commit": "46f2b1a397e2955303c2f97272fa3b4765eeae23",
+    "manifest_files": 450
+  },
+  "validation": {
+    "crc_passed": true,
+    "checkpoint_entries": [
+      "fhe_fr_progressive_ms1k_20260921/checkpoints/student_scaled.pt"
+    ],
+    "isolated_directory": "/tmp/progressive_bundle_test_xneiew2g/fhe_fr_progressive_ms1k_20260921",
+    "results": {
+      "verify_bundle.py": "IResNet arch_config=baseline nonlinear_depth=25 stem=P stage1=PPP stage2=PPPP stage3=PPPPPPPPPPPPPP stage4=PPP\n{\n  \"verified_files\": 450,\n  \"strict_loading\": true,\n  \"synthetic_smoke_test_passed\": true,\n  \"embedding_shape\": [\n    1,\n    512\n  ],\n  \"model_source\": \"/tmp/progressive_bundle_test_xneiew2g/fhe_fr_progressive_ms1k_20260921/controlled_degree2/model.py\"\n}\n",
+      "example.py": "IResNet arch_config=baseline nonlinear_depth=25 stem=P stage1=PPP stage2=PPPP stage3=PPPPPPPPPPPPPP stage4=PPP\n{\n  \"input\": \"synthetic zero smoke test\",\n  \"embedding_shape\": [\n    1,\n    512\n  ],\n  \"finite\": true,\n  \"bts_failed\": false,\n  \"zeroed\": false,\n  \"boundary_ranges\": {\n    \"layer1.2\": [\n      -0.1312399059534073,\n      0.5691466331481934\n    ],\n    \"layer2.3\": [\n      -0.7357620596885681,\n      0.23203901946544647\n    ],\n    \"layer3.3\": [\n      -0.046801432967185974,\n      0.16372138261795044\n    ],\n    \"layer3.7\": [\n      -0.05325298383831978,\n      0.28537723422050476\n    ],\n    \"layer3.11\": [\n      -0.07004498690366745,\n      0.46320536732673645\n    ],\n    \"layer4.1\": [\n      -0.1401723027229309,\n      0.1200777143239975\n    ]\n  }\n}\n",
+      "image_example": "IResNet arch_config=baseline nonlinear_depth=25 stem=P stage1=PPP stage2=PPPP stage3=PPPPPPPPPPPPPP stage4=PPP\n{\n  \"input\": \"aligned face\",\n  \"embedding_shape\": [\n    1,\n    512\n  ],\n  \"finite\": true,\n  \"bts_failed\": false,\n  \"zeroed\": false,\n  \"boundary_ranges\": {\n    \"layer1.2\": [\n      -0.1312178671360016,\n      0.5693658590316772\n    ],\n    \"layer2.3\": [\n      -0.7359142899513245,\n      0.2320481389760971\n    ],\n    \"layer3.3\": [\n      -0.04680497944355011,\n      0.16369900107383728\n    ],\n    \"layer3.7\": [\n      -0.053268592804670334,\n      0.28534677624702454\n    ],\n    \"layer3.11\": [\n      -0.07004138827323914,\n      0.46311068534851074\n    ],\n    \"layer4.1\": [\n      -0.1403767615556717,\n      0.12027537822723389\n    ]\n  }\n}\n"
+    }
+  }
+}
