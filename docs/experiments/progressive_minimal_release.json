@@ -1,0 +1,23 @@
+{
+  "build": {
+    "zip": "/work/u8798807/FHE_FR_model/outputs/fhe_fr_progressive_ms1k_inference.zip",
+    "bytes": 162638486,
+    "sha256": "8ed4245ee1fa369e08b9bc4a7149955bb34b54299c2b51847dd9ed063e8d9530",
+    "files": [
+      "model.pt",
+      "backbone.py",
+      "inference.py",
+      "README.md",
+      "requirements.txt"
+    ]
+  },
+  "validation": {
+    "crc_passed": true,
+    "file_count": 5,
+    "reference_result": "IResNet arch_config=baseline nonlinear_depth=25 stem=P stage1=PPP stage2=PPPP stage3=PPPPPPPPPPPPPP stage4=PPP\n{\"tested_inputs\": [\"zero\", \"3043 original\", \"3043 flip\"], \"output_shape\": [3, 512], \"max_abs_difference\": 0.0, \"six_boundaries_identical\": true, \"isolated_imports\": true}\n",
+    "cli_result": "IResNet arch_config=baseline nonlinear_depth=25 stem=P stage1=PPP stage2=PPPP stage3=PPPPPPPPPPPPPP stage4=PPP\nSaved 512 raw float32 values to /tmp/minimal_progressive_svhxob4q/embedding.txt\n",
+    "cli_values": 512,
+    "cli_max_abs_difference": 1.1920928955078125e-06,
+    "isolated_directory": "/tmp/minimal_progressive_svhxob4q/fhe_fr_progressive_inference"
+  }
+}
