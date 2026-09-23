@@ -1,0 +1,159 @@
+{
+  "image": "3043.jpg",
+  "source_index_zero_based": 3042,
+  "original_size_width_height": [
+    2740,
+    3131
+  ],
+  "source_image_sha256": "936074e0b94450a4d87eb58ec5f3d345dcd71f1b698f21d4d444d84dd59e0426",
+  "source_landmarks": [
+    [
+      1147.0040283203125,
+      1399.7220458984375
+    ],
+    [
+      1908.1650390625,
+      1163.137939453125
+    ],
+    [
+      1793.06396484375,
+      1729.9610595703125
+    ],
+    [
+      1441.2750244140625,
+      2220.64501953125
+    ],
+    [
+      2059.910888671875,
+      2029.0699462890625
+    ]
+  ],
+  "target_landmarks": [
+    [
+      38.29460144042969,
+      51.6963005065918
+    ],
+    [
+      73.53179931640625,
+      51.501399993896484
+    ],
+    [
+      56.02519989013672,
+      71.73660278320312
+    ],
+    [
+      41.54930114746094,
+      92.3655014038086
+    ],
+    [
+      70.72990417480469,
+      92.2041015625
+    ]
+  ],
+  "similarity_matrix_2x3": [
+    [
+      0.04345254456206349,
+      -0.012000143350347856,
+      3.9677927770249397
+    ],
+    [
+      0.012000143350347856,
+      0.04345254456206349,
+      -22.377050459012338
+    ]
+  ],
+  "aligned_size_width_height": [
+    112,
+    112
+  ],
+  "alignment": "skimage SimilarityTransform.estimate + cv2.warpAffine INTER_LINEAR / constant-zero border",
+  "model_input": "RGB float32 NCHW, pixel/127.5-1",
+  "model": "MS1MV3-calibrated scaled progressive/best",
+  "minimal_bundle_sha256": "8ed4245ee1fa369e08b9bc4a7149955bb34b54299c2b51847dd9ed063e8d9530",
+  "checkpoint_sha256": "f6b8fddafc8d8cfca5127d1732781b6eeaa7d9e7727524d5123e002bd1165dc1",
+  "comparison": {
+    "device": "cpu",
+    "precision": "float32",
+    "threads": 4,
+    "same_batch_inputs": [
+      "zero",
+      "3043 original",
+      "3043 flip"
+    ],
+    "same_batch_embedding_max_abs_difference": 0.0,
+    "same_batch_six_boundaries_identical": true,
+    "cli_batch_size": 1,
+    "reference_batch_size": 3,
+    "cli_max_abs_difference": 1.1920928955078125e-06,
+    "cli_values": 512
+  },
+  "vectors": "raw model output, no flip sum, no L2 normalization, no faceness weighting",
+  "boundary_ranges": {
+    "layer1.2": {
+      "original": [
+        -0.31505218148231506,
+        0.5608841180801392
+      ],
+      "flip": [
+        -0.29058390855789185,
+        0.6216200590133667
+      ]
+    },
+    "layer2.3": {
+      "original": [
+        -0.6999217867851257,
+        0.3187837600708008
+      ],
+      "flip": [
+        -0.7160859704017639,
+        0.3607964515686035
+      ]
+    },
+    "layer3.3": {
+      "original": [
+        -0.08687153458595276,
+        0.16283366084098816
+      ],
+      "flip": [
+        -0.08015365153551102,
+        0.15921269357204437
+      ]
+    },
+    "layer3.7": {
+      "original": [
+        -0.0790959820151329,
+        0.2618125379085541
+      ],
+      "flip": [
+        -0.08237777650356293,
+        0.2922894358634949
+      ]
+    },
+    "layer3.11": {
+      "original": [
+        -0.08238230645656586,
+        0.3966064155101776
+      ],
+      "flip": [
+        -0.09527496993541718,
+        0.5102968811988831
+      ]
+    },
+    "layer4.1": {
+      "original": [
+        -0.162981316447258,
+        0.17716042697429657
+      ],
+      "flip": [
+        -0.18001052737236023,
+        0.17746885120868683
+      ]
+    }
+  },
+  "reproduction_test": {
+    "aligned_pixels_identical": true,
+    "flip_pixels_identical": true,
+    "cli_embedding_max_abs_difference": 0.0,
+    "txt_values": 512
+  }
+}
