@@ -1,0 +1,998 @@
+[
+  {
+    "path": "poly_run10/README.md",
+    "sha256": "b3cbccf00cd0e6543abab3b89397ffdb20a27d0e9f417831cbbd3004f9964c4b",
+    "format": "md",
+    "text": "# Polynomial iResNet-50 face model - run10\n\nEvery one of the 25 PReLU activations is replaced by a per-channel degree-4 polynomial\n`y = c0 + c1*x + c2*x^2 + c4*x^4` (no x^3 term: |x| is even). Deployed as-is, no clipping,\nno lookup tables, no comparison - CKKS-friendly.\n\n## Checkpoint\n\n* `model/student_best.pt` - format `adaface-nano4/poly-v1`, exported at step 7000 (canary {'lfw': 0.9983333333333333, 'cplfw': 0.9243333333333335})\n* teacher: `None`\n* architecture: `iresnet50` from `arch/iresnet.py` (recorded path `/work/u8498934/model/iresnet.py`)\n* input order: rgb , 112x112, pixels scaled to [-1, 1]\n* embedding: 512-d; L2-normalise before comparing\n\n## Activation ranges (per layer, per-channel lam_fit in activation units)\n\n| layer | channels | lam_fit min | lam_fit max | widened x |\n|---|---|---|---|---|\n| prelu | 64 | 0.102 | 2.04 | 1.5 |\n| layer1.0 | 64 | 0.129 | 2.59 | 1.5 |\n| layer1.1 | 64 | 0.835 | 1.69 | 1.5 |\n| layer1.2 | 64 | 0.536 | 1.92 | 1.5 |\n| layer2.0 | 128 | 0.643 | 1.96 | 1.5 |\n| layer2.1 | 128 | 0.33 | 1.22 | 1.5 |\n| layer2.2 | 128 | 0.273 | 1.28 | 1.5 |\n| layer2.3 | 128 | 0.506 | 1.39 | 1.5 |\n| layer3.0 | 256 | 0.403 | 1.38 | 1.3 |\n| layer3.1 | 256 | 0.213 | 1.05 | 1.3 |\n| layer3.2 | 256 | 0.179 | 0.993 | 1.3 |\n| layer3.3 | 256 | 0.209 | 1.25 | 1.3 |\n| layer3.4 | 256 | 0.23 | 0.983 | 1.3 |\n| layer3.5 | 256 | 0.273 | 0.744 | 1.3 |\n| layer3.6 | 256 | 0.325 | 0.782 | 1.3 |\n| layer3.7 | 256 | 0.309 | 0.687 | 1.3 |\n| layer3.8 | 256 | 0.344 | 0.822 | 1.3 |\n| layer3.9 | 256 | 0.238 | 1.12 | 1.3 |\n| layer3.10 | 256 | 0.275 | 0.839 | 1.3 |\n| layer3.11 | 256 | 0.0449 | 0.898 | 1.3 |\n| layer3.12 | 256 | 0.211 | 0.916 | 1.3 |\n| layer3.13 | 256 | 0.264 | 0.9 | 1.3 |\n| layer4.0 | 512 | 0.29 | 0.955 | 1.3 |\n| layer4.1 | 512 | 0.232 | 2.01 | 1.3 |\n| layer4.2 | 512 | 0.0571 | 1.14 | 1.3 |\n\n## Final fine-tune stage (train/config.json)\n\n* student_init: `/work/u8498934/experiments/poly/run9/student_final.pt`\n* epochs: `3.0`\n* lr: `0.002`\n* global_batch: `2048`\n* penalty: `hinge`\n* beta: `1.0`\n* lam_reg_ratio: `0.6`\n* lam_scale: ``\n* hint_w0: `1.0`\n* hint_w1: `0.3`\n* aug_lowres: `0.2`\n* aug_photo: `0.2`\n* aug_stress: `0.4`\n* aug_pathological: `0.05`\n* swap_epochs: `0.0`\n* warmup_epochs: `0.1`\n\n## Reload\n\n```python\nimport sys; sys.path.insert(0, \"code\")            # the repo snapshot\nfrom distill.poly_act import load_poly_checkpoint\nmodel, payload = load_poly_checkpoint(\"model/student_best.pt\", arch_module=\"arch/iresnet.py\")\nmodel.eval()                                        # x: (N,3,112,112) RGB in [-1,1]\n```\n\n`state_dict` holds conv/BN weights plus, per activation, `coeffs` (C,4), `lam_fit`, `lam_reg`, `slope`.\n`poly_calib` is the calibration dict the activations were built from (with cumulative `lam_scale`).\n\nSee code/CLAUDE.md (open thread 0) for the full run1 -> run10 history and every measured number.\n"
+  },
+  {
+    "path": "poly_run10/train/config.json",
+    "sha256": "e7047903b89f1267df92b32cd403b771e760ca1479ff35d671c14d2c677d76d4",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8498934/experiments/poly/run9/student_final.pt\",\n  \"teacher_weights\": \"/work/u8498934/model/model.pt\",\n  \"data_root\": \"/work/u8498934/data\",\n  \"dataset\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8498934/experiments/poly/run10\",\n  \"resume\": null,\n  \"gpus\": 8,\n  \"num_nodes\": 2,\n  \"batch_size\": 128,\n  \"num_workers\": 10,\n  \"epochs\": 3.0,\n  \"precision\": \"bf16-mixed\",\n  \"channels_last\": true,\n  \"optimizer\": \"sgd\",\n  \"lr\": 0.002,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_emb\": 1.0,\n  \"hint_points\": \"block\",\n  \"hint_w0\": 1.0,\n  \"hint_w1\": 0.3,\n  \"gamma\": 10.0,\n  \"penalty\": \"hinge\",\n  \"beta\": 1.0,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"lam_scale\": \"\",\n  \"lam_reg_ratio\": 0.6,\n  \"warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"max_nan_streak\": 20,\n  \"canary_sets\": [\n    \"lfw\",\n    \"cplfw\"\n  ],\n  \"canary_every\": 1000,\n  \"log_every\": 50,\n  \"ckpt_every\": 2000,\n  \"seed\": 42,\n  \"limit_train_batches\": 1.0,\n  \"global_batch\": 2048,\n  \"world_size\": 16,\n  \"arch_module\": \"/work/u8498934/model/iresnet.py\",\n  \"arch_fn\": \"iresnet50\",\n  \"arch_config\": \"baseline\",\n  \"input_order\": \"rgb\"\n}"
+  },
+  {
+    "path": "work_dirs/adaptive_conversion_kd5_20260915/config.json",
+    "sha256": "9231bab01a9aa717125064dd0bbf1ccbc5dcf7eeea64593066b99233f931bfd7",
+    "format": "json",
+    "text": "{\n  \"config\": {\n    \"output\": \"work_dirs/adaptive_conversion_kd5_20260915\",\n    \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n    \"prepared_root\": \"work_dirs/channelwise_ijbc96_20260914\",\n    \"dataset_root\": \"ms1m-retinaface-t1\",\n    \"sites\": 8,\n    \"batch_size\": 64,\n    \"workers\": 4,\n    \"calibration_images\": 2048,\n    \"gate_images\": 512,\n    \"min_phase_steps\": 100,\n    \"max_phase_steps\": 300,\n    \"check_every\": 25,\n    \"seed\": 20260928,\n    \"embedding_kd_weight\": 5.0\n  },\n  \"code_commit\": \"82650831df245b7a6a0574507c52e30562d26072\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"prepared_sha256\": \"e376e9b285d6a45fd8a1e7fe7a4b02882b0c54d9779ac70c0c1103516e331d68\",\n  \"split_sha256\": \"455e94feb2e8470192035c3295ff614da04085bb512c63985b4c5e5ad947718c\",\n  \"uses_ijbc_images\": false,\n  \"uses_ijbc_pair_labels\": false,\n  \"comparison\": \"fixed teacher fit/time schedule versus refreshed student fit/consecutive quality gates\"\n}\n"
+  },
+  {
+    "path": "work_dirs/adaptive_conversion_pilot_20260915/config.json",
+    "sha256": "96ced43e5c05f8da36a1536d3d5c8ade2927553d9c1a13fc1b72fa54dac20a67",
+    "format": "json",
+    "text": "{\n  \"config\": {\n    \"output\": \"work_dirs/adaptive_conversion_pilot_20260915\",\n    \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n    \"prepared_root\": \"work_dirs/channelwise_ijbc96_20260914\",\n    \"dataset_root\": \"ms1m-retinaface-t1\",\n    \"sites\": 2,\n    \"batch_size\": 64,\n    \"workers\": 4,\n    \"calibration_images\": 2048,\n    \"gate_images\": 512,\n    \"min_phase_steps\": 100,\n    \"max_phase_steps\": 300,\n    \"check_every\": 25,\n    \"seed\": 20260928\n  },\n  \"code_commit\": \"3dd1350f24497b4292275651547464fa5cd2f449\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"prepared_sha256\": \"e376e9b285d6a45fd8a1e7fe7a4b02882b0c54d9779ac70c0c1103516e331d68\",\n  \"split_sha256\": \"455e94feb2e8470192035c3295ff614da04085bb512c63985b4c5e5ad947718c\",\n  \"uses_ijbc_images\": false,\n  \"uses_ijbc_pair_labels\": false,\n  \"comparison\": \"fixed teacher fit/time schedule versus refreshed student fit/consecutive quality gates\"\n}\n"
+  },
+  {
+    "path": "work_dirs/adaptive_conversion_smoke_20260915/config.json",
+    "sha256": "949b7cdf5217bfaac0aa0e7c28e83b7da0f2c6ad6e7d7408b673b909ed3f62b8",
+    "format": "json",
+    "text": "{\n  \"config\": {\n    \"output\": \"work_dirs/adaptive_conversion_smoke_20260915\",\n    \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n    \"prepared_root\": \"work_dirs/channelwise_ijbc96_20260914\",\n    \"dataset_root\": \"ms1m-retinaface-t1\",\n    \"sites\": 1,\n    \"batch_size\": 64,\n    \"workers\": 4,\n    \"calibration_images\": 128,\n    \"gate_images\": 64,\n    \"min_phase_steps\": 2,\n    \"max_phase_steps\": 4,\n    \"check_every\": 1,\n    \"seed\": 20260928\n  },\n  \"code_commit\": \"ad6df40b900c2867b2c1f7f5a403df20f5f739a3\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"prepared_sha256\": \"e376e9b285d6a45fd8a1e7fe7a4b02882b0c54d9779ac70c0c1103516e331d68\",\n  \"split_sha256\": \"455e94feb2e8470192035c3295ff614da04085bb512c63985b4c5e5ad947718c\",\n  \"uses_ijbc_images\": false,\n  \"uses_ijbc_pair_labels\": false,\n  \"comparison\": \"fixed teacher fit/time schedule versus refreshed student fit/consecutive quality gates\"\n}\n"
+  },
+  {
+    "path": "work_dirs/channelwise_exact_head_20260915/mse0/ijbc_full/exact_head_mse0/ijbc_tar_at_far.csv",
+    "sha256": "fbed9fb1a1814ad5484bac26f014f1724e3c5bea4e4e5f0fba4a48ce3836ec52",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,87.52,93.41,95.80,97.39,98.39,99.02\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_exact_head_20260915/mse1/ijbc_full/exact_head_mse1/ijbc_tar_at_far.csv",
+    "sha256": "90491d740a2f284cef1e55ee94d04856246d06a12ec0c764f5db6f63d0be69b3",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,86.75,93.22,95.70,97.35,98.38,99.05\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_1000_full/channelwise_calibration1000/ijbc_tar_at_far.csv",
+    "sha256": "5251288806df1c902a3b21d8dd856c00cbf184c0c3cbfab9dcd15fb3969524bc",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.04,93.77,95.64,97.04,98.01,98.68\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head2000_full/channelwise_head2000/ijbc_tar_at_far.csv",
+    "sha256": "61479febe049f05ff29768a37b7e2e8f91608acfb26af49caa69e9a6ed72ad43",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,89.36,93.74,95.91,97.40,98.41,99.03\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_head_random_full/channelwise_head_random/ijbc_tar_at_far.csv",
+    "sha256": "61f7aa96fd95366c922406582ef37de4452a86fb0d32606b26803ff2953796e9",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,86.93,93.15,95.77,97.37,98.39,99.04\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_lr1e4_3000_full/channelwise_calibration_lr1e4_3000/ijbc_tar_at_far.csv",
+    "sha256": "7b04b16b6302643acd34259907a039d44d99177e0ff1a3b05dc13438d14c81bc",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,88.73,93.36,95.71,97.23,98.35,99.00\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_calibration_epoch14_residual6_full/channelwise_residual6/ijbc_tar_at_far.csv",
+    "sha256": "cc2b31567aae92236b67fa63ec57bc6ef37030d16e141fc8f72b2f0648585ab7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,87.49,93.56,95.78,97.37,98.42,99.05\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_ijbc96_guarded_resume_20260914/ijbc_epoch14/channelwise_epoch14/ijbc_tar_at_far.csv",
+    "sha256": "a67b2c55d55e7c12360d5a37dda7c52221d5b63f5964ee8ae212a8611b9a6010",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.26,93.57,95.54,96.96,97.92,98.57\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_linear_head_20260915/ijbc_full/linear_head/ijbc_tar_at_far.csv",
+    "sha256": "31f7617fa9d30ab44abf9aee036caa7e4956fc7ea7e907f3544d48683cebcd76",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,89.10,93.39,95.78,97.32,98.39,98.99\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_pair_geometry_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "92a357a43beff73e75a51a048b958d50ddf5bd8c07dd5d6fe6e3dff18e6a629a",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.24,93.83,95.89,97.34,98.37,99.04\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_pair_geometry_8000_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "5bbcb16599c8772b358010e7453d45662d9c91ae7a8947f4df9daf168dbeb882",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.09,93.66,95.87,97.31,98.35,99.04\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_prelu_verified_20260915/ijbc_full/original_prelu/ijbc_tar_at_far.csv",
+    "sha256": "b6ff745229a4c338c6cc4de65469410cd2164d186a6f4094b7e01489663c9992",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.39,94.86,96.56,97.72,98.55,99.11\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_template_anchor03_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "5af9c40b84c2f4a18a92cc27b00467049ed1d7cecb93328e05648c88a477a2c4",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,89.25,93.74,95.95,97.43,98.32,99.03\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_template_geometry_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "2de56bd377b082ce61ef84a630357fd59a644ff0d5d1c37ab5cfdac54eada175",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.14,93.88,95.89,97.35,98.41,99.05\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_template_population_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "923cd047acddbe606b49384258ccde4cc54b2359a29632671381513222aa1247",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.12,93.82,95.96,97.36,98.35,99.04\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_template_population_expanded_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "9389f9f5c03f8fa1416dc5cb563469fabb0fb6fa148c339e46a829bc089efb1a",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,89.01,93.78,95.97,97.43,98.32,99.02\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_template_supervised01_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "41d54432d9fdcb8df475a28842185af03a04ea07c57f6082992adac15da53630",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,89.23,93.85,96.06,97.49,98.38,99.06\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_template_tail01_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "868dd19d87f9695b742701577c3fb9db2ed07d1f6cef9e084f87574fffabfd67",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,89.92,93.78,95.84,97.38,98.37,99.04\r\n"
+  },
+  {
+    "path": "work_dirs/channelwise_template_tail02_20260915/ijbc_full/pair_geometry/ijbc_tar_at_far.csv",
+    "sha256": "9316c155bc1ac11ef410ec1f4796fa6dfebd1c2df87340f6a7c84a3c55b38b26",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,90.16,93.74,95.96,97.40,98.35,99.03\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_accuracy_recovery_frozen_l3_v2_20260908/train/config.json",
+    "sha256": "1a66150bf685c693f244100e60e48f32902c3670bc6f2e2375650a71c916dea2",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_accuracy_recovery_frozen_l3_v2_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 3,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0001,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 2.0,\n  \"hint_start\": 2.0,\n  \"hint_end\": 1.0,\n  \"beta\": 0.5,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.1,\n  \"aug_photo\": 0.1,\n  \"aug_crop\": 0.05,\n  \"aug_stress\": 0.1,\n  \"aug_pathological\": 0.0,\n  \"tail_replay_fraction\": 0.0,\n  \"tail_replay_capacity\": 0,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 0.0,\n  \"activation_guard_ratio\": 0.75,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.01,\n  \"operator_bound_margin\": 0.0,\n  \"freeze_through_layer3\": true,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0004,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 7587,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": [\n    \"conv1\",\n    \"bn1\",\n    \"prelu\",\n    \"layer1\",\n    \"layer2\",\n    \"layer3\"\n  ]\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_accuracy_recovery_head_only_v3_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "516a02bdd8d499ab7b24b7a8151c7f79e8db58d9496d5f0e24d63d36e495785e",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,80.47,88.70,93.42,95.97,97.64,98.81\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_accuracy_recovery_head_only_v3_20260908/train/config.json",
+    "sha256": "8f65e75d3ccc5d543653d11eb081fd268b3eedb8ebd21b223b7ec6addd04eaa5",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_accuracy_recovery_head_only_v3_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 4,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0002,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 5.0,\n  \"hint_start\": 0.0,\n  \"hint_end\": 0.0,\n  \"beta\": 0.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.05,\n  \"aug_photo\": 0.05,\n  \"aug_crop\": 0.05,\n  \"aug_stress\": 0.0,\n  \"aug_pathological\": 0.0,\n  \"tail_replay_fraction\": 0.0,\n  \"tail_replay_capacity\": 0,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 0.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.0,\n  \"operator_bound_margin\": 0.0,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": true,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0008,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 10116,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": [\n    \"conv1\",\n    \"bn1\",\n    \"prelu\",\n    \"layer1\",\n    \"layer2\",\n    \"layer3\",\n    \"layer4\"\n  ]\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_accuracy_recovery_ms1mv3_v1_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "2231d901e067d5d17702dc324d7e0fba528143068e67d37c51e46217022af2d9",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,76.69,87.74,93.38,96.12,97.69,98.89\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_accuracy_recovery_ms1mv3_v1_20260908/train/config.json",
+    "sha256": "f59da769d4f1179e9c18479513d623de6de6cc6281fde749beaf67701ea72e20",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_accuracy_recovery_ms1mv3_v1_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 2,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0001,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 2.0,\n  \"hint_start\": 2.0,\n  \"hint_end\": 1.0,\n  \"beta\": 0.5,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.1,\n  \"aug_photo\": 0.1,\n  \"aug_crop\": 0.05,\n  \"aug_stress\": 0.2,\n  \"aug_pathological\": 0.02,\n  \"tail_replay_fraction\": 0.125,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 0.5,\n  \"activation_guard_ratio\": 0.75,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.01,\n  \"operator_bound_margin\": 0.0,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0004,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 5058,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/ijbc_controlled/result/r50_controlled_d2_tail/ijbc_tar_at_far.csv",
+    "sha256": "efb5d2775cb42a91ac74d2a09d4d6a39a6827fcc6c1e0b3116ab24743ed996bb",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.50,92.75,95.64,97.14,98.32,99.00\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/polish/config.json",
+    "sha256": "597aae5a6af6cf332c5cebb89950eaae970b6a8afacf537cda33c93d506b8227",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/polish\",\n  \"resume\": null,\n  \"epochs\": 3,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"tail_replay_fraction\": 0.25,\n  \"tail_replay_capacity\": 1024,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"operator_bound_weight\": 0.0001,\n  \"operator_bound_margin\": 0.1,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 7587,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/config.json",
+    "sha256": "3a3b126d0a0ce1fe4a2d4b9486b4d6776d05f51b1c137c19b105b5aa901ca955",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/student_init.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive\",\n  \"resume\": null,\n  \"epochs\": 8,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 1.0,\n  \"swap_epochs\": 2.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"tail_replay_fraction\": 0.25,\n  \"tail_replay_capacity\": 1024,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"operator_bound_weight\": 0.0001,\n  \"operator_bound_margin\": 0.1,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 20232,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_adversarial_smoke2_20260908/train/config.json",
+    "sha256": "43a25cda2dd1820433288e9292b5238bff4fa2e1e753ee8a64b158193aa0326b",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_adversarial_smoke2_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 1.25e-05,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 10.0,\n  \"hint_start\": 4.0,\n  \"hint_end\": 2.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0625,\n  \"adversarial_tail_steps\": 2,\n  \"adversarial_tail_epsilon\": 0.125,\n  \"adversarial_tail_step_size\": 0.0625,\n  \"adversarial_tail_beta\": 2.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 8,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 5e-05,\n  \"steps_per_epoch\": 2,\n  \"total_steps\": 2,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_adversarial_v6_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "9d2c7bccd2daa93aedd0646a4f927f183587568f9bc6d6405aa418f6906f8952",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,82.59,91.63,95.05,96.85,98.15,98.96\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_adversarial_v6_20260908/train/config.json",
+    "sha256": "c37d86c32c6e4d79b922ac088f6de21f3b934d52c34a49e36f4fb4ab08f62174",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_adversarial_v6_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 1.25e-05,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0625,\n  \"adversarial_tail_steps\": 2,\n  \"adversarial_tail_epsilon\": 0.125,\n  \"adversarial_tail_step_size\": 0.0625,\n  \"adversarial_tail_beta\": 2.0,\n  \"adversarial_tail_warmup_steps\": 100,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 5e-05,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 2529,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_bn_contract_v14_20260908/candidate_093/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "6e84c574b0bd9bf9d1bf98eb99ae9cfde85ecba25db256d5ff930a9580c005ab",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,80.53,91.00,94.94,96.74,98.20,98.97\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_smoke2_20260908/train/config.json",
+    "sha256": "3013f237cccf0a3791a640850af6fb392e054d02c7737f2ac8dc4fee9678f57b",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_smoke2_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0001,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 5.0,\n  \"hint_start\": 2.0,\n  \"hint_end\": 1.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 8,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0004,\n  \"steps_per_epoch\": 2,\n  \"total_steps\": 2,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_smoke3_20260908/train/config.json",
+    "sha256": "e25bd5278989ba7534c2dfac75592c08823deaa439927522d5f289f3083b2a44",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_smoke3_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0001,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 5.0,\n  \"hint_start\": 2.0,\n  \"hint_end\": 1.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 8,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0004,\n  \"steps_per_epoch\": 2,\n  \"total_steps\": 2,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_smoke_20260908/train/config.json",
+    "sha256": "3cc663158045aa055da57706777817f20ab36ddf8402a68d2fcaeab38001d2e5",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_smoke_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0001,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 5.0,\n  \"hint_start\": 2.0,\n  \"hint_end\": 1.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 8,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0004,\n  \"steps_per_epoch\": 2,\n  \"total_steps\": 2,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "00073bd0665cf6e500c139de93ffc2486b1dc94f006f211f2d6a2cf9adbcb5f3",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.58,92.51,95.49,97.07,98.30,99.04\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "aca28006e2630b37d2050c211be832ef023d8f0c6d0c0b5249d57b87960ab812",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.23,92.67,95.53,97.11,98.31,99.06\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train/config.json",
+    "sha256": "0c8ad988103a391042379d6b1333f0f58ef186e8dbff81f0413413589f243230",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 2,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 5e-05,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 10.0,\n  \"hint_start\": 4.0,\n  \"hint_end\": 2.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 5058,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/ijbc_final/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "7803f684df1e9ccce913ae0c876a5fe9a9c137c4ac997b0ad5c6cc5680484fa1",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.11,91.89,95.18,96.84,98.22,98.99\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/config.json",
+    "sha256": "988831f34a03fd900ab581dace19923228615f80981f84416a7430a296e8c96b",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.25,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/mine/manifest.json\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 2,\n  \"deployment_tail_beta\": 0.25,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_priority_count\": 6,\n  \"deployment_tail_priority_repeats\": 16,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 2e-05,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 2529,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 1329,\n  \"deployment_tail_weighted_rows\": 1419,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_hard_smoke/train/config.json",
+    "sha256": "132ae947e6782d0cf8abb659c31dec327c2f79c177c6e7ff1085e0607d0786b9",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_hard_smoke/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 1.25e-05,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 256,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.25,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/mine/manifest.json\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 0,\n  \"deployment_tail_beta\": 0.25,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_priority_count\": 6,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 4,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 5e-05,\n  \"steps_per_epoch\": 1,\n  \"total_steps\": 1,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 1329,\n  \"deployment_tail_weighted_rows\": 2859,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_smoke/train/config.json",
+    "sha256": "bcdeb56f9e7b652fce87014003fc1babd47f52708566a9b1cc6d06c6f035a09c",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_causal_fixed_v5_20260908/train/student_best.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_smoke/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 1.25e-05,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 256,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.25,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_smoke/mine/manifest.json\",\n  \"deployment_tail_batch_size\": 2,\n  \"deployment_tail_workers\": 0,\n  \"deployment_tail_beta\": 0.25,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 8,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 5e-05,\n  \"steps_per_epoch\": 2,\n  \"total_steps\": 2,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 74,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_deployment_v8_hard_smoke/train/config.json",
+    "sha256": "724edb0934c5218a809f554c92d65191bdcb48afc88b90d2eb3678f816575546",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v8_hard_smoke/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 256,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.25,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 0,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 4,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 1,\n  \"total_steps\": 1,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 1369,\n  \"deployment_tail_weighted_rows\": 2644,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_exact_v10_20260908/train600/config.json",
+    "sha256": "5dc1a27833c3990965c41acebe8d69e9a857764ae670552662aefee5e3331371",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_exact_v10_20260908/train600\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 0.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 2,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.01,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_batchnorm_stats\": true,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 2400,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 600,\n  \"total_steps\": 600,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": [],\n  \"batchnorm_running_stats_frozen\": true\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_exact_v11_20260908/train600/config.json",
+    "sha256": "0da8f107f5b0288ea6bc2be355cdba4d4e9222881e50b90c86c125692482cb5d",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_exact_v11_20260908/train600\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 0.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 2,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.0001,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_batchnorm_stats\": true,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 2400,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 600,\n  \"total_steps\": 600,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": [],\n  \"batchnorm_running_stats_frozen\": true\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/ijbc_controlled/result/r50_controlled_d2_lam4/ijbc_tar_at_far.csv",
+    "sha256": "bb2c71ea6d966ae85e4f9569f68fbbf5ad6726869e4326f068f9e7f18be8e907",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,78.63,87.76,92.79,95.65,97.48,98.83\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/ijbc_lam8/result/r50_controlled_d2_lam8/ijbc_tar_at_far.csv",
+    "sha256": "d8cf369d9d87c8bcb6a7726348dc331e82c33efd83cbee6143c4f57d7c57f2b3",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,0.00,0.00,0.00,0.00,0.00,0.00\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/polish/config.json",
+    "sha256": "9dfe98875ce35b9c6dd2dcc005fe9bf0634854c2a5add7f73ef19b52d524d746",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/polish/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/polish\",\n  \"resume\": null,\n  \"epochs\": 3,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"tail_replay_fraction\": 0.25,\n  \"tail_replay_capacity\": 1024,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 4.0,\n  \"operator_bound_weight\": 0.0001,\n  \"operator_bound_margin\": 0.1,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 7587,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_layer3x2_20260908/ijbc/result/r50_controlled_d2_l3x2/ijbc_tar_at_far.csv",
+    "sha256": "ccd1b6d4831d88244725972ac3e42479b9a6581815e0919e104c4528991a899b",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,79.31,88.70,93.04,95.72,97.57,98.80\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_layer3x2_20260908/polish/config.json",
+    "sha256": "f6b9b66a4b9f202b0181be92d76819880cd0496ff91694442ff9afe0166ced25",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/polish/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_tail_ms1mv3_layer3x2_20260908/polish\",\n  \"resume\": null,\n  \"epochs\": 3,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"tail_replay_fraction\": 0.25,\n  \"tail_replay_capacity\": 1024,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 2.0,\n  \"operator_bound_weight\": 0.0001,\n  \"operator_bound_margin\": 0.1,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 7587,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_localbn_v13_20260908/train600/config.json",
+    "sha256": "9070948c265a12738409062f88a745d5630c107652e85461c7c87e45a16fc8d8",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_localbn_v13_20260908/train600\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 0.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 2,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.01,\n  \"deployment_tail_local_bn\": true,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_batchnorm_stats\": true,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 2400,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 600,\n  \"total_steps\": 600,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": [],\n  \"batchnorm_running_stats_frozen\": true,\n  \"deployment_tail_local_batchnorm\": true\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch1/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "b6aa5ae6481d6634c9f304448e8f7d6ef2d9912e49123416a6d43a52aea33315",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.52,93.06,95.74,97.19,98.31,99.01\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_epoch2/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "d2e0b9f5a0912189b5836654a55dcae573db51bbc0b504768b68b61fa3d8788a",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.56,93.01,95.78,97.19,98.35,99.03\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/ijbc_final_manual/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "8ffd9c2e2b1d46309a19e08bbc914bfccf4fc16b96b273eabf87c020f8b0eb60",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.82,92.98,95.76,97.17,98.33,99.04\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/train/config.json",
+    "sha256": "0c537d29ae7dd9517b61c54d9d9bba61462d516edcc2c0b7fcfba968c36e5a66",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/polish/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_tail_ms1mv3_narrow_guard_v4_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 3,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0001,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 5.0,\n  \"hint_start\": 2.0,\n  \"hint_end\": 1.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 5.0,\n  \"activation_guard_ratio\": 0.5,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.0004,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 7587,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/config.json",
+    "sha256": "cd8b73c7d7f8db8d876b88d7adc93d77452f1e1a10a1c72efeffc1658783820f",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_degree2_tail_ms1mv3_lam4_20260908/polish/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908\",\n  \"resume\": null,\n  \"epochs\": 3,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.6,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 0.5,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.25,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"canary_root\": \"ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 7587,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "9cf9edd552ae116334ecdd5c1d780cb4e8d195daf30a9763f6f8b3a5abe5596a",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,79.02,87.71,93.19,95.96,97.70,98.80\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/ijbc_best/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "942e06a722c7106568be943c48f9794ca5193b7e9c5119e97ede98993ddffeab",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,77.72,87.14,92.76,95.81,97.61,98.79\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_relative_v12_20260908/train600/config.json",
+    "sha256": "2faebb0a0538c2b456df997f9c3db4222cc0798032326a63d1136e49e43fd153",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_relative_v12_20260908/train600\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 0.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 2,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.01,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_batchnorm_stats\": true,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 2400,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 600,\n  \"total_steps\": 600,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": [],\n  \"batchnorm_running_stats_frozen\": true\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/smoke/config.json",
+    "sha256": "8e8ee16420eecd3afc45948f49a3d445084448b2c29f23cd1bd24791980657be",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/smoke\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 256,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.25,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 0,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.01,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 4,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 1,\n  \"total_steps\": 1,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": []\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/smoke_bnfixed/config.json",
+    "sha256": "a29ed4d5765aaa2b632d9ec22c3bfa86073cf107ec5f41733dfb988432deecaa",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/smoke_bnfixed\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 256,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.25,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 0,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.01,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_batchnorm_stats\": true,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 4,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 1,\n  \"total_steps\": 1,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": [],\n  \"batchnorm_running_stats_frozen\": true\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/smoke_exact_retry/config.json",
+    "sha256": "b643b647b7cfed053fea154cb439b077aea1f851a66b0403bbb7fe8522e4206f",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/smoke_exact_retry\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 256,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 0,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.01,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_batchnorm_stats\": true,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 4,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 1,\n  \"total_steps\": 1,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": [],\n  \"batchnorm_running_stats_frozen\": true\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/train/config.json",
+    "sha256": "ef9fa3ad828899a3f09f3754700ffa94c88c30e24280453367ade937aa4b79f4",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/train/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_safe_v9_20260908/train\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 2.5e-06,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 20.0,\n  \"hint_start\": 8.0,\n  \"hint_end\": 4.0,\n  \"beta\": 5.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.25,\n  \"aug_photo\": 0.25,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.8,\n  \"aug_pathological\": 0.1,\n  \"tail_replay_fraction\": 0.5,\n  \"tail_replay_capacity\": 4096,\n  \"tail_replay_warmup_steps\": 100,\n  \"causal_tail_beta\": 2.0,\n  \"activation_guard_ratio\": 1.0,\n  \"activation_lam_scale\": 1.0,\n  \"activation_lam_scale_layer3\": 1.0,\n  \"operator_bound_weight\": 0.001,\n  \"operator_bound_margin\": 0.05,\n  \"adversarial_tail_fraction\": 0.0,\n  \"adversarial_tail_steps\": 0,\n  \"adversarial_tail_epsilon\": 0.25,\n  \"adversarial_tail_step_size\": 0.125,\n  \"adversarial_tail_beta\": 1.0,\n  \"adversarial_tail_warmup_steps\": 0,\n  \"deployment_tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_degree2_tail_ms1mv3_deployment_v7_20260908/remine/manifest.json\",\n  \"deployment_tail_manifest_key\": \"output_nonfinite\",\n  \"deployment_tail_batch_size\": 8,\n  \"deployment_tail_workers\": 2,\n  \"deployment_tail_beta\": 0.5,\n  \"deployment_tail_guard_ratio\": 0.8,\n  \"deployment_tail_assignment_ratio\": 1.0,\n  \"deployment_tail_gradient_clip\": 0.01,\n  \"deployment_tail_priority_count\": 5,\n  \"deployment_tail_priority_repeats\": 256,\n  \"freeze_batchnorm_stats\": true,\n  \"freeze_through_layer3\": false,\n  \"freeze_through_layer4\": false,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 1e-05,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 2529,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\",\n  \"deployment_tail_rows\": 5,\n  \"deployment_tail_weighted_rows\": 1280,\n  \"deployment_tail_source\": \"MS1MV3 deterministic original/flip manifest:output_nonfinite\",\n  \"frozen_modules\": [],\n  \"batchnorm_running_stats_frozen\": true\n}"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_source_causal_v16_20260909/candidate_s1_0965/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "f92c816111fa858e8bf0effc3d5980798c2a39da100d536d92efa74b89ddace1",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,49.76,74.44,90.58,95.51,97.75,98.92\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_source_channel_v17_20260909/l10_k2_f09/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "87580645a50c394b2338c777b0d6d1f9af4f5c3e915d34f078abc3e52fc5f2ad",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,64.72,84.77,93.56,96.26,98.02,98.97\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_degree2_tail_source_channel_v18_20260909/c093_l10_k1_f085/ijbc/result/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "b1cd721430373dbd594332e14b435d6c77f00cf263d6509d3a6061cc45ee36da",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,80.27,90.83,94.89,96.71,98.19,98.96\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_direct_degree2/ijbc_polish_unclipped/controlled_degree2_polish_unclipped/ijbc_tar_at_far.csv",
+    "sha256": "2a6be1df06d37741667b883a0d05a62a16462dff43234067e0e24187c549eda4",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.86,92.98,95.68,97.10,98.24,98.96\r\n"
+  },
+  {
+    "path": "work_dirs/controlled_direct_degree2/polish/config.json",
+    "sha256": "ee5226cc647bf3b0c5cc51728bb3065d3985289e3176b9e93cd2761ca90f0963",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_direct_degree2/progressive/student_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_direct_degree2/polish\",\n  \"resume\": null,\n  \"epochs\": 3,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 0.1,\n  \"swap_epochs\": 0.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 7587,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_direct_degree2/progressive/config.json",
+    "sha256": "74a1e6e3a49767eaed9c2e5a9bf3f0a3d5ffd6cba2b1cee68c577915ec5d7716",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_direct_degree2/student_init.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"output_dir\": \"/work/u8798807/FHE_FR_model/work_dirs/controlled_direct_degree2/progressive\",\n  \"resume\": null,\n  \"epochs\": 8,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 8,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 1.0,\n  \"swap_epochs\": 2.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"canary_root\": \"/work/u8798807/FHE_FR_model/ms1m-retinaface-t1\",\n  \"canary_sets\": \"lfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 50,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 0,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 2529,\n  \"total_steps\": 20232,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\"\n}"
+  },
+  {
+    "path": "work_dirs/controlled_direct_degree2/tail_smoke/config.json",
+    "sha256": "b2ab6e16c4217bc5326d5c5e3ad098547c27b3c50a39b5ac8f96c19f2c28c40b",
+    "format": "json",
+    "text": "{\n  \"student_init\": \"work_dirs/controlled_direct_degree2/student_init.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"output_dir\": \"work_dirs/controlled_direct_degree2/tail_smoke\",\n  \"resume\": null,\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"num_workers\": 2,\n  \"precision\": \"bf16\",\n  \"channels_last\": true,\n  \"lr_at_512\": 0.0005,\n  \"weight_decay\": 0.0005,\n  \"lr_warmup_epochs\": 0.5,\n  \"grad_clip\": 5.0,\n  \"w_embedding\": 1.0,\n  \"hint_start\": 1.0,\n  \"hint_end\": 0.3,\n  \"beta\": 1.0,\n  \"gamma\": 10.0,\n  \"penalty_warmup_epochs\": 1.0,\n  \"swap_epochs\": 2.0,\n  \"swap_ramp\": 2.0,\n  \"lam_reg_ratio\": 0.6,\n  \"aug_lowres\": 0.2,\n  \"aug_photo\": 0.2,\n  \"aug_crop\": 0.1,\n  \"aug_stress\": 0.4,\n  \"aug_pathological\": 0.05,\n  \"tail_replay_fraction\": 0.25,\n  \"tail_replay_capacity\": 128,\n  \"tail_replay_warmup_steps\": 0,\n  \"causal_tail_beta\": 1.0,\n  \"activation_guard_ratio\": 1.0,\n  \"operator_bound_weight\": 0.0001,\n  \"operator_bound_margin\": 0.1,\n  \"canary_root\": null,\n  \"canary_sets\": \"lfw,cplfw\",\n  \"canary_batch_size\": 256,\n  \"log_every\": 1,\n  \"max_nonfinite_streak\": 20,\n  \"seed\": 42,\n  \"limit_batches\": 4,\n  \"world_size\": 4,\n  \"gradient_accumulation\": 4,\n  \"effective_global_batch\": 2048,\n  \"learning_rate\": 0.002,\n  \"steps_per_epoch\": 1,\n  \"total_steps\": 1,\n  \"degree\": 2,\n  \"reference_ranges\": \"exact run10 checkpoint buffers\",\n  \"causal_tail_layers\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"operator_bound_proxy\": \"max convolution row Frobenius norm\"\n}"
+  },
+  {
+    "path": "work_dirs/ms1mv3_poolformer_s24_fully_gated_fp32/ijbc_result/ms1mv3_poolformer_s24_fully_gated_fp32/ijbc_tar_at_far.csv",
+    "sha256": "08d8a7b92969b6aac3973daac90cb9a94fe9086598e5a3d4ac1d4230d4518324",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,89.16,93.70,95.89,97.23,98.32,99.08\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear9_layer3_9_low_lr/ijbc_layer3_9_low_lr_step250/r50_e10_linear9_layer3_9_low_lr_step250/ijbc_tar_at_far.csv",
+    "sha256": "6da84b4b06f375860f0a191b4943b4c7c94076aa505c1dee29f88bb85903fd81",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.35,91.45,94.69,96.52,97.74,98.73\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear9_layer3_9_low_lr/ijbc_layer3_9_low_lr_step500/r50_e10_linear9_layer3_9_low_lr_step500/ijbc_tar_at_far.csv",
+    "sha256": "27ac8c53bd12d5f901f4ad3536b155ca1462223c7064798af8fbcfae23b792b6",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.43,91.49,94.70,96.53,97.73,98.74\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear9_layer3_9_recovery/ijbc_layer3_9_step1000/r50_e10_linear9_layer3_9_step1000/ijbc_tar_at_far.csv",
+    "sha256": "d5685f30b69cc02d7fb6c717e413adb88148571ecb57009d63751fa812558695",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.61,91.48,94.62,96.49,97.74,98.72\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear9_layer3_9_recovery/ijbc_layer3_9_step1500/r50_e10_linear9_layer3_9_step1500/ijbc_tar_at_far.csv",
+    "sha256": "6b977256a2934e7260b6fd5f891f6ef58b0a43d4cf8e8a6109983fe81f322c47",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.81,91.48,94.69,96.51,97.75,98.72\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear9_layer3_9_recovery/ijbc_layer3_9_step500/r50_e10_linear9_layer3_9_step500/ijbc_tar_at_far.csv",
+    "sha256": "726ea2893422a41b40f47b963e6a98f7a361b043219be78d393a2e4c58a10701",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.55,91.38,94.54,96.45,97.73,98.71\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear9_layer42/ijbc_prelu_slope_static/r50_e10_linear9_prelu_slope_static/ijbc_tar_at_far.csv",
+    "sha256": "5f1cb62532bcedb20f179c59cb01afdd053b35834685284ca09d6ff8f8c79194",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,80.82,89.22,93.61,95.84,97.50,98.72\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear_sites/ijbc_layer3_8/r50_e10_linear9_layer3_8/ijbc_tar_at_far.csv",
+    "sha256": "63ff88091dfe12912eede74fc0afdfb32dd9e3cefc37720190638666d897862b",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,73.75,88.79,94.21,96.33,97.72,98.73\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_epoch10_linear_sites/ijbc_layer3_9/r50_e10_linear9_layer3_9/ijbc_tar_at_far.csv",
+    "sha256": "82d3406999730d3d42b4afea55d4ba0fc55f040bed178be895456b5fe4bd5a94",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,82.70,90.92,94.27,96.21,97.61,98.63\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/ijbc_epoch21/r50_full_poly_epoch21/ijbc_tar_at_far.csv",
+    "sha256": "0ea9fe7ea263f1278457a65a66bde2ec46d59d957dfab7ac7001b83fcccebd33",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,82.71,91.11,94.33,96.36,97.82,98.80\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/ijbc_epoch22/r50_full_poly_epoch22/ijbc_tar_at_far.csv",
+    "sha256": "758fd00e141f2cb42eacba9fb7937dbe4951b16736cddab88675fba288e76044",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.79,91.54,94.52,96.36,97.77,98.69\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/ijbc_epoch23/r50_full_poly_epoch23/ijbc_tar_at_far.csv",
+    "sha256": "013af5ea830f23b1a5d78789f0c5e4a9d1ca4f10ebbd794fc63f4ad93e324850",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.88,92.01,94.81,96.62,97.91,98.82\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/ijbc_epoch24/r50_full_poly_epoch24/ijbc_tar_at_far.csv",
+    "sha256": "b18159e6f786005b321245b72202719a6bf20b41c96a4eaa3ec5b1fab451a2a7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,87.32,92.57,94.91,96.61,97.76,98.62\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1/ijbc_epoch24_trace/r50_full_poly_epoch24_trace/ijbc_tar_at_far.csv",
+    "sha256": "b18159e6f786005b321245b72202719a6bf20b41c96a4eaa3ec5b1fab451a2a7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,87.32,92.57,94.91,96.61,97.76,98.62\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1_epoch24_plus3/ijbc_control_e25/r50_full_poly_control_e25/ijbc_tar_at_far.csv",
+    "sha256": "70c73a6824679f56630c2ee88b02f40946603a45698d0de0ce05252a5afcfad2",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,72.86,87.14,92.98,95.77,97.48,98.70\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1_epoch24_plus3/ijbc_control_e26/r50_full_poly_control_e26/ijbc_tar_at_far.csv",
+    "sha256": "2acbf4226eb2657bc23b54e7e7926021b8f237a9948e780565203469b61af5f3",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,87.91,92.62,95.07,96.74,97.85,98.72\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase1_epoch24_plus3/ijbc_control_e27/r50_full_poly_control_e27/ijbc_tar_at_far.csv",
+    "sha256": "3a3c72e335b938d3fa5f7f283616dfdb26b1cf0d863530ecfad74a1c3875c3eb",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,47.60,67.54,79.88,89.08,94.73,97.88\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_bn/ijbc_epoch23_bnreset_1000x4/r50_full_poly_epoch23_bnreset_1000x4/ijbc_tar_at_far.csv",
+    "sha256": "a7cd02529913174eef7ed650c25e826db5593f009fa9275ed296c6f128c15303",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,70.90,82.39,89.91,94.51,97.19,98.76\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_causal_layer20/ijbc_causal_l20_epoch01/r50_full_poly_causal_l20_epoch01/ijbc_tar_at_far.csv",
+    "sha256": "73599e7209d74e5aa65fe7b5733c8a92bd51eda8bbca44184d1a251ab98531dd",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.99,92.03,94.84,96.64,97.93,98.84\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_conflict_aware_recovery/ijbc_conflict_e1/r50_full_poly_conflict_e1/ijbc_tar_at_far.csv",
+    "sha256": "56ca14579f0d60f9f1b29b7c8aedbcb349c6201caa102c1b11917d0c3228050f",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.40,92.30,95.06,96.70,97.91,98.81\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_conflict_aware_recovery/ijbc_conflict_e2/r50_full_poly_conflict_e2/ijbc_tar_at_far.csv",
+    "sha256": "e64e5594b7e9b42f57cb6f73546376342e3817436ba87f3b1bf478467dfeed61",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,74.78,87.25,92.83,95.42,97.39,98.62\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_conflict_aware_recovery/ijbc_conflict_e3/r50_full_poly_conflict_e3/ijbc_tar_at_far.csv",
+    "sha256": "5e683d1422c23158f89e464f49527c97242d1ccc1b1de0e34f445e3cfb8cc8fd",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,87.52,92.82,95.23,96.71,97.83,98.73\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbb_focus1_zero/r50_full_poly_ijbb_focus1_zero/ijbb_tar_at_far.csv",
+    "sha256": "50925206bde4758242a4f178c788e0a508f1ef161c73029091e969c5fe4c88d7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbb-IJBB,34.43,86.48,92.96,95.65,97.24,98.42\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ijbc_focus1/ijbc_focus1_zero/r50_full_poly_focus1_zero/ijbc_tar_at_far.csv",
+    "sha256": "bbb9a81d7e1b9afa8960aa3a4c80a12b2e7b28bb66babf3a1861273d0be7bfb2",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.86,92.06,94.87,96.68,97.93,98.86\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_joint_recovery/ijbc_epoch01/r50_joint_epoch01/ijbc_tar_at_far.csv",
+    "sha256": "abcfa6672662e14b181e21d9f99526c2e3b181cd10c773cf9ef611f7574d0518",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.96,91.88,94.76,96.59,97.89,98.85\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_joint_recovery/ijbc_epoch02/r50_joint_epoch02/ijbc_tar_at_far.csv",
+    "sha256": "bf23f91de3810fb90b666d19e9e7333604d34f204f1397d0d78c058a3a540650",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.22,91.78,94.72,96.58,97.88,98.84\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_joint_tensor_recovery/ijbc_epoch01/r50_joint_epoch01/ijbc_tar_at_far.csv",
+    "sha256": "7725627eb9d4c069cf8de21bbe56a5778c7bb435ddb10951b357d1d36dcc6865",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.09,90.97,93.33,94.95,96.18,97.14\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_joint_tensor_recovery/ijbc_epoch02/r50_joint_epoch02/ijbc_tar_at_far.csv",
+    "sha256": "d8cf369d9d87c8bcb6a7726348dc331e82c33efd83cbee6143c4f57d7c57f2b3",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,0.00,0.00,0.00,0.00,0.00,0.00\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ms1mv3_focus1/ijbc_ms1mv3_only_zero/r50_full_poly_ms1mv3_only_zero/ijbc_tar_at_far.csv",
+    "sha256": "9614d2f07cbacbc51a7ee240fd83ba70887c12383112a1d2fe54a14447a7d844",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.57,92.03,94.85,96.63,97.90,98.83\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_ms1mv3_robust_margin_focus1/ijbc_ms1mv3_robust_margin_zero/r50_full_poly_ms1mv3_robust_margin_zero/ijbc_tar_at_far.csv",
+    "sha256": "ec78f70792be1aa2c4c4d17aeb248bac1f13816f027655d2093ed7e5ea6c0cc1",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.06,91.64,94.70,96.53,97.91,98.79\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_quadratic_probe/ijbc_stage23_q001/r50_full_poly_stage23_q001/ijbc_tar_at_far.csv",
+    "sha256": "0f7e59751a2f9a70bc1f155894ddbbb49510ed4124bad90785b12dd1b4ec84be",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,2.98,5.82,11.20,21.15,37.65,63.04\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_quadratic_probe/ijbc_stage23_q009/r50_full_poly_stage23_q009/ijbc_tar_at_far.csv",
+    "sha256": "4a3b71d5a15f9db56f6716d6184dad9e82fc353eb2e33895aa24e571d4663406",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,3.02,5.93,11.41,21.37,37.83,63.28\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_tail_recovery/ijbc_r50_full_poly_tail_epoch01/r50_full_poly_r50_full_poly_tail_epoch01/ijbc_tar_at_far.csv",
+    "sha256": "ad6eccce72afd17d055acc28f2e9e957a39fb7e355144d634c11efa1bc200ee9",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.64,92.37,95.14,96.74,97.84,98.84\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_tail_recovery/ijbc_r50_full_poly_tail_epoch02/r50_full_poly_r50_full_poly_tail_epoch02/ijbc_tar_at_far.csv",
+    "sha256": "812cac6a6a865762ccc9df8cf5656324e901bb9b20407349c9b7a2045f6426b3",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,86.56,92.54,95.11,96.70,97.80,98.77\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_wider_ms1mv3_focus2/ijbc_wider_ms1mv3_ijbfree_zero/r50_full_poly_wider_ms1mv3_ijbfree_zero/ijbc_tar_at_far.csv",
+    "sha256": "3040c1e07002ae60d8aafee1090f4884d248453aa7ee8527f2708e402bf8f0e7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,85.38,91.70,94.73,96.53,97.92,98.85\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_layerwise_poly_group4_d2/ijbc_result/ms1mv3_r50_layerwise_poly_group4_d2/ijbc_tar_at_far.csv",
+    "sha256": "5df9f6f101791ea44805aff6712443595c03503a22472e1c651065e51b94757f",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,75.66,90.08,94.51,96.55,97.97,98.77\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13/ijbc_result/ms1mv3_r50_nl13/ijbc_tar_at_far.csv",
+    "sha256": "1e5e4bc935ac5ca44e02727d0690bd00fb459d1323c878b1d476118285c152b7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,88.21,93.84,96.15,97.41,98.31,99.03\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn/ijbc_group01/nl13_herpn_group01/ijbc_tar_at_far.csv",
+    "sha256": "846815e0a6801bf76e5daf4a3785a043df2daa75ff99955df938db515eaa646c",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,79.35,91.92,95.46,97.05,98.17,98.93\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled/ijbc_scaled_group03/nl13_herpn_scaled_group03/ijbc_tar_at_far.csv",
+    "sha256": "7c3b2e6191df01719ccbdf9d54d184047b9a1588a814414f0df8439ce7ba8dcc",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,80.44,91.49,95.20,96.88,98.17,98.89\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_recovery/ijbc_group06_accuracy_final/nl13_herpn_group06_accuracy_final/ijbc_tar_at_far.csv",
+    "sha256": "b9e888ccf3e528273e2c974f52e52a2503046494d40d3aba0bd872c68d6461a0",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,80.50,88.09,92.69,95.59,97.45,98.64\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_recovery/ijbc_group07_accuracy_epoch11/nl13_herpn_group07_accuracy_epoch11/ijbc_tar_at_far.csv",
+    "sha256": "aad0c33fb90ed97ceeb539ea4b51c720d84f078d890c811a14794581d8de53a6",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,65.90,76.02,84.24,90.32,94.61,97.46\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_group06_accuracy_recovery/ijbc_group07_accuracy_final/nl13_herpn_group07_accuracy_final/ijbc_tar_at_far.csv",
+    "sha256": "917da7940ff242fadb800fe68615a5d329b3e0c4a29c1066774d13109b3bde3a",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,71.79,80.35,87.36,92.23,95.71,97.90\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03/ijbc_scaled_recover_group04/nl13_herpn_scaled_recover_group04/ijbc_tar_at_far.csv",
+    "sha256": "3dbf1014102b17ecf8656ba74847e72f433712551d0902b0afab21d825eeb8e7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,80.69,88.05,92.85,95.69,97.69,98.80\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03/ijbc_scaled_recover_group05/nl13_herpn_scaled_recover_group05/ijbc_tar_at_far.csv",
+    "sha256": "c54f91fe0caeec03f5370980135628022cbe0ec0aa44bc5e52b938ce106a47f0",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,76.91,86.37,91.79,95.20,97.30,98.62\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03/ijbc_scaled_recover_group06/nl13_herpn_scaled_recover_group06/ijbc_tar_at_far.csv",
+    "sha256": "27de020f2f5993099d770283df201d678c24c01db414ef798ec9faf442d8ca9f",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,68.86,76.78,84.72,91.03,95.43,97.90\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03/ijbc_scaled_recover_group07/nl13_herpn_scaled_recover_group07/ijbc_tar_at_far.csv",
+    "sha256": "d8f45ef651021579b095856b650fbf84f75905d01e45fca2bdd196ebc7b4115a",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,59.48,68.34,77.52,86.10,92.42,96.80\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/ijbc_selective7_layer42_epoch07_node35/nl13_herpn_selective7_layer42_epoch07_node35/ijbc_tar_at_far.csv",
+    "sha256": "c4c61a48c974bf51fc8b81e0c2f5d2359f2258a9c8b4da30ae0f550f6357e135",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,76.61,84.36,90.86,94.70,97.31,98.90\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer42/ijbc_selective7_layer42_final_node34/nl13_herpn_selective7_layer42_final_node34/ijbc_tar_at_far.csv",
+    "sha256": "b44993d01f5724ca5b02db44371fa572deed00a730ff47b94117f31bd223ccf4",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,76.86,84.47,90.84,94.70,97.30,98.90\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41/ijbc_selective8_layer42_layer41_node33/nl13_herpn_selective8_layer42_layer41_node33/ijbc_tar_at_far.csv",
+    "sha256": "077fa529b723ec33cbe22cc6aed016cd3b532403dd4f5104a5684ead71f0e21e",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,71.34,81.00,88.62,93.53,96.82,98.85\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41_recovered/ijbc_selective8_layer42_layer41_recovered/nl13_herpn_selective8_layer42_layer41_recovered/ijbc_tar_at_far.csv",
+    "sha256": "1dff7aabf583da07fec1ef2342eb3f0bc7a207ffca46e3353e61448d2c423ff8",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,73.93,82.34,89.50,93.90,96.93,98.85\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_layer42_layer41_recovered/ijbc_selective8_layer42_layer41_recovered_epoch06_node37/nl13_herpn_selective8_layer42_layer41_recovered_epoch06_node37/ijbc_tar_at_far.csv",
+    "sha256": "bf2145578b657a66b17ed909ba153a800f571b5e8c68b443922b250c0077beec",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,72.54,81.75,89.14,93.79,96.87,98.88\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_recovered_distill/ijbc_selective8_recovered_distill_epoch02/nl13_herpn_selective8_recovered_distill_epoch02/ijbc_tar_at_far.csv",
+    "sha256": "9b92f55cc2cc0edf5fd12ce148e2709622ae080e61d0fa72c1ccf20b4062de66",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,73.06,81.32,88.79,93.70,96.90,98.95\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_recovered_distill_lr1e3/ijbc_selective8_recovered_distill_lr1e3_epoch01/nl13_herpn_selective8_recovered_distill_lr1e3_epoch01/ijbc_tar_at_far.csv",
+    "sha256": "79b6f43755cd7d0f46ea644bec1ca348b2c5f4c9687edeccc5139784e119aaf6",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,69.86,78.87,87.17,93.15,96.81,98.96\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill/ijbc_selective8_resume_distill_epoch09/nl13_herpn_selective8_resume_distill_epoch09/ijbc_tar_at_far.csv",
+    "sha256": "650cfc27eb710bc36579631c57c133403080c87a4842f5d3b7b9474308661b1c",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,75.11,83.07,89.75,94.05,96.97,98.83\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill/ijbc_selective8_resume_distill_epoch10/nl13_herpn_selective8_resume_distill_epoch10/ijbc_tar_at_far.csv",
+    "sha256": "ea91f12fe3d294a6a4d6deee0f0b62281c497acccf9493223f0ecc13525c372e",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,75.72,83.49,90.01,94.15,97.00,98.82\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective8_resume_distill_lr3e4/ijbc_selective8_resume_distill_lr3e4_epoch09/nl13_herpn_selective8_resume_distill_lr3e4_epoch09/ijbc_tar_at_far.csv",
+    "sha256": "4dbf4e3bf41bb36b5c45f3f7f39861ab6eb0c4c57dc637d5c1d1a6cad3c86297",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,74.78,82.65,89.60,93.97,96.93,98.84\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl9/ijbc_result/ms1mv3_r50_nl9/ijbc_tar_at_far.csv",
+    "sha256": "b7355ca4a9e195a751b31c0ada8bdf4abcdf1316724b70733be69e69640f7840",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,88.13,93.25,95.69,97.11,98.19,99.00\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_nl9_prelu_herpn_fast_grouped/ijbc_result/ms1mv3_r50_nl9_prelu_herpn_fast_grouped/ijbc_tar_at_far.csv",
+    "sha256": "1cae6aba0ee338c4ccf6b8955fec1510cca17c990234c6c24b1ec04a864532e2",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,6.06,52.44,86.67,89.83,91.54,93.26\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_prelu_herpn/ijbc_epoch_08/ms1mv3_r50_prelu_herpn/ijbc_tar_at_far.csv",
+    "sha256": "6b0062307eb9a76ef46dbc2237be152a3b140aec5c31045308d3a753bd8908ab",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,69.60,89.59,94.43,96.32,97.47,98.36\r\n"
+  },
+  {
+    "path": "work_dirs/ms1mv3_r50_prelu_herpn/ijbc_group_03_bnrecalibrated/ms1mv3_r50_prelu_herpn/ijbc_tar_at_far.csv",
+    "sha256": "8a1609b7e364945f5c1c9f0f8dad3ab0f21beb0ac7509aa27005f695cc85726e",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,70.21,90.34,94.80,96.56,97.75,98.56\r\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/A/config.json",
+    "sha256": "c8de7f96a0578df5f0dd3fd3108314e7ce7245bec1687b89d935fbc5c3f1ccaf",
+    "format": "json",
+    "text": "{\n  \"arm\": \"A\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/A\",\n  \"checkpoint\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/progressive_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/teacher.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 2,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8192,\n  \"tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/baseline/ms1mv3/manifest.json\",\n  \"smoke\": false,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2525,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"bn_moments_fixed\": false,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5171318,\n  \"eval_rows_sha256\": \"354b370d72ea365ba22a05d0d0de5e8dc2a5a5306f373e17e8628b7b7e688537\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/A/final_eval/ijbc/polish_abcd/ijbc_tar_at_far.csv",
+    "sha256": "00b8a9d851e5c4164c67b548707e0c267605f946ba2a9196f5f990001ddd5ff8",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.65,92.33,95.37,97.00,98.23,98.94\r\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/B/config.json",
+    "sha256": "bb0702088574422f19c44a2f9ecac5896319a8644901ac518ab6e9f86236dcb7",
+    "format": "json",
+    "text": "{\n  \"arm\": \"B\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/B\",\n  \"checkpoint\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/progressive_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/teacher.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 2,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8192,\n  \"tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/baseline/ms1mv3/manifest.json\",\n  \"smoke\": false,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2525,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": false,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5171318,\n  \"eval_rows_sha256\": \"354b370d72ea365ba22a05d0d0de5e8dc2a5a5306f373e17e8628b7b7e688537\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/B/final_eval/ijbc/polish_abcd/ijbc_tar_at_far.csv",
+    "sha256": "68e82647b728676094085fe90bc9c1b031ef8c2e5caf010e78631d69322f577f",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.07,92.37,95.27,96.95,98.22,98.99\r\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/C/config.json",
+    "sha256": "790333b65dcafc457301a7ffb355e4d5327e198a29dd99e0ce5c1d66875b7134",
+    "format": "json",
+    "text": "{\n  \"arm\": \"C\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/C\",\n  \"checkpoint\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/progressive_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/teacher.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 2,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8192,\n  \"tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/baseline/ms1mv3/manifest.json\",\n  \"smoke\": false,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2525,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": true,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5171318,\n  \"eval_rows_sha256\": \"354b370d72ea365ba22a05d0d0de5e8dc2a5a5306f373e17e8628b7b7e688537\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/C/final_eval/ijbc/polish_abcd/ijbc_tar_at_far.csv",
+    "sha256": "70047345fd5436488642bdee59a69c4c21758c9b147eef5b044fef21b9c08636",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.15,92.07,95.19,96.89,98.20,98.97\r\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/D/config.json",
+    "sha256": "c2ae415993dfd0de0ba05625fb84ded898d000347ff4fbbe011a7b19e5f70730",
+    "format": "json",
+    "text": "{\n  \"arm\": \"D\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/D\",\n  \"checkpoint\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/progressive_final.pt\",\n  \"teacher\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/inputs/teacher.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 2,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8192,\n  \"tail_manifest\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_20260915/baseline/ms1mv3/manifest.json\",\n  \"smoke\": false,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2525,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": true,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5171318,\n  \"eval_rows_sha256\": \"354b370d72ea365ba22a05d0d0de5e8dc2a5a5306f373e17e8628b7b7e688537\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/D/final_eval/ijbc/polish_abcd/ijbc_tar_at_far.csv",
+    "sha256": "ea1ca0451cf771997beec6afe491fff61cf572c14d8c17728e4015eaaed2e098",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.19,92.20,95.18,96.89,98.22,98.99\r\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_20260915/baseline/ijbc/polish_abcd/ijbc_tar_at_far.csv",
+    "sha256": "8bc8a264e81a3aefbf71636247fe1434e5b01f7068b835fa3ddd68f9206b3c6b",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,83.50,92.24,95.35,97.01,98.26,99.01\r\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run1/A/config.json",
+    "sha256": "7417915e223ed9ad92d64904863aa03e72d358942842535271ec85e1b81f78d1",
+    "format": "json",
+    "text": "{\n  \"arm\": \"A\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run1/A\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 4,\n  \"global_batch\": 16,\n  \"workers\": 0,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 1,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"bn_moments_fixed\": false,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run1/B/config.json",
+    "sha256": "45ad6cad9f5b46f1e5b2148a5581dee79f5d750ffe87c2089181ea5c852c2c5a",
+    "format": "json",
+    "text": "{\n  \"arm\": \"B\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run1/B\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 4,\n  \"global_batch\": 16,\n  \"workers\": 0,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 1,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": false,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run1/C/config.json",
+    "sha256": "a9708b61c4c7a607a3109b6c7afd87602af3ac7878b533e4dd3467018c3fc7a7",
+    "format": "json",
+    "text": "{\n  \"arm\": \"C\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run1/C\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 4,\n  \"global_batch\": 16,\n  \"workers\": 0,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 1,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": true,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run1/D/config.json",
+    "sha256": "5b049d990e2b9c228137fa467cfaeb25560c9cab46df35763733ae815700e6d4",
+    "format": "json",
+    "text": "{\n  \"arm\": \"D\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run1/D\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 4,\n  \"global_batch\": 16,\n  \"workers\": 0,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 1,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": true,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run2/A/config.json",
+    "sha256": "f332b78f13c2fe53c8d5e8305a8e60254a937419f1ec69f0f473b62ce5210baa",
+    "format": "json",
+    "text": "{\n  \"arm\": \"A\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run2/A\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\"\n  ],\n  \"bn_moments_fixed\": false,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run2/B/config.json",
+    "sha256": "7bf839575a882e60e78ecf3ac7a8deb60c4f7cc4fbbc9c30df9d187e53a27ee9",
+    "format": "json",
+    "text": "{\n  \"arm\": \"B\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run2/B\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": false,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run2/C/config.json",
+    "sha256": "538ff23cef9f441dcfdb625e728f1cbe1849b82a5dea38a6ffe6f8c639987552",
+    "format": "json",
+    "text": "{\n  \"arm\": \"C\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run2/C\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": true,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/polish_abcd_smoke_20260915/run2/D/config.json",
+    "sha256": "8c6ae31918c7606a546a3d6592e7874864addda3a0119a98a09c0c7b693ae538",
+    "format": "json",
+    "text": "{\n  \"arm\": \"D\",\n  \"output\": \"/work/u8798807/FHE_FR_model/work_dirs/polish_abcd_smoke_20260915/run2/D\",\n  \"checkpoint\": \"work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_final.pt\",\n  \"teacher\": \"work_dirs/ms1mv3_r50/model.pt\",\n  \"dataset_root\": \"ms1m-retinaface-t1\",\n  \"epochs\": 1,\n  \"batch_size\": 128,\n  \"global_batch\": 2048,\n  \"workers\": 4,\n  \"seed\": 20260915,\n  \"audit_images\": 8,\n  \"tail_manifest\": null,\n  \"smoke\": true,\n  \"world_size\": 4,\n  \"accumulation\": 4,\n  \"steps_per_epoch\": 2,\n  \"precision\": \"fp32\",\n  \"base_lr\": 0.002,\n  \"causal_sites\": [\n    \"prelu\",\n    \"layer1.0.prelu\",\n    \"layer1.1.prelu\",\n    \"layer1.2.prelu\",\n    \"layer2.0.prelu\",\n    \"layer2.1.prelu\",\n    \"layer2.2.prelu\",\n    \"layer2.3.prelu\",\n    \"layer3.0.prelu\",\n    \"layer3.1.prelu\",\n    \"layer3.2.prelu\",\n    \"layer3.3.prelu\",\n    \"layer3.4.prelu\",\n    \"layer3.5.prelu\",\n    \"layer3.6.prelu\",\n    \"layer3.7.prelu\",\n    \"layer3.8.prelu\",\n    \"layer3.9.prelu\",\n    \"layer3.10.prelu\",\n    \"layer3.11.prelu\",\n    \"layer3.12.prelu\",\n    \"layer3.13.prelu\",\n    \"layer4.0.prelu\",\n    \"layer4.1.prelu\",\n    \"layer4.2.prelu\"\n  ],\n  \"bn_moments_fixed\": true,\n  \"coefficients_fixed\": true,\n  \"approximation_target\": \"original per-channel PReLU\",\n  \"interval\": \"checkpoint [-lam_fit,lam_fit]; no interval change\",\n  \"checkpoint_sha256\": \"af5f76e18cd46ea3a15079e1c9405774a3d5a28cf9150e677f73d8f13d818d0f\",\n  \"teacher_sha256\": \"ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a\",\n  \"data_selection\": \"MS1MV3 only; no IJB fitting or selection\",\n  \"inference_clipping\": false,\n  \"routing_guard_fit_ratio\": 4.0,\n  \"repair_target_fit_ratio\": 1.0,\n  \"train_rows\": 5179502,\n  \"eval_rows_sha256\": \"792ad4c2872753f1ffbfa0c30ecf89747981ce8ddb2d4c3863c734c9bbe86231\"\n}\n"
+  },
+  {
+    "path": "work_dirs/progressive_best_bts_ms1k_20260917/ijbc_full/ms1k_bts_zero_failed/ijbc_tar_at_far.csv",
+    "sha256": "940308ab533c2f0779d86da2e5f0f076e03cc6d1716437b2daed5b80c9b8f681",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.68,92.02,95.14,96.87,98.15,98.96\r\n"
+  },
+  {
+    "path": "work_dirs/progressive_best_unscaled_ijbc_20260919/result/unscaled_nonfinite_only/ijbc_tar_at_far.csv",
+    "sha256": "00be7b93ac06820963be3a50b227ab4a6c3cfc167f3933d2e9211a6a62ee21a4",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.68,92.02,95.14,96.86,98.15,98.96\r\n"
+  },
+  {
+    "path": "work_dirs/quadT12c_ijbc/controlled_d2/ijbc_tar_at_far.csv",
+    "sha256": "2786c85e9f7666dea751cd5392325d64d7c2858e5b5c57b67db21b922b6b93f7",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,81.21,92.82,95.62,97.10,98.13,98.84\r\n"
+  },
+  {
+    "path": "work_dirs/shared_d2_A_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "sha256": "343b01177910f635f6b3c1a8727febd9259346a36b662c277de4a934c4a04b9f",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,4.22,7.88,14.16,25.65,43.08,67.99\r\n"
+  },
+  {
+    "path": "work_dirs/shared_d2_B_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "sha256": "c8d24528f8b11f3dfd924699b550eb8497e30c0048fbd9d39f66cffd67aafd87",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,4.78,7.99,15.68,27.65,46.35,71.37\r\n"
+  },
+  {
+    "path": "work_dirs/shared_d2_C_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "sha256": "d8cf369d9d87c8bcb6a7726348dc331e82c33efd83cbee6143c4f57d7c57f2b3",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,0.00,0.00,0.00,0.00,0.00,0.00\r\n"
+  },
+  {
+    "path": "work_dirs/shared_d2_D_20260913/final_ijbc/shared_d2/ijbc_tar_at_far.csv",
+    "sha256": "0289c4e3dea2bd488a2e28fda9183d0baa9b646cf772394917faa09aba4c3d8e",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,71.54,91.11,96.06,97.56,98.51,99.10\r\n"
+  },
+  {
+    "path": "work_dirs/student_best_ijbc/student_best/ijbc_tar_at_far.csv",
+    "sha256": "9979b81782a535804a1c64673373276344e2c706ce5d94f735eb68a55c448a9c",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,84.83,91.55,94.74,96.57,98.02,98.89\r\n"
+  },
+  {
+    "path": "work_dirs/unclipped_round_20260913/adaptive_bn/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "sha256": "9e3e98317624b9aed82aeb00408a4e95d2ff1fe6543d8e1e0c1a19062db0fc4e",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,25.43,37.80,55.51,74.90,88.33,95.22\r\n"
+  },
+  {
+    "path": "work_dirs/unclipped_round_20260913/adaptive_bn_free_retry/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "sha256": "77b9af54b7953fd6239cd6dc43fb3287b500d6d02c2b99505165097182fe3402",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,8.38,13.33,21.64,34.85,52.32,75.47\r\n"
+  },
+  {
+    "path": "work_dirs/unclipped_round_20260913/adaptive_bn_moderate/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "sha256": "7098563429af0b4bdda08225533333282f1b992c0cf1b768c634eea0521f7b4b",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,5.55,9.50,16.75,28.36,45.97,69.71\r\n"
+  },
+  {
+    "path": "work_dirs/unclipped_round_20260913/adaptive_prefix/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "sha256": "48512f625d078e19886df0897ab8ee4c978d2185cffe01069adfdcc6f4ab8d90",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,0.18,47.87,71.02,74.78,76.32,77.56\r\n"
+  },
+  {
+    "path": "work_dirs/unclipped_round_20260913/gradual/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "sha256": "c32ed9fa3017d7e03352a436bfb1e89245f5e707909252938664c7fc7789e2f0",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,0.05,0.17,2.76,74.89,85.64,87.84\r\n"
+  },
+  {
+    "path": "work_dirs/unclipped_round_20260913/projected/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "sha256": "c5d9dd88d7b0e7f8c5feb02fa2009d4cdbf48ee091505d4a4f2505038c40b2a1",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,0.22,1.87,18.91,43.91,57.78,67.35\r\n"
+  },
+  {
+    "path": "work_dirs/unclipped_round_20260913/small_curvature/final_ijbc/unclipped_d2/ijbc_tar_at_far.csv",
+    "sha256": "9f3c6f91e053d3244732a87cb6b36f1c70d83a93a932839888a7517e2cd2b2ab",
+    "format": "csv",
+    "text": "Methods,1e-06,1e-05,0.0001,0.001,0.01,0.1\r\nijbc-IJBC,8.32,16.39,26.76,40.85,59.59,80.96\r\n"
+  }
+]

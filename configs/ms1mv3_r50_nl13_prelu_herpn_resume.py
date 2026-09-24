@@ -1,9 +1,5 @@
-"""Resume the interrupted four-rank NL13 PReLU-to-HerPN conversion."""
+"""Compatibility entry; edit configs/reduced_nonlinearity/ms1mv3_r50_nl13_prelu_herpn_resume.py instead."""
+from importlib import import_module as _import_module
 
-from .ms1mv3_r50_nl13_prelu_herpn import config
-
-
-# The original run stopped on a TensorBoard filesystem-quota error, while the
-# model and all four rank-local PartialFC checkpoints remained finite.
-config.resume = True
-config.tensorboard = False
+_module = _import_module('configs.reduced_nonlinearity.ms1mv3_r50_nl13_prelu_herpn_resume')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

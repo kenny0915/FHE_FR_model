@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "run_id": "poly_run10",
+  "experiment_id": "polynomial_conversion",
+  "family": "polynomial_conversion",
+  "status": "historical_documented",
+  "checkpoint": {
+    "path": "poly_run10/model/student_best.pt",
+    "sha256": "07c75f2843c76fedea4b2af93288e25b1f2d414773dae71e7e5d347fb23e613b"
+  },
+  "parent_checkpoint": {
+    "path": "/work/u8498934/experiments/poly/run9/student_final.pt",
+    "sha256": "unknown"
+  },
+  "code": {
+    "commit": "unknown",
+    "dirty": null
+  },
+  "metadata_source": "experiments/representatives.json",
+  "config_snapshots": [
+    {
+      "path": "poly_run10/train/config.json",
+      "sha256": "e7047903b89f1267df92b32cd403b771e760ca1479ff35d671c14d2c677d76d4",
+      "config": {
+        "student_init": "/work/u8498934/experiments/poly/run9/student_final.pt",
+        "teacher_weights": "/work/u8498934/model/model.pt",
+        "data_root": "/work/u8498934/data",
+        "dataset": "ms1m-retinaface-t1",
+        "output_dir": "/work/u8498934/experiments/poly/run10",
+        "resume": null,
+        "gpus": 8,
+        "num_nodes": 2,
+        "batch_size": 128,
+        "num_workers": 10,
+        "epochs": 3.0,
+        "precision": "bf16-mixed",
+        "channels_last": true,
+        "optimizer": "sgd",
+        "lr": 0.002,
+        "weight_decay": 0.0005,
+        "lr_warmup_epochs": 0.5,
+        "grad_clip": 5.0,
+        "w_emb": 1.0,
+        "hint_points": "block",
+        "hint_w0": 1.0,
+        "hint_w1": 0.3,
+        "gamma": 10.0,
+        "penalty": "hinge",
+        "beta": 1.0,
+        "aug_lowres": 0.2,
+        "aug_photo": 0.2,
+        "aug_stress": 0.4,
+        "aug_pathological": 0.05,
+        "lam_scale": "",
+        "lam_reg_ratio": 0.6,
+        "warmup_epochs": 0.1,
+        "swap_epochs": 0.0,
+        "swap_ramp": 2.0,
+        "max_nan_streak": 20,
+        "canary_sets": [
+          "lfw",
+          "cplfw"
+        ],
+        "canary_every": 1000,
+        "log_every": 50,
+        "ckpt_every": 2000,
+        "seed": 42,
+        "limit_train_batches": 1.0,
+        "global_batch": 2048,
+        "world_size": 16,
+        "arch_module": "/work/u8498934/model/iresnet.py",
+        "arch_fn": "iresnet50",
+        "arch_config": "baseline",
+        "input_order": "rgb"
+      }
+    }
+  ],
+  "calibration": "historical_ijbb_escape_adjustment_overlap_with_ijbc",
+  "polynomial": {
+    "target": "per-channel PReLU",
+    "degree": 4,
+    "interval": "per-channel [-lam_fit, lam_fit]; see checkpoint buffers and source report",
+    "multiplicative_depth_per_activation": 2,
+    "inference_clipping": false
+  },
+  "actual_fhe_execution": "not_measured",
+  "evidence": [
+    {
+      "path": "controlled_degree2/README.md",
+      "sha256": "f9ed1cc9c4acaecb47524cdcb9b6bab97e1340ff60202acb21b7fa0378acb444"
+    },
+    {
+      "path": "poly_run10/",
+      "sha256": "unknown"
+    }
+  ],
+  "lineage_table": "reports/tables/lineage.csv",
+  "evaluations": [],
+  "notes": "Degree-4 reference; parent is outside this checkout. README teacher=None conflicts with train/config.json teacher_weights; preserve both sources, do not claim no teacher."
+}

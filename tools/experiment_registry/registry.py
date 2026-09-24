@@ -4,8 +4,15 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
+
+# Support both direct CLI execution and importlib-based lightweight tests.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from evidence import capture, local_rows, lineage_rows
+from catalog import publish
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -88,6 +95,9 @@ def normalized_results(root):
                     checkpoint=model['checkpoint'], checkpoint_sha256=model['checkpoint_sha256'],
                     dataset='IJB-C', protocol='0915_full_original_flip', calibration=meta['calibration'],
                     finite_scope=meta['finite_scope'], nonfinite_embedding_rows=0,
+                    nonfinite_source_images='unknown', failed_source_images='unknown',
+                    zeroed_augmented_rows='unknown', failure_policy='see_0915_report_no_observed_nonfinite_embeddings',
+                    evidence_scope='observed_finite_' + meta['finite_scope'], actual_fhe_execution='not_measured',
                     far_rule=rule, requested_far=point['requested_far'], actual_far=point[actual],
                     tar_percent=point[tar], threshold=point['threshold'] if rule == 'strict' else 'unknown',
                     source=source, source_sha256=digest(root / source),
@@ -114,7 +124,50 @@ def historical_results(root):
     return rows
 
 
-def build(root, scan=False):
+def deployment_results(root):
+    rows = []
+    models = json.loads((root / 'experiments/representatives.json').read_text())
+    for meta in models:
+        if not meta.get('raw_metrics'):
+            continue
+        source = meta['raw_metrics']
+        raw = json.loads((root / source).read_text())
+        summary = json.loads((root / meta['failure_summary']).read_text())
+        for method in raw:
+            for far, point in method['points'].items():
+                for rule, value in [('nearest', point), ('strict', point['at_or_below_requested_far'])]:
+                    rows.append(dict(run_id=meta['run_id'], evaluation_id=meta['run_id'],
+                        checkpoint=meta['checkpoint'], checkpoint_sha256=meta['checkpoint_sha256'],
+                        dataset='IJB-C', protocol=meta['protocol'], calibration=meta['calibration'],
+                        finite_scope='six_boundaries_and_embedding_before_zeroing', nonfinite_embedding_rows='unknown',
+                        nonfinite_source_images=summary['nonfinite_source_images'],
+                        failed_source_images=summary['failed_source_images'],
+                        zeroed_augmented_rows=summary['zeroed_augmented_rows'], failure_policy=summary['failure_policy'],
+                        evidence_scope='failure_filtered_plaintext', actual_fhe_execution='not_measured',
+                        far_rule=rule, requested_far=float(far), actual_far=value['actual_far'],
+                        tar_percent=value['tar_percent'], threshold='unknown',
+                        source=source, source_sha256=digest(root / source),
+                        scores=meta['scores'], scores_sha256='unknown'))
+    return rows
+
+
+def validate_evaluations(rows):
+    seen = set()
+    for row in rows:
+        identity = (row['checkpoint_sha256'], row['evaluation_id'], row['far_rule'], row['requested_far'])
+        if identity in seen:
+            raise ValueError('Duplicate evaluation operating point: ' + str(identity))
+        seen.add(identity)
+        tar, actual, requested = row['tar_percent'], row['actual_far'], row['requested_far']
+        if not all(math.isfinite(x) for x in (tar, actual, requested)):
+            raise ValueError('Nonfinite ROC measurement')
+        if not (0 <= tar <= 100 and 0 <= actual <= 1 and 0 < requested <= 1):
+            raise ValueError('ROC measurement outside valid interval')
+        if row['far_rule'] == 'strict' and actual > requested:
+            raise ValueError('Strict FAR exceeds request')
+
+
+def build(root, scan=False, capture_local=False):
     if scan:
         rows = inventory(root)
         (root / 'experiments/inventory.json').write_text(json.dumps(rows, indent=2) + '\n')
@@ -123,13 +176,21 @@ def build(root, scan=False):
                       for k in ('checkpoints', 'configs', 'metrics', 'logs')}) for r in rows]
         write_csv(root / 'experiments/index.csv', index,
                   ['run_id', 'path', 'family_hint', 'review_status', 'checkpoints_count', 'configs_count', 'metrics_count', 'logs_count'])
-    for name, rows in [('evaluations', normalized_results(root)), ('historical_evidence', historical_results(root))]:
+    if capture_local:
+        capture(root)
+    tables = [('evaluations', normalized_results(root) + deployment_results(root)),
+              ('historical_evidence', historical_results(root)),
+              ('local_evidence', local_rows(root)), ('lineage', lineage_rows(root))]
+    validate_evaluations(tables[0][1])
+    for name, rows in tables:
         write_csv(root / ('reports/tables/' + name + '.csv'), rows, list(rows[0]))
         print('{}: {} rows'.format(name, len(rows)))
+    publish(root, tables[0][1], write_csv, digest)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scan', action='store_true', help='Refresh local work_dirs inventory; requires artifacts')
+    parser.add_argument("--capture-local", action="store_true", help="Snapshot local configs and TAR CSVs for portable rebuilds")
     args = parser.parse_args()
-    build(ROOT, args.scan)
+    build(ROOT, args.scan, args.capture_local)

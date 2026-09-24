@@ -1,0 +1,184 @@
+[
+  {
+    "source": "WIDER_train.zip",
+    "destination": "artifacts/archives/WIDER_train.zip",
+    "identity": {
+      "bytes": 1465602149,
+      "device": 2079458569,
+      "inode": 13533137634044608513,
+      "mtime_ns": 1788627319040982194
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "adaptive-387373.err",
+    "destination": "artifacts/scheduler_logs/adaptive-387373.err",
+    "identity": {
+      "bytes": 13289,
+      "device": 2079458569,
+      "inode": 12751124585968304129,
+      "mtime_ns": 1789439112815787537
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "adaptive-387373.out",
+    "destination": "artifacts/scheduler_logs/adaptive-387373.out",
+    "identity": {
+      "bytes": 5792,
+      "device": 2079458569,
+      "inode": 13955814708617936897,
+      "mtime_ns": 1789439118371668731
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "adaptive-387411.err",
+    "destination": "artifacts/scheduler_logs/adaptive-387411.err",
+    "identity": {
+      "bytes": 8999,
+      "device": 2079458569,
+      "inode": 16140217738257825793,
+      "mtime_ns": 1789439394870755256
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "adaptive-387411.out",
+    "destination": "artifacts/scheduler_logs/adaptive-387411.out",
+    "identity": {
+      "bytes": 18201,
+      "device": 2079458569,
+      "inode": 10484525950066819073,
+      "mtime_ns": 1789439481802894356
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "adaptive-387435.err",
+    "destination": "artifacts/scheduler_logs/adaptive-387435.err",
+    "identity": {
+      "bytes": 15863,
+      "device": 2079458569,
+      "inode": 2257106099137216513,
+      "mtime_ns": 1789440290872603585
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "adaptive-387435.out",
+    "destination": "artifacts/scheduler_logs/adaptive-387435.out",
+    "identity": {
+      "bytes": 72223,
+      "device": 2079458569,
+      "inode": 3705330086685245441,
+      "mtime_ns": 1789440344913552109
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "aligned_images_DB.tar.gz",
+    "destination": "artifacts/archives/aligned_images_DB.tar.gz",
+    "identity": {
+      "bytes": 5740942762,
+      "device": 2079458569,
+      "inode": 13816016990213046273,
+      "mtime_ns": 1788923733364206093
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "faces_webface_112x112.zip",
+    "destination": "artifacts/archives/faces_webface_112x112.zip",
+    "identity": {
+      "bytes": 2787480599,
+      "device": 2079458569,
+      "inode": 14688548172511117313,
+      "mtime_ns": 1787855700562155179
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "ijb-testsuite.tar",
+    "destination": "artifacts/archives/ijb-testsuite.tar",
+    "identity": {
+      "bytes": 9169172480,
+      "device": 2079458569,
+      "inode": 1257405974087663617,
+      "mtime_ns": 1787897506664002204
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "ms1m-retinaface-t1.zip",
+    "destination": "artifacts/archives/ms1m-retinaface-t1.zip",
+    "identity": {
+      "bytes": 26157852001,
+      "device": 2079458569,
+      "inode": 4443982808421236737,
+      "mtime_ns": 1787900043000000000
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "poly_run10_20260906.zip",
+    "destination": "artifacts/archives/poly_run10_20260906.zip",
+    "identity": {
+      "bytes": 464998751,
+      "device": 2079458569,
+      "inode": 2187740229565480961,
+      "mtime_ns": 1788631977343092723
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "wider_face_split.zip",
+    "destination": "artifacts/archives/wider_face_split.zip",
+    "identity": {
+      "bytes": 3591642,
+      "device": 2079458569,
+      "inode": 2231101944316821505,
+      "mtime_ns": 1788630643165370109
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  },
+  {
+    "source": "work_dirs.tar.gz",
+    "destination": "artifacts/archives/work_dirs.tar.gz",
+    "identity": {
+      "bytes": 71674968683,
+      "device": 2079458569,
+      "inode": 9138532183990206465,
+      "mtime_ns": 1787926984000000000
+    },
+    "state": "relocated",
+    "retention": "retain_no_verified_external_backup",
+    "sha256": "not_computed"
+  }
+]

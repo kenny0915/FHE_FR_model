@@ -1,0 +1,11 @@
+{
+  "herpn_epoch10_activation_analysis.md": "reports/studies/herpn_epoch10_activation_analysis.md",
+  "iresnet50_low_degree_polynomial_practicality_report.md": "reports/studies/iresnet50_low_degree_polynomial_practicality_report.md",
+  "iresnet50_reduced_nonlinearity_experiment.md": "reports/studies/iresnet50_reduced_nonlinearity_experiment.md",
+  "layerwise_poly_hard_containment_report.md": "reports/studies/layerwise_poly_hard_containment_report.md",
+  "nl13_polynomial_replacement_results.md": "reports/studies/nl13_polynomial_replacement_results.md",
+  "pillar_espn_face_experiment.md": "reports/studies/pillar_espn_face_experiment.md",
+  "pillar_r50_experiment.md": "reports/studies/pillar_r50_experiment.md",
+  "poolformer_s24_reduced_gelu_experiment.md": "reports/studies/poolformer_s24_reduced_gelu_experiment.md",
+  "README_arcface_author.md": "docs/upstream/arcface.md"
+}

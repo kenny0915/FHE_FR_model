@@ -1,10 +1,5 @@
-"""Resume the degree-8 S=16 curriculum in FP32 after FP16 overflow."""
+"""Compatibility entry; edit configs/reduced_nonlinearity/ms1mv3_r50_nl13_precise_relu_d8_s16_resume_fp32.py instead."""
+from importlib import import_module as _import_module
 
-from copy import deepcopy
-
-from configs.ms1mv3_r50_nl13_precise_relu_d8_s16 import config as d8_config
-
-
-config = deepcopy(d8_config)
-config.resume = True
-config.fp16 = False
+_module = _import_module('configs.reduced_nonlinearity.ms1mv3_r50_nl13_precise_relu_d8_s16_resume_fp32')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

@@ -1,15 +1,5 @@
-"""Resume the corrected group-4 conversion from full epoch-3 checkpoints.
+"""Compatibility entry; edit configs/polynomial_conversion/ms1mv3_r50_layerwise_poly_group4_resume_epoch3.py instead."""
+from importlib import import_module as _import_module
 
-Place ``checkpoint_gpu_0.pt`` through ``checkpoint_gpu_3.pt`` in the output
-directory configured by the base experiment. The checkpoints contain epoch 3,
-optimizer, scheduler, PartialFC, and per-rank state, so training continues at
-the group-1 completion boundary without replaying earlier epochs.
-"""
-
-from easydict import EasyDict as edict
-
-from configs.ms1mv3_r50_layerwise_poly_group4 import config as base_config
-
-
-config = edict(base_config.copy())
-config.resume = True
+_module = _import_module('configs.polynomial_conversion.ms1mv3_r50_layerwise_poly_group4_resume_epoch3')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

@@ -1,20 +1,5 @@
-"""Widen the two empirically unstable early PILLAR activation intervals.
+"""Compatibility entry; edit configs/polynomial_conversion/ms1mv3_r50_pillar_espn_scale4_early.py instead."""
+from importlib import import_module as _import_module
 
-The base polynomial q approximates ReLU on [-5, 5].  These two sites use
-``4 * q(x / 4)``, which approximates ReLU on [-20, 20] while retaining degree
-4 and multiplicative depth 2.  All other 23 activation sites remain q(x).
-"""
-
-from easydict import EasyDict as edict
-
-from configs.ms1mv3_r50_pillar_espn import config as _base_config
-
-
-config = edict(_base_config.copy())
-config.output = "work_dirs/ms1mv3_r50_pillar_espn_d4_scale4_early"
-config.resume = True
-config.pillar_input_scale = 1.0
-config.pillar_input_scale_overrides = {
-    "layer1.1.prelu": 4.0,
-    "layer1.2.prelu": 4.0,
-}
+_module = _import_module('configs.polynomial_conversion.ms1mv3_r50_pillar_espn_scale4_early')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

@@ -6,7 +6,12 @@
     "calibration": "baseline_reference",
     "finite_scope": "full_module_audit",
     "source": "docs/0915_result/README.md",
-    "lineage": "configs/ms1mv3_r50.py"
+    "lineage": "configs/ms1mv3_r50.py",
+    "checkpoint": "work_dirs/ms1mv3_r50/model.pt",
+    "checkpoint_sha256": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a",
+    "actual_fhe_execution": "not_measured",
+    "training_commit": "unknown",
+    "checkpoint_verification": "sha256_verified_local_2026-09-24"
   },
   {
     "run_id": "controlled_degree2_accuracy_recovery_head_only_v3_20260908",
@@ -15,7 +20,22 @@
     "calibration": "no_ijbc_calibration_in_verified_chain_but_historical_ijbb_overlap",
     "finite_scope": "augmented_embeddings_only",
     "source": "docs/0915_result/README.md",
-    "lineage": "docs/0915_result/no_ijbc_training_chain.json"
+    "lineage": "docs/0915_result/no_ijbc_training_chain.json",
+    "checkpoint": "work_dirs/controlled_degree2_accuracy_recovery_head_only_v3_20260908/train/student_best.pt",
+    "checkpoint_sha256": "618d6ee7b6b38a35eb8f5e768df13c07a3d2acc6a7fa5287275f046e5c7e920b",
+    "actual_fhe_execution": "not_measured",
+    "training_commit": "unknown",
+    "polynomial": {
+      "target": "per-channel PReLU",
+      "degree": 2,
+      "interval": "per-channel [-lam_fit, lam_fit]; see checkpoint buffers and source report",
+      "multiplicative_depth_per_activation": 1,
+      "inference_clipping": false
+    },
+    "checkpoint_verification": "sha256_verified_local_2026-09-24",
+    "parent_checkpoint": "work_dirs/controlled_degree2_tail_ms1mv3_refine125_20260908/student_final.pt",
+    "parent_checkpoint_sha256": "unknown",
+    "teacher_checkpoint": "work_dirs/ms1mv3_r50/model.pt"
   },
   {
     "run_id": "channelwise_template_supervised01_20260915",
@@ -24,7 +44,21 @@
     "calibration": "ijbc_images_and_labels_calibration_set_performance",
     "finite_scope": "full_module_audit",
     "source": "docs/0915_result/README.md",
-    "lineage": "docs/0915_result/calibrated_training_chain.json"
+    "lineage": "docs/0915_result/calibrated_training_chain.json",
+    "checkpoint": "work_dirs/channelwise_template_supervised01_20260915/ijbc_full/evaluated_checkpoint.pt",
+    "checkpoint_sha256": "64e3e65555638cbe43d93f104a9d8e913346bab070e4538cebf950479fb3fddf",
+    "actual_fhe_execution": "not_measured",
+    "training_commit": "unknown",
+    "polynomial": {
+      "target": "per-channel PReLU",
+      "degree": 2,
+      "interval": "per-channel [-lam_fit, lam_fit]; see checkpoint buffers and source report",
+      "multiplicative_depth_per_activation": 1,
+      "inference_clipping": false
+    },
+    "checkpoint_verification": "sha256_verified_local_2026-09-24",
+    "parent_checkpoint": "work_dirs/channelwise_pair_geometry_20260915/ijbc_full/evaluated_checkpoint.pt",
+    "parent_checkpoint_sha256": "e76a52943c538df315414a6c9f147dee239f31c337148125e56f6eeca4bf8a7d"
   },
   {
     "run_id": "progressive_best_bts_ms1k_20260917",
@@ -33,20 +67,86 @@
     "lineage": "docs/experiments/progressive_release_20260921.json",
     "checkpoint": "work_dirs/progressive_best_bts_ms1k_20260917/scaled/student_scaled.pt",
     "checkpoint_sha256": "f6b8fddafc8d8cfca5127d1732781b6eeaa7d9e7727524d5123e002bd1165dc1",
-    "notes": "Do not inherit accuracy from another checkpoint or the 100-image scaling variant; actual FHE execution unknown."
+    "notes": "21 failed source images; 42 zeroed views. Range-gated plaintext simulation, not actual FHE.",
+    "actual_fhe_execution": "not_measured",
+    "training_commit": "unknown",
+    "polynomial": {
+      "target": "per-channel PReLU",
+      "degree": 2,
+      "interval": "per-channel [-s*lam_fit, s*lam_fit]; calibration.json stage scales",
+      "multiplicative_depth_per_activation": 1,
+      "inference_clipping": false
+    },
+    "raw_metrics": "docs/experiments/progressive_best_bts_ms1k_20260917/ijbc_tar_at_far_raw.json",
+    "failure_summary": "docs/experiments/progressive_best_bts_ms1k_20260917/bts.summary.json",
+    "protocol": "fp32_tf32_off_original_flip_bts_range_and_nonfinite_zero_both_views",
+    "calibration": "ms1mv3_1000_images_for_scaling_ancestor_history_see_lineage",
+    "scores": "work_dirs/progressive_best_bts_ms1k_20260917/ijbc_full/ms1k_bts_zero_failed/ijbc.npy",
+    "parent_checkpoint": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_best.pt",
+    "parent_checkpoint_sha256": "3b3298217fcc54a368b045f50d85e8e0d9c845f305e7f1212640838c160f6b39",
+    "checkpoint_verification": "sha256_verified_local_2026-09-24"
   },
   {
     "run_id": "poly_run10",
     "family": "polynomial_conversion",
     "source": "controlled_degree2/README.md",
     "lineage": "poly_run10/",
-    "notes": "Untracked historical degree-4 reference; preserve original files and range buffers. Checkpoint identity requires review."
+    "notes": "Degree-4 reference; parent is outside this checkout. README teacher=None conflicts with train/config.json teacher_weights; preserve both sources, do not claim no teacher.",
+    "actual_fhe_execution": "not_measured",
+    "training_commit": "unknown",
+    "polynomial": {
+      "target": "per-channel PReLU",
+      "degree": 4,
+      "interval": "per-channel [-lam_fit, lam_fit]; see checkpoint buffers and source report",
+      "multiplicative_depth_per_activation": 2,
+      "inference_clipping": false
+    },
+    "checkpoint": "poly_run10/model/student_best.pt",
+    "checkpoint_sha256": "07c75f2843c76fedea4b2af93288e25b1f2d414773dae71e7e5d347fb23e613b",
+    "parent_checkpoint": "/work/u8498934/experiments/poly/run9/student_final.pt",
+    "parent_checkpoint_sha256": "unknown",
+    "calibration": "historical_ijbb_escape_adjustment_overlap_with_ijbc",
+    "evidence_snapshot": "experiments/local_evidence.json",
+    "checkpoint_verification": "sha256_verified_local_2026-09-24"
   },
   {
     "run_id": "controlled_direct_degree2",
     "family": "controlled_degree2",
     "source": "docs/0915_result/README.md",
     "lineage": "docs/0915_result/selection_evidence.json",
-    "notes": "Historical polish-unclipped evaluation has 14 nonfinite augmented rows; retain failure evidence; not an eligible finite result."
+    "notes": "Polish evaluation has 14 nonfinite augmented rows. Evaluated checkpoint identity is not established from the CSV; do not attach an arbitrary current best.pt.",
+    "actual_fhe_execution": "not_measured",
+    "training_commit": "unknown",
+    "polynomial": {
+      "target": "per-channel PReLU",
+      "degree": 2,
+      "interval": "per-channel [-lam_fit, lam_fit]; see checkpoint buffers and source report",
+      "multiplicative_depth_per_activation": 1,
+      "inference_clipping": false
+    }
+  },
+  {
+    "run_id": "progressive_best_unscaled_ijbc_20260919",
+    "family": "deployment",
+    "checkpoint": "work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_best.pt",
+    "checkpoint_sha256": "3b3298217fcc54a368b045f50d85e8e0d9c845f305e7f1212640838c160f6b39",
+    "raw_metrics": "docs/experiments/progressive_unscaled_comparison_20260919/unscaled_tar_at_far_raw.json",
+    "failure_summary": "docs/experiments/progressive_unscaled_comparison_20260919/unscaled_failure_summary.json",
+    "source": "docs/experiments/progressive_unscaled_comparison_20260919/README.md",
+    "lineage": "docs/experiments/progressive_unscaled_comparison_20260919/comparison.json",
+    "protocol": "fp32_tf32_off_original_flip_nonfinite_only_zero_both_views",
+    "calibration": "no_new_calibration_in_this_evaluation_ancestor_history_see_lineage",
+    "scores": "work_dirs/progressive_best_unscaled_ijbc_20260919/result/unscaled_nonfinite_only/ijbc.npy",
+    "actual_fhe_execution": "not_measured",
+    "training_commit": "unknown",
+    "notes": "14 failed source images; no BTS range filtering. Not the polish/final checkpoint.",
+    "polynomial": {
+      "target": "per-channel PReLU",
+      "degree": 2,
+      "interval": "per-channel [-lam_fit, lam_fit]",
+      "multiplicative_depth_per_activation": 1,
+      "inference_clipping": false
+    },
+    "checkpoint_verification": "sha256_verified_local_2026-09-24"
   }
 ]

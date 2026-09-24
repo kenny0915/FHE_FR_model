@@ -1,11 +1,5 @@
-"""Resume full-epoch conditioning from the group-3 recovery directory."""
+"""Compatibility entry; edit configs/reduced_nonlinearity/ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03_resume.py instead."""
+from importlib import import_module as _import_module
 
-from easydict import EasyDict as edict
-
-from configs.ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03 import (
-    config as recovery_config,
-)
-
-
-config = edict(recovery_config.copy())
-config.resume = True
+_module = _import_module('configs.reduced_nonlinearity.ms1mv3_r50_nl13_prelu_herpn_scaled_recover_group03_resume')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

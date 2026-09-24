@@ -1,20 +1,5 @@
-"""Resume the stable frozen-std run from its clean epoch checkpoint.
+"""Compatibility entry; edit configs/other_backbones/ms1mv3_poolformer_s24_fully_gated_frozen_std_resume_fp32.py instead."""
+from importlib import import_module as _import_module
 
-Use this after the former auxiliary-loss configuration failed during epoch 1.
-The epoch-1 checkpoint is at global step 10,116, immediately before the first
-frozen-std switch at step 10,117, so it contains the accepted exact-LayerNorm
-model and can safely continue with the auxiliary objective disabled.  If that
-legacy checkpoint contains an infinite EMA from the old centered-square
-collector, the first resumed finite batch now replaces it with the stable RMS
-observation before any affected group is frozen.
-"""
-
-from easydict import EasyDict as edict
-
-from configs.ms1mv3_poolformer_s24_fully_gated_frozen_std_fp32 import (
-    config as stable_config,
-)
-
-
-config = edict(stable_config.copy())
-config.resume = True
+_module = _import_module('configs.other_backbones.ms1mv3_poolformer_s24_fully_gated_frozen_std_resume_fp32')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

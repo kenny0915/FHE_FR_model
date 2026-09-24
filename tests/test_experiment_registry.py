@@ -61,15 +61,46 @@ class RegistryTests(unittest.TestCase):
     def test_committed_tables_are_reproducible_without_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in ['docs/0915_result/metrics.json', 'docs/0915_result/selection_evidence.json',
-                         'experiments/representatives.json']:
+            sources = {'docs/0915_result/metrics.json', 'docs/0915_result/selection_evidence.json',
+                       'docs/0915_result/calibrated_training_chain.json', 'experiments/local_evidence.json',
+                       'experiments/inventory.json', 'experiments/representatives.json'}
+            for rep in json.loads((ROOT / 'experiments/representatives.json').read_text()):
+                for key in ('source', 'lineage', 'raw_metrics', 'failure_summary'):
+                    if key in rep and not rep[key].startswith('poly_run10/') and (ROOT / rep[key]).is_file():
+                        sources.add(rep[key])
+            for name in sources:
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes((ROOT / name).read_bytes())
             registry.build(root)
-            for name in ['evaluations', 'historical_evidence']:
+            for name in ['evaluations', 'historical_evidence', 'local_evidence', 'lineage', 'run_summary']:
                 path = 'reports/tables/' + name + '.csv'
                 self.assertEqual((root / path).read_bytes(), (ROOT / path).read_bytes())
+            for manifest in (root / 'experiments/runs').glob('*/manifest.json'):
+                self.assertEqual(manifest.read_bytes(), (ROOT / manifest.relative_to(root)).read_bytes())
+            self.assertEqual((root / 'reports/summary.md').read_bytes(), (ROOT / 'reports/summary.md').read_bytes())
+
+    def test_deployment_zeroing_is_explicit(self):
+        rows = registry.deployment_results(ROOT)
+        self.assertEqual(len(rows), 24)
+        scaled = next(r for r in rows if 'ms1k' in r['run_id'])
+        unscaled = next(r for r in rows if 'unscaled' in r['run_id'])
+        self.assertEqual(scaled['failed_source_images'], 21)
+        self.assertEqual(scaled['zeroed_augmented_rows'], 42)
+        self.assertEqual(unscaled['failed_source_images'], 14)
+        self.assertEqual(unscaled['zeroed_augmented_rows'], 28)
+        self.assertNotEqual(scaled['protocol'], unscaled['protocol'])
+        self.assertEqual(scaled['nonfinite_embedding_rows'], 'unknown')
+
+    def test_reject_invalid_and_duplicate_roc(self):
+        rows = registry.normalized_results(ROOT)
+        with self.assertRaises(ValueError):
+            registry.validate_evaluations([rows[0], rows[0]])
+        bad = dict(rows[0], far_rule='strict', actual_far=1.0)
+        with self.assertRaises(ValueError):
+            registry.validate_evaluations([bad])
+        with self.assertRaises(ValueError):
+            registry.validate_evaluations([dict(rows[0], tar_percent=float('nan'))])
 
 
 if __name__ == '__main__':

@@ -7,7 +7,7 @@ The "arcface_torch" repository is the official implementation of the ArcFace alg
 To avail the latest features of PyTorch, we have upgraded to version 1.12.0.
 
 - Install [PyTorch](https://pytorch.org/get-started/previous-versions/) (torch>=1.12.0).
-- (Optional) Install [DALI](https://docs.nvidia.com/deeplearning/dali/user-guide/docs/), our doc for [install_dali.md](docs/install_dali.md).
+- (Optional) Install [DALI](https://docs.nvidia.com/deeplearning/dali/user-guide/docs/), our doc for [install_dali.md](../install_dali.md).
 - `pip install -r requirement.txt`.
   
 ## How to Training
@@ -55,8 +55,8 @@ torchrun --nproc_per_node=8 train_v2.py configs/wf42m_pfc03_40epoch_8gpu_vit_b
 - [MS1MV2](https://github.com/deepinsight/insightface/tree/master/recognition/_datasets_#ms1m-arcface-85k-ids58m-images-57) (87k IDs, 5.8M images)
 - [MS1MV3](https://github.com/deepinsight/insightface/tree/master/recognition/_datasets_#ms1m-retinaface) (93k IDs, 5.2M images)
 - [Glint360K](https://github.com/deepinsight/insightface/tree/master/recognition/partial_fc#4-download) (360k IDs, 17.1M images)
-- [WebFace42M](docs/prepare_webface42m.md) (2M IDs, 42.5M images)
-- [Your Dataset, Click Here!](docs/prepare_custom_dataset.md)
+- [WebFace42M](../prepare_webface42m.md) (2M IDs, 42.5M images)
+- [Your Dataset, Click Here!](../prepare_custom_dataset.md)
 
 Note: 
 If you want to use DALI for data reading, please use the script 'scripts/shuffle_rec.py' to shuffle the InsightFace style rec before using it.  
@@ -158,7 +158,7 @@ globalised multi-racial testset contains 242,143 identities and 1,624,305 images
 
 
 More details see 
-[speed_benchmark.md](docs/speed_benchmark.md) in docs.
+[speed_benchmark.md](../speed_benchmark.md) in docs.
 
 > 1. Training Speed of Various Parallel Techniques (Samples per Second) on a Tesla V100 32GB x 8 System (Higher is Optimal)
 

@@ -1,11 +1,5 @@
-"""Scale-32 Alpha10-to-Alpha7 R50 comparison experiment."""
+"""Compatibility entry; edit configs/polynomial_conversion/ms1mv3_r50_precise_relu_alpha7_s32.py instead."""
+from importlib import import_module as _import_module
 
-from copy import deepcopy
-
-from configs.ms1mv3_r50_precise_relu_alpha7_s16 import config as scale16_config
-
-
-config = deepcopy(scale16_config)
-config.output = "work_dirs/ms1mv3_r50_precise_relu_alpha7_s32"
-config.precise_relu_input_scale = 32.0
-config.precise_relu_approximation_error_bound = 0.25
+_module = _import_module('configs.polynomial_conversion.ms1mv3_r50_precise_relu_alpha7_s32')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

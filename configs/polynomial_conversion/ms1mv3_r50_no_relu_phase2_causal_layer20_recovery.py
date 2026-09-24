@@ -1,0 +1,57 @@
+"""Causally condition the first measured runaway boundary, layer2.0.
+
+Exact MS1Mv3 prefix mining found maxima 1.79 (stem), 5.94 (end of Layer1),
+then 115.6 at the input of ``layer2.0.prelu``.  This run therefore adjusts the
+``layer2.0.conv1`` producer and penalizes only that first unsafe boundary. The
+training-only stabilization begins at layer2.0 so exact non-finite replay
+sources remain usable.  Evaluation/FHE inference is still the exact unclipped
+degree-2 graph targeting PReLU on [-6, 6], with unchanged depth.
+"""
+
+from easydict import EasyDict as edict
+
+from configs.polynomial_conversion.ms1mv3_r50_no_relu_phase2_tail_recovery import (
+    config as _phase2_config,
+)
+
+
+config = edict(_phase2_config.copy())
+config.output = (
+    "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_causal_layer20")
+
+# The first broad-prefix attempt demonstrated that this fully polynomial graph
+# is too sensitive to update every upstream square at once.  Start with the
+# single convolution that directly produces the first unsafe activation input;
+# expand into Layer1 only if a new exact scan proves it is necessary.
+config.backbone_trainable_prefixes = ("layer2.0.conv1",)
+config.herpn_range_loss_names = ("layer2.0.prelu",)
+
+# Preserve the exact path through the measured boundary input. Stabilize only
+# that activation and its suffix so a catastrophic replay source can still
+# deliver a range gradient to the causal prefix.
+config.herpn_training_stabilization_limit = 6.0
+config.herpn_training_stabilization_names = (
+    *(f"layer2.{index}.prelu" for index in range(4)),
+    *(f"layer3.{index}.prelu" for index in range(14)),
+    *(f"layer4.{index}.prelu" for index in range(3)),
+)
+config.herpn_range_loss_weight = 2.0
+
+config.fixed_tail_replay_file = (
+    "work_dirs/ms1mv3_r50_herpn_full_conversion_phase2_tail_mining/"
+    "epoch23_prefix_tails.json")
+config.fixed_tail_replay_batch_size = 16
+config.fixed_tail_replay_workers = 2
+config.fixed_tail_replay_priority_count = 0
+config.fixed_tail_replay_priority_repeats = 1
+config.fixed_tail_replay_orientations_key = "output_nonfinite"
+
+# Exact replay already targets every measured catastrophic orientation.  Do
+# not perturb those images with the random photometric stress inherited from
+# the exploratory Stage3 run.
+config.range_augmentation = {"enabled": False}
+
+config.embedding_distill_weight = 0.25
+config.lr = 1e-6
+config.momentum = 0.0
+config.num_epoch = 1

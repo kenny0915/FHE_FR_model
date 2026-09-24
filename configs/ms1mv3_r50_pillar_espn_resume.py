@@ -1,9 +1,5 @@
-"""Resume the guarded all-polynomial PILLAR run from its latest epoch."""
+"""Compatibility entry; edit configs/polynomial_conversion/ms1mv3_r50_pillar_espn_resume.py instead."""
+from importlib import import_module as _import_module
 
-from easydict import EasyDict as edict
-
-from configs.ms1mv3_r50_pillar_espn import config as _base_config
-
-
-config = edict(_base_config.copy())
-config.resume = True
+_module = _import_module('configs.polynomial_conversion.ms1mv3_r50_pillar_espn_resume')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

@@ -1,17 +1,5 @@
-"""Resume the accepted epoch-0 affine fit with all BN buffers preserved.
+"""Compatibility entry; edit configs/reduced_nonlinearity/ms1mv3_r50_herpn_epoch10_linear9_layer42_resume.py instead."""
+from importlib import import_module as _import_module
 
-The rank checkpoints in ``config.output`` were written at global step 5058,
-before the first nonzero blend update. They contain the fitted degree-one
-student, optimizer/PartialFC state, and the unchanged epoch-10 BatchNorm
-buffers. The canceled exploratory blend is not part of those checkpoints.
-"""
-
-from easydict import EasyDict as edict
-
-from configs.ms1mv3_r50_herpn_epoch10_selective9_layer42 import (
-    config as base_config,
-)
-
-
-config = edict(base_config.copy())
-config.resume = True
+_module = _import_module('configs.reduced_nonlinearity.ms1mv3_r50_herpn_epoch10_linear9_layer42_resume')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

@@ -1,12 +1,5 @@
-from copy import deepcopy
+"""Compatibility entry; edit configs/polynomial_conversion/casia_r50_no_relu_capture.py instead."""
+from importlib import import_module as _import_module
 
-from configs.casia_r50_no_relu import config as training_config
-
-
-config = deepcopy(training_config)
-config.resume = True
-config.output = "work_dirs/casia_r50_herpn_capture8000"
-config.num_epoch = 4
-config.max_steps_per_epoch = 336
-config.verbose = 1000000
-config.val_targets = []
+_module = _import_module('configs.polynomial_conversion.casia_r50_no_relu_capture')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})

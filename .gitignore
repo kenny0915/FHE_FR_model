@@ -63,3 +63,10 @@ tinyface/
 /wider_face_split/
 /adaptive-*.out
 /adaptive-*.err
+
+# Local artifact storage (tracked metadata lives in experiments/)
+/artifacts/
+
+# Versioned run metadata; training runs elsewhere remain ignored
+!/experiments/runs/
+!/experiments/runs/**

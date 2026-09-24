@@ -1,16 +1,19 @@
+"""Load legacy flat and family-organized experiment configs independently."""
+from copy import deepcopy
 import importlib
-import os.path as osp
+from pathlib import PurePosixPath
 
 
 def get_config(config_file):
-    assert config_file.startswith('configs/'), 'config file setting must start with configs/'
-    temp_config_name = osp.basename(config_file)
-    temp_module_name = osp.splitext(temp_config_name)[0]
-    config = importlib.import_module("configs.base")
-    cfg = config.config
-    config = importlib.import_module("configs.%s" % temp_module_name)
-    job_cfg = config.config
-    cfg.update(job_cfg)
+    path = PurePosixPath(config_file)
+    if (not config_file.startswith('configs/') or '..' in path.parts
+            or path.suffix not in ('', '.py') or len(path.parts) < 2):
+        raise ValueError('config must be a path under configs/ with an optional .py suffix')
+    module_path = path.with_suffix('') if path.suffix else path
+    module_name = '.'.join(module_path.parts)
+    cfg = deepcopy(importlib.import_module('configs.base').config)
+    cfg.update(deepcopy(importlib.import_module(module_name).config))
     if cfg.output is None:
-        cfg.output = osp.join('work_dirs', temp_module_name)
+        # Keep legacy output paths when switching to a family-organized config path.
+        cfg.output = 'work_dirs/' + module_path.name
     return cfg

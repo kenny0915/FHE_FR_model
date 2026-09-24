@@ -1,24 +1,5 @@
-"""Selective seventh quadratic at ``layer4.1.prelu``.
+"""Compatibility entry; edit configs/reduced_nonlinearity/ms1mv3_r50_nl13_prelu_herpn_selective7_layer41.py instead."""
+from importlib import import_module as _import_module
 
-This is the matched alternative to the final-block ``layer4.2`` experiment.
-It uses the same accepted six-polynomial source, degree-2 PReLU target,
-causal public interval, two-epoch blend, and fixed-seven recovery schedule.
-"""
-
-from easydict import EasyDict as edict
-
-from backbones.iresnet_nl13_prelu_herpn import NL13_ACTIVATION_NAMES
-from configs.ms1mv3_r50_nl13_prelu_herpn_selective7_layer42 import (
-    config as _layer42_config,
-)
-
-
-config = edict(_layer42_config.copy())
-config.output = (
-    "work_dirs/ms1mv3_r50_nl13_prelu_herpn_selective7_layer41")
-prefix = NL13_ACTIVATION_NAMES[:6]
-target = "layer4.1.prelu"
-remainder = tuple(
-    name for name in NL13_ACTIVATION_NAMES[6:] if name != target)
-config.herpn_conversion_groups = tuple((name,) for name in (
-    *prefix, target, *remainder))
+_module = _import_module('configs.reduced_nonlinearity.ms1mv3_r50_nl13_prelu_herpn_selective7_layer41')
+globals().update({k: v for k, v in vars(_module).items() if not k.startswith("__")})
