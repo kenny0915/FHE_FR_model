@@ -1,5 +1,9 @@
 # ArcFace Torch Experiments
 
+## 實驗與數據整理入口
+
+請先看 [實驗清冊與管理規範](experiments/README.md)、[代表模型與來源鏈](experiments/representatives.json) 和 [結果總表](reports/README.md)。既有訓練入口與路徑維持不變；歷史結果依校準條件、FAR 規則及有限性證據分開整理。
+
 This repository contains PyTorch training and evaluation code for face recognition experiments based on ArcFace-style backbones and margin losses. It includes ResNet, MobileFaceNet, PoolFormer, Patch-CNN, and custom non-linearity variants.
 
 ## Repository Layout

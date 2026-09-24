@@ -55,3 +55,11 @@ tinyface/
 *.tgz
 *.7z
 *.rar
+
+# Local dataset copies and scheduler logs
+/WIDER_train/
+/aligned_images_DB/
+/ms1m-retinaface-t1/
+/wider_face_split/
+/adaptive-*.out
+/adaptive-*.err

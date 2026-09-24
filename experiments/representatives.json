@@ -1,0 +1,52 @@
+[
+  {
+    "run_id": "ms1mv3_r50",
+    "family": "baseline",
+    "metrics_key": "prelu_baseline",
+    "calibration": "baseline_reference",
+    "finite_scope": "full_module_audit",
+    "source": "docs/0915_result/README.md",
+    "lineage": "configs/ms1mv3_r50.py"
+  },
+  {
+    "run_id": "controlled_degree2_accuracy_recovery_head_only_v3_20260908",
+    "family": "controlled_degree2",
+    "metrics_key": "no_ijbc_head",
+    "calibration": "no_ijbc_calibration_in_verified_chain_but_historical_ijbb_overlap",
+    "finite_scope": "augmented_embeddings_only",
+    "source": "docs/0915_result/README.md",
+    "lineage": "docs/0915_result/no_ijbc_training_chain.json"
+  },
+  {
+    "run_id": "channelwise_template_supervised01_20260915",
+    "family": "channelwise_calibration",
+    "metrics_key": "ijbc_calibrated",
+    "calibration": "ijbc_images_and_labels_calibration_set_performance",
+    "finite_scope": "full_module_audit",
+    "source": "docs/0915_result/README.md",
+    "lineage": "docs/0915_result/calibrated_training_chain.json"
+  },
+  {
+    "run_id": "progressive_best_bts_ms1k_20260917",
+    "family": "deployment",
+    "source": "docs/experiments/progressive_release_20260921.md",
+    "lineage": "docs/experiments/progressive_release_20260921.json",
+    "checkpoint": "work_dirs/progressive_best_bts_ms1k_20260917/scaled/student_scaled.pt",
+    "checkpoint_sha256": "f6b8fddafc8d8cfca5127d1732781b6eeaa7d9e7727524d5123e002bd1165dc1",
+    "notes": "Do not inherit accuracy from another checkpoint or the 100-image scaling variant; actual FHE execution unknown."
+  },
+  {
+    "run_id": "poly_run10",
+    "family": "polynomial_conversion",
+    "source": "controlled_degree2/README.md",
+    "lineage": "poly_run10/",
+    "notes": "Untracked historical degree-4 reference; preserve original files and range buffers. Checkpoint identity requires review."
+  },
+  {
+    "run_id": "controlled_direct_degree2",
+    "family": "controlled_degree2",
+    "source": "docs/0915_result/README.md",
+    "lineage": "docs/0915_result/selection_evidence.json",
+    "notes": "Historical polish-unclipped evaluation has 14 nonfinite augmented rows; retain failure evidence; not an eligible finite result."
+  }
+]

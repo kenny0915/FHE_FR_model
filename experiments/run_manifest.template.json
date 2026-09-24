@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "run_id": null,
+  "experiment_id": null,
+  "family": null,
+  "status": "planned",
+  "parent_runs": [],
+  "initial_checkpoint": {"path": null, "sha256": null},
+  "teacher_checkpoint": {"path": null, "sha256": null},
+  "code": {"commit": null, "dirty": null, "patch_path": null, "patch_sha256": null},
+  "command": null,
+  "resolved_config": null,
+  "environment": null,
+  "seed": null,
+  "data": {"train": null, "fit": null, "calibration": null, "selection": null, "test": null, "overlap_notes": null},
+  "polynomial": {"target": null, "degree": null, "intervals_artifact": null, "coefficients_artifact": null, "distribution_artifact": null, "inference_clipping": null, "training_guard": null},
+  "fhe": {"encrypted_boundary": null, "depth_estimate": null, "depth_convention": null, "actual_execution": null},
+  "evaluations": [],
+  "artifacts": [],
+  "notes": null
+}
