@@ -1,15 +1,16 @@
-"""Fail closed at six BTS boundaries; zero both views of a failed source image."""
+"""Fail closed at configured BTS boundaries; zero both views of a failed source image."""
 import json
 import math
 from pathlib import Path
 
 import torch
 
-from controlled_degree2.rescale_residual_graph import BOUNDARIES
+from controlled_degree2.rescale_residual_graph import BOUNDARIES, validate_boundaries
 
 
 class BTSFailureAudit:
-    def __init__(self, prefix, check_range=True):
+    def __init__(self, prefix, check_range=True, boundaries=BOUNDARIES):
+        self.boundary_names = validate_boundaries(boundaries)
         self.check_range = bool(check_range)
         self.prefix = Path(prefix)
         self.prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -24,15 +25,25 @@ class BTSFailureAudit:
                                     nonfinite_augmented_rows=0,
                                     failed_source_images=0,
                                     finite_row_min=None, finite_row_max=None)
-                           for name in BOUNDARIES}
+                           for name in self.boundary_names}
 
-    def attach(self, model):
+    def attach(self, model, boundaries=None):
+        if boundaries is not None:
+            names = validate_boundaries(boundaries)
+            if names != self.boundary_names:
+                if self.counts['source_images']:
+                    raise ValueError('Cannot change BTS boundaries after auditing images')
+                self.boundary_names = names
+                self.boundaries = {name: dict(out_of_range_augmented_rows=0,
+                    nonfinite_augmented_rows=0, failed_source_images=0,
+                    finite_row_min=None, finite_row_max=None) for name in names}
+                self.current = {}
         for handle in self.handles:
             handle.remove()
-        modules = [model.get_submodule(name) for name in BOUNDARIES]
+        modules = [model.get_submodule(name) for name in self.boundary_names]
         self.handles = [module.register_forward_hook(
             lambda m, i, o, name=name: self.observe(name, o))
-            for name, module in zip(BOUNDARIES, modules)]
+            for name, module in zip(self.boundary_names, modules)]
 
     def start_batch(self):
         self.current = {}
@@ -43,13 +54,13 @@ class BTSFailureAudit:
         self.current[name] = torch.stack((flat.amin(1), flat.amax(1)), dim=1)
 
     def filter_embeddings(self, features, source_indices, source_names):
-        if set(self.current) != set(BOUNDARIES):
+        if set(self.current) != set(self.boundary_names):
             raise RuntimeError('Incomplete BTS boundary coverage')
         rows = len(features)
         if rows % 2 or len(source_indices) != rows // 2 or len(source_names) != rows // 2:
             raise ValueError('Expected interleaved original/flip rows for each source')
-        limits = torch.stack([self.current[n] for n in BOUNDARIES], dim=1).cpu()
-        if limits.shape != (rows, len(BOUNDARIES), 2):
+        limits = torch.stack([self.current[n] for n in self.boundary_names], dim=1).cpu()
+        if limits.shape != (rows, len(self.boundary_names), 2):
             raise ValueError('BTS hook row count mismatch')
         finite = torch.isfinite(limits).all(2)
         outside = ((limits[:, :, 0] < -1) | (limits[:, :, 1] > 1)) if self.check_range else torch.zeros_like(finite)
@@ -67,7 +78,7 @@ class BTSFailureAudit:
         self.counts['nonfinite_source_images'] += int(nonfinite_bad.reshape(-1, 2).any(1).sum())
         self.counts['embedding_nonfinite_source_images'] += int(embedding_nonfinite.reshape(-1, 2).any(1).sum())
         self.counts['zeroed_augmented_rows'] += 2 * int(source_bad.sum())
-        for j, name in enumerate(BOUNDARIES):
+        for j, name in enumerate(self.boundary_names):
             entry = self.boundaries[name]
             entry['out_of_range_augmented_rows'] += int(outside[:, j].sum())
             entry['nonfinite_augmented_rows'] += int((~finite[:, j]).sum())
@@ -83,7 +94,7 @@ class BTSFailureAudit:
             for orientation in range(2):
                 row = 2 * source + orientation
                 values = {}
-                for j, name in enumerate(BOUNDARIES):
+                for j, name in enumerate(self.boundary_names):
                     lo, hi = limits[row, j].tolist()
                     values[name] = dict(min=lo if math.isfinite(lo) else None,
                                         max=hi if math.isfinite(hi) else None,

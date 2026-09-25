@@ -9,7 +9,7 @@ import torch
 
 from controlled_degree2.model import load_controlled_checkpoint, save_checkpoint
 from controlled_degree2.rescale_residual_graph import (
-    BOUNDARIES, capture, rescale_graph, sha256_file, update_ranges,
+    BOUNDARIES, capture, rescale_graph, sha256_file, update_ranges, validate_boundaries,
 )
 
 
@@ -19,15 +19,20 @@ def sample_indices(length, count, seed):
     return sorted(random.Random(seed).sample(range(length), count))
 
 
-def choose_scales(ranges, target):
+def choose_scales(ranges, target, boundaries=BOUNDARIES):
     if not 0 < target < 1:
         raise ValueError('Target must be in (0,1)')
+    boundaries = validate_boundaries(boundaries)
+    for name in boundaries:
+        entry = ranges[name]
+        if not all(torch.isfinite(torch.tensor(entry[key], dtype=torch.float64)) for key in ('min', 'max')):
+            raise ValueError('Nonfinite calibration range')
+        if entry['min'] > entry['max']:
+            raise ValueError('Invalid calibration range')
     scales = []
     for stage in range(1, 5):
-        peak = max(max(abs(ranges[name]['min']), abs(ranges[name]['max']))
-                   for name in BOUNDARIES if name.startswith(f'layer{stage}.'))
-        if not torch.isfinite(torch.tensor(peak)):
-            raise ValueError('Nonfinite calibration range')
+        peak = max((max(abs(ranges[name]['min']), abs(ranges[name]['max']))
+                    for name in boundaries if name.startswith(f'layer{stage}.')), default=0.)
         scales.append(min(1., target / peak) if peak else 1.)
     return scales
 
@@ -42,7 +47,11 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--target-absmax', type=float, default=0.8)
     parser.add_argument('--device', default='cuda')
+    parser.add_argument('--boundaries', nargs='+', default=list(BOUNDARIES),
+                        help='zero-based residual block outputs, e.g. 1.2 2.3 3.13 4.2')
     args = parser.parse_args()
+    boundaries = validate_boundaries(args.boundaries)
+    args.boundaries = list(boundaries)
     if args.batch_size < 1:
         parser.error('batch-size must be positive')
     from dataset import MXFaceDataset
@@ -69,11 +78,11 @@ def main():
     ranges = {}
     with torch.inference_mode():
         for batch in batches():
-            embedding, values = capture(model, batch, BOUNDARIES)
+            embedding, values = capture(model, batch, boundaries)
             if not torch.isfinite(embedding).all():
                 raise FloatingPointError('Nonfinite source MS1MV3 embedding; calibration aborted')
             update_ranges(ranges, values)
-    scales = choose_scales(ranges, args.target_absmax)
+    scales = choose_scales(ranges, args.target_absmax, boundaries)
     print('MS1MV3 stage scales:', scales, flush=True)
     transformed = copy.deepcopy(model)
     mapping = rescale_graph(transformed, scales)
@@ -83,7 +92,9 @@ def main():
         calibration[name] = dict(lam_fit=module.lam_fit.flatten().tolist(),
                                  lam_reg=module.lam_reg.flatten().tolist(), coordinate_scale=scale)
     provenance = dict(source=str(Path(args.checkpoint).resolve()), source_sha256=sha256_file(args.checkpoint),
-                      stage_scales=scales, eval_only=True, calibration_dataset='MS1MV3',
+                      stage_scales=scales, boundaries=list(boundaries),
+                      boundary_semantics='residual block output; zero-based block index',
+                      eval_only=True, calibration_dataset='MS1MV3',
                       calibration_images=args.images, seed=args.seed,
                       sampling='random without replacement, sorted for IO, original orientation only',
                       image_manifest_sha256=sha256_file(output / 'calibration_images.json'),
@@ -98,12 +109,12 @@ def main():
     metrics = dict(images=0, embedding_max_abs_error=0., embedding_relative_l2_max=0., embedding_cosine_min=1.)
     with torch.inference_mode():
         for batch in batches():
-            reference, before = capture(model, batch, BOUNDARIES)
-            actual, values = capture(transformed, batch, BOUNDARIES)
+            reference, before = capture(model, batch, boundaries)
+            actual, values = capture(transformed, batch, boundaries)
             if not torch.isfinite(actual).all():
                 raise FloatingPointError('Nonfinite rescaled calibration embedding')
             torch.testing.assert_close(actual, reference, atol=1e-4, rtol=1e-4)
-            for name in BOUNDARIES:
+            for name in boundaries:
                 torch.testing.assert_close(values[name], before[name] * scales[int(name[5]) - 1], atol=1e-4, rtol=1e-4)
             update_ranges(after, values)
             error = actual - reference

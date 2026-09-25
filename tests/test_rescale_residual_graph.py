@@ -55,12 +55,12 @@ def test_frozen_bn_general_input_output_scales():
     torch.testing.assert_close(transformed(x * 0.07), bn(x) * 0.3, atol=1e-13, rtol=1e-13)
 
 
-def test_graph_equivalence_at_every_residual_and_serialization():
+@pytest.mark.parametrize('scales', [[0.25, 0.125, 0.0625, 0.5], [1., 0.125, 0.0625, 0.5]])
+def test_graph_equivalence_at_every_residual_and_serialization(scales):
     torch.manual_seed(11)
     torch.set_num_threads(2)
     original = TinyResidualGraph().eval()
     scaled = copy.deepcopy(original)
-    scales = [0.25, 0.125, 0.0625, 0.5]
     structure = [(name, type(m)) for name, m in scaled.named_modules()]
     mapping = rescale_graph(scaled, scales)
     assert structure == [(name, type(m)) for name, m in scaled.named_modules()]

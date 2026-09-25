@@ -101,7 +101,7 @@ parser.add_argument('--polynomial-export', default=None, help='export and evalua
 parser.add_argument('--polynomial-coefficient-mode', choices=('shared', 'channelwise'), default='shared')
 parser.add_argument('--finite-audit', default=None, help='JSON audit of all module inputs/outputs; single visible GPU required')
 parser.add_argument('--image-workers', type=int, default=0, help='bounded parallel image decoding/alignment, preserving metadata order')
-parser.add_argument('--bts-failure-report', default=None, help='prefix for six-boundary failure JSONL/summary; zero both source views if either fails')
+parser.add_argument('--bts-failure-report', default=None, help='failure JSONL/summary at checkpoint BTS boundaries (legacy default: six); zero both source views if either fails')
 parser.add_argument('--ignore-bts-range', action='store_true', help='with --bts-failure-report, fail only on nonfinite values; no range threshold')
 args = parser.parse_args()
 if args.ignore_bts_range and not args.bts_failure_report:
@@ -208,7 +208,11 @@ class Embedding(object):
             resnet.cuda()
             certificate_path.write_text(json.dumps(certificate, indent=2))
         if bts_failure_audit is not None:
-            bts_failure_audit.attach(resnet)
+            # New scaling exports carry their BTS layout. Legacy checkpoints
+            # retain the original six-boundary policy.
+            boundaries = (checkpoint.get('residual_graph_scaling', {}).get('boundaries')
+                          if isinstance(checkpoint, dict) else None)
+            bts_failure_audit.attach(resnet, boundaries=boundaries)
         model = torch.nn.DataParallel(resnet)
         self.model = model
         self.model.eval()

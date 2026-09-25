@@ -19,6 +19,25 @@ from controlled_degree2.model import DirectQuadratic, load_controlled_checkpoint
 BOUNDARIES = ('layer1.2', 'layer2.3', 'layer3.3', 'layer3.7', 'layer3.11', 'layer4.1')
 
 
+def validate_boundaries(names):
+    """Canonical residual-block OUTPUT names, using zero-based iResNet50 indices."""
+    valid = {f'layer{s}.{i}' for s, length in enumerate((3, 4, 14, 3), 1)
+             for i in range(length)}
+    names = tuple(name if name.startswith('layer') else 'layer' + name for name in names)
+    if not names or len(set(names)) != len(names) or any(name not in valid for name in names):
+        raise ValueError('Provide unique, valid iResNet50 residual block boundaries')
+    return names
+
+
+BTS_LAYOUTS = {
+    'bts6': BOUNDARIES,
+    'bts14': validate_boundaries('1.0 1.2 2.1 2.3 3.0 3.2 3.4 3.6 3.8 3.10 3.12 3.13 4.0 4.2'.split()),
+    'bts9': validate_boundaries('1.1 2.1 2.3 3.1 3.4 3.7 3.10 3.13 4.1'.split()),
+    'bts7': validate_boundaries('1.2 2.3 3.2 3.6 3.10 3.13 4.2'.split()),
+    'bts5': validate_boundaries('2.0 3.0 3.5 3.10 4.0'.split()),
+}
+
+
 @torch.no_grad()
 def rescale_bn(bn, input_scale, output_scale):
     """Frozen BN': BN'(a*x) = b*BN(x), with original running buffers."""

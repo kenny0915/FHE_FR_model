@@ -5,8 +5,54 @@ import torch
 from torch import nn
 
 from controlled_degree2.calibrate_bts_ms1mv3 import sample_indices, choose_scales
-from controlled_degree2.rescale_residual_graph import BOUNDARIES
+from controlled_degree2.rescale_residual_graph import BOUNDARIES, BTS_LAYOUTS, validate_boundaries
 from eval.bts_failure_audit import BTSFailureAudit
+
+
+@pytest.mark.parametrize('layout,count', [('bts6', 6), ('bts14', 14), ('bts9', 9), ('bts7', 7), ('bts5', 5)])
+def test_custom_layout_scale_and_actual_hooks(tmp_path, layout, count):
+    names = BTS_LAYOUTS[layout]
+    assert len(names) == count
+    ranges = {name: {'min': -2., 'max': 4.} for name in names}
+    scales = choose_scales(ranges, .8, names)
+    assert scales == ([1., .2, .2, .2] if layout == 'bts5' else [.2] * 4)
+    model = nn.Module()
+    for stage, length in enumerate((3, 4, 14, 3), 1):
+        setattr(model, f'layer{stage}', nn.Sequential(*[nn.Identity() for _ in range(length)]))
+    audit = BTSFailureAudit(tmp_path / layout)
+    audit.attach(model, boundaries=names)
+    audit.start_batch()
+    for stage, length in enumerate((3, 4, 14, 3), 1):
+        for i in range(length):
+            name = f'layer{stage}.{i}'
+            # Unselected block outputs must not cause a BTS range failure.
+            model.get_submodule(name)(torch.zeros(2, 1) if name in names else torch.full((2, 1), 50.))
+    assert set(audit.current) == set(names)
+    features = torch.ones(2, 3)
+    torch.testing.assert_close(audit.filter_embeddings(features, [0], ['safe']), features)
+    audit.start_batch()
+    for name in names:
+        values = torch.zeros(2, 1)
+        if name == names[-1]:
+            values[1] = 1.01
+        model.get_submodule(name)(values)
+    assert audit.filter_embeddings(features, [1], ['bad']).count_nonzero() == 0
+    summary = audit.finish(2)
+    assert set(summary['boundaries']) == set(names)
+    assert summary['failed_source_images'] == 1
+
+
+@pytest.mark.parametrize('names', [[], ['1.0', 'layer1.0'], ['layer3.14'], ['0.0'], ['4.3']])
+def test_invalid_layout_rejected(names):
+    with pytest.raises(ValueError):
+        validate_boundaries(names)
+
+
+def test_scale_rejects_nonfinite_minimum():
+    ranges = {name: {'min': -2., 'max': 4.} for name in BOUNDARIES}
+    ranges[BOUNDARIES[0]]['min'] = float('nan')
+    with pytest.raises(ValueError, match='Nonfinite'):
+        choose_scales(ranges, .8)
 
 
 def populate(audit, rows):
