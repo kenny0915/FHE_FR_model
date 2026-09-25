@@ -1,4 +1,7 @@
 from argparse import Namespace
+import os
+from pathlib import Path
+import subprocess
 
 import pytest
 import torch
@@ -8,6 +11,24 @@ from controlled_degree2.accuracy_recovery import training_command
 from controlled_degree2.losses import active_weighted_loss
 from controlled_degree2.model import DirectQuadratic
 from controlled_degree2.train import accuracy_parameter_groups, parse_args
+
+
+@pytest.mark.parametrize('mode', ['train', 'smoke'])
+def test_slurm_uses_explicit_interpreter_for_both_modes(tmp_path, mode):
+    fake = tmp_path / 'chosen-python'
+    fake.write_text('#!/bin/bash\nprintf "%s\\n" "$@" >> "$CAPTURE"\n')
+    fake.chmod(0o755)
+    capture = tmp_path / 'calls'
+    repo = Path(__file__).resolve().parents[1]
+    env = os.environ | dict(ACCURACY_PYTHON=str(fake), ACCURACY_CODE_ROOT=str(repo),
+                            ACCURACY_MODE=mode, SLURM_ARRAY_TASK_ID='2', CAPTURE=str(capture))
+    subprocess.run(['/bin/bash', str(repo / 'controlled_degree2/accuracy_recovery.slurm')],
+                   env=env, check=True)
+    calls = capture.read_text().splitlines()
+    assert calls[0] == '-c'
+    assert 'controlled_degree2.accuracy_recovery' in calls
+    assert 'coefficients' in calls
+    assert ('--smoke' in calls) == (mode == 'smoke')
 
 
 def test_disabled_nonfinite_loss_does_not_poison_gradient():

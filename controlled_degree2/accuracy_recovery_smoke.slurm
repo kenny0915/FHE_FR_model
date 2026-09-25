@@ -9,8 +9,8 @@
 #SBATCH --time=00:30:00
 set -euo pipefail
 cd "${ACCURACY_CODE_ROOT:-${SLURM_SUBMIT_DIR:?}}"
-export OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1 MXNET_CPU_WORKER_NTHREADS=1 PYTHONUNBUFFERED=1
-python -m controlled_degree2.accuracy_recovery_smoke \
+source controlled_degree2/accuracy_runtime.sh
+"$ACCURACY_PYTHON" -m controlled_degree2.accuracy_recovery_smoke \
   --output-root "${SMOKE_ROOT:?}" --checkpoint "${CHECKPOINT:?}" \
   --teacher "${TEACHER:?}" --dataset-root "${DATASET_ROOT:?}" \
   --canary-root "${CANARY_ROOT:?}"
