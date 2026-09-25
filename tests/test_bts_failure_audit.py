@@ -78,6 +78,9 @@ def test_failures_zero_both_views_preserve_safe_rows_and_endpoints(tmp_path):
     summary = audit.finish(5)
     assert summary['failed_source_images'] == 4
     assert summary['failed_augmented_rows'] == 4
+    assert summary['range_failed_augmented_rows'] == 2  # finite overflow and -Inf
+    assert summary['nonfinite_augmented_rows'] == 3
+    assert summary['embedding_nonfinite_augmented_rows'] == 1
     assert summary['zeroed_augmented_rows'] == 8
     records = [json.loads(line) for line in (tmp_path / 'bts.failures.jsonl').read_text().splitlines()]
     assert [r['source_index'] for r in records] == [1, 2, 3, 4]

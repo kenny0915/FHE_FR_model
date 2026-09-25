@@ -20,6 +20,8 @@ class BTSFailureAudit:
         self.counts = dict(source_images=0, augmented_rows=0, failed_source_images=0,
                            failed_augmented_rows=0, range_failed_source_images=0,
                            nonfinite_source_images=0, embedding_nonfinite_source_images=0,
+                           range_failed_augmented_rows=0, nonfinite_augmented_rows=0,
+                           embedding_nonfinite_augmented_rows=0,
                            zeroed_augmented_rows=0)
         self.boundaries = {name: dict(out_of_range_augmented_rows=0,
                                     nonfinite_augmented_rows=0,
@@ -74,6 +76,9 @@ class BTSFailureAudit:
         self.counts['augmented_rows'] += rows
         self.counts['failed_source_images'] += int(source_bad.sum())
         self.counts['failed_augmented_rows'] += int(bad.sum())
+        self.counts['range_failed_augmented_rows'] += int(range_bad.sum())
+        self.counts['nonfinite_augmented_rows'] += int(nonfinite_bad.sum())
+        self.counts['embedding_nonfinite_augmented_rows'] += int(embedding_nonfinite.sum())
         self.counts['range_failed_source_images'] += int(range_bad.reshape(-1, 2).any(1).sum())
         self.counts['nonfinite_source_images'] += int(nonfinite_bad.reshape(-1, 2).any(1).sum())
         self.counts['embedding_nonfinite_source_images'] += int(embedding_nonfinite.reshape(-1, 2).any(1).sum())
