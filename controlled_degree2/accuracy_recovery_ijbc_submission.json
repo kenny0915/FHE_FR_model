@@ -1,0 +1,62 @@
+{
+  "root": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925",
+  "checkpoints": {
+    "control": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/train/control/epoch3.pt",
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "sha256": "5e2b6e237475150e7767a8362bbae43a648d8a9bca0420020ec12db97f223657",
+      "epoch": 3,
+      "optimizer_steps": 7587,
+      "finite_parameters": true,
+      "quadratics": 25
+    },
+    "fixed": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/train/fixed/epoch3.pt",
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/fixed.pt",
+      "sha256": "8b6203a7ee3530327a999188266cc1cbacbdefeaed5afe20e23d787b7ee8b5ef",
+      "epoch": 3,
+      "optimizer_steps": 7587,
+      "finite_parameters": true,
+      "quadratics": 25
+    },
+    "coefficients": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/train/coefficients/epoch3.pt",
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/coefficients.pt",
+      "sha256": "df143d37e2612fb1984b4ab488b6ec3bf0c8e1d7931e815446b4c18fa684cc58",
+      "epoch": 3,
+      "optimizer_steps": 7587,
+      "finite_parameters": true,
+      "quadratics": 25
+    }
+  },
+  "ijbc_root": "/work/u8798807/FHE_FR_model/ijb/IJBC",
+  "training_job": "435891",
+  "checkpoint_choice": "predeclared epoch3 for all arms",
+  "policy": "nonfinite-only zeroing of both full view embeddings; retain all sources and verification pairs; ignore BTS range",
+  "monitoring": false,
+  "job_id": "437539",
+  "array": {
+    "0": "control",
+    "1": "fixed",
+    "2": "coefficients"
+  },
+  "code_commit": "dc839ebc028f718ce2e4641eaa005080de809826",
+  "environment": {
+    "ACCURACY_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/source",
+    "ACCURACY_PYTHON": "/home/u8798807/.conda/envs/face_recog/bin/python",
+    "ACCURACY_EVAL_INPUTS": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs",
+    "ACCURACY_EVAL_OUTPUT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/results",
+    "IJBC_ROOT": "/work/u8798807/FHE_FR_model/ijb/IJBC"
+  },
+  "command": [
+    "sbatch",
+    "--parsable",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/eval-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/eval-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/source/controlled_degree2/accuracy_recovery_ijbc.slurm"
+  ],
+  "submission_stderr": "",
+  "gpus_per_task": 1,
+  "batch_size": 256,
+  "image_workers": 8
+}
