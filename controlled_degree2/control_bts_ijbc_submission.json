@@ -1,0 +1,108 @@
+{
+  "root": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925",
+  "checkpoints": {
+    "bts6": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/inputs/bts6.pt",
+      "sha256": "ec1eada0fc33a81f75cb9c3bec5fc56296c350948e2b57eecc94cceae2dba4fd",
+      "boundaries": [
+        "layer1.2",
+        "layer2.3",
+        "layer3.3",
+        "layer3.7",
+        "layer3.11",
+        "layer4.1"
+      ]
+    },
+    "bts14": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/inputs/bts14.pt",
+      "sha256": "50b324630838a8b9f896791ffea21e83aaef4cd9a6b9bddc332be2778f56731e",
+      "boundaries": [
+        "layer1.0",
+        "layer1.2",
+        "layer2.1",
+        "layer2.3",
+        "layer3.0",
+        "layer3.2",
+        "layer3.4",
+        "layer3.6",
+        "layer3.8",
+        "layer3.10",
+        "layer3.12",
+        "layer3.13",
+        "layer4.0",
+        "layer4.2"
+      ]
+    },
+    "bts9": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/inputs/bts9.pt",
+      "sha256": "31e6217f487d0a086c376cb9184fc2a0d460fe3e4f6764fa82c9760aa6d923e2",
+      "boundaries": [
+        "layer1.1",
+        "layer2.1",
+        "layer2.3",
+        "layer3.1",
+        "layer3.4",
+        "layer3.7",
+        "layer3.10",
+        "layer3.13",
+        "layer4.1"
+      ]
+    },
+    "bts7": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/inputs/bts7.pt",
+      "sha256": "ee6d0157c33c29e45cae0a0d95e48480c7c1b4d1c307a77bc3cc6421deb820d5",
+      "boundaries": [
+        "layer1.2",
+        "layer2.3",
+        "layer3.2",
+        "layer3.6",
+        "layer3.10",
+        "layer3.13",
+        "layer4.2"
+      ]
+    },
+    "bts5": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/inputs/bts5.pt",
+      "sha256": "ed50daf233406763da427b78723baf68f041db8b35d834a1207b35b2a1248ed5",
+      "boundaries": [
+        "layer2.0",
+        "layer3.0",
+        "layer3.5",
+        "layer3.10",
+        "layer4.0"
+      ]
+    }
+  },
+  "ijbc_root": "/work/u8798807/FHE_FR_model/ijb/IJBC",
+  "failure_policy": "any selected block output outside inclusive [-1,1], or nonfinite boundary/embedding, in either view => zero BOTH full view embeddings; retain all source images and verification pairs",
+  "counts": "source-image and original/flip-view counts; per-boundary counts; range and nonfinite reasons may overlap (Inf is also outside interval)",
+  "monitoring": false,
+  "job_id": "438350",
+  "code_commit": "1620ec6ad77958a0f0a2626b8a744320fd582991",
+  "environment": {
+    "BTS_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/source",
+    "BTS_EVAL_INPUTS": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/inputs",
+    "BTS_EVAL_OUTPUT": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/results",
+    "IJBC_ROOT": "/work/u8798807/FHE_FR_model/ijb/IJBC",
+    "ACCURACY_PYTHON": "/home/u8798807/.conda/envs/face_recog/bin/python"
+  },
+  "command": [
+    "sbatch",
+    "--parsable",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/eval-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/eval-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/control_bts_ijbc_20260925/source/controlled_degree2/control_bts_ijbc.slurm"
+  ],
+  "submission_stderr": "",
+  "array": {
+    "0": "bts6",
+    "1": "bts14",
+    "2": "bts9",
+    "3": "bts7",
+    "4": "bts5"
+  },
+  "gpus_per_task": 1,
+  "batch_size": 256,
+  "image_workers": 8,
+  "tests_passed": 21
+}
