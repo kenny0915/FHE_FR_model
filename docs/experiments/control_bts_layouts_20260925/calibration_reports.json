@@ -1,0 +1,662 @@
+{
+  "bts6": {
+    "settings": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "output_dir": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts6",
+      "dataset_root": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+      "images": 1000,
+      "seed": 42,
+      "batch_size": 64,
+      "target_absmax": 0.8,
+      "device": "cuda",
+      "boundaries": [
+        "layer1.2",
+        "layer2.3",
+        "layer3.3",
+        "layer3.7",
+        "layer3.11",
+        "layer4.1"
+      ]
+    },
+    "provenance": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "source_sha256": "5e2b6e237475150e7767a8362bbae43a648d8a9bca0420020ec12db97f223657",
+      "stage_scales": [
+        0.18910870945027528,
+        0.2562613211684217,
+        0.07410368251293982,
+        0.44996994450276745
+      ],
+      "boundaries": [
+        "layer1.2",
+        "layer2.3",
+        "layer3.3",
+        "layer3.7",
+        "layer3.11",
+        "layer4.1"
+      ],
+      "boundary_semantics": "residual block output; zero-based block index",
+      "eval_only": true,
+      "calibration_dataset": "MS1MV3",
+      "calibration_images": 1000,
+      "seed": 42,
+      "sampling": "random without replacement, sorted for IO, original orientation only",
+      "image_manifest_sha256": "88a3ab30f3a9d520741f9227efeec0f76bc732e25433f4ba743017e20b88a12d",
+      "recordio_index_sha256": "59c7808ec53c7307d9f1a2d4ce7dcd9858229b805ba88bb3fe3fbd3102471e5b"
+    },
+    "before": {
+      "layer1.2": {
+        "min": -4.230370998382568,
+        "max": 3.8039870262145996
+      },
+      "layer2.3": {
+        "min": -3.1218132972717285,
+        "max": 2.2842748165130615
+      },
+      "layer3.3": {
+        "min": -2.8833351135253906,
+        "max": 2.9994242191314697
+      },
+      "layer3.7": {
+        "min": -2.844391107559204,
+        "max": 5.46001672744751
+      },
+      "layer3.11": {
+        "min": -2.8975002765655518,
+        "max": 10.795684814453125
+      },
+      "layer4.1": {
+        "min": -1.1897976398468018,
+        "max": 1.777896523475647
+      }
+    },
+    "after": {
+      "layer1.2": {
+        "min": -0.8000003099441528,
+        "max": 0.7193671464920044
+      },
+      "layer2.3": {
+        "min": -0.7999997138977051,
+        "max": 0.5853714942932129
+      },
+      "layer3.3": {
+        "min": -0.21366623044013977,
+        "max": 0.22226856648921967
+      },
+      "layer3.7": {
+        "min": -0.2107802927494049,
+        "max": 0.4046076834201813
+      },
+      "layer3.11": {
+        "min": -0.21471500396728516,
+        "max": 0.8000013828277588
+      },
+      "layer4.1": {
+        "min": -0.5353727340698242,
+        "max": 0.7999997138977051
+      }
+    },
+    "equivalence": {
+      "images": 1000,
+      "embedding_max_abs_error": 4.029273986816406e-05,
+      "embedding_relative_l2_max": 1.156393136625411e-05,
+      "embedding_cosine_min": 0.9999999999334843
+    },
+    "equivalence_passed": true,
+    "approximation_target": "per-channel PReLU; q_new(s*x)=s*q_old(x)",
+    "approximation_interval": "per-channel [-s*lam_fit, s*lam_fit]",
+    "degree": 2,
+    "activation_multiplicative_depth": 1,
+    "checkpoint_sha256": "ec1eada0fc33a81f75cb9c3bec5fc56296c350948e2b57eecc94cceae2dba4fd"
+  },
+  "bts14": {
+    "settings": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "output_dir": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts14",
+      "dataset_root": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+      "images": 1000,
+      "seed": 42,
+      "batch_size": 64,
+      "target_absmax": 0.8,
+      "device": "cuda",
+      "boundaries": [
+        "layer1.0",
+        "layer1.2",
+        "layer2.1",
+        "layer2.3",
+        "layer3.0",
+        "layer3.2",
+        "layer3.4",
+        "layer3.6",
+        "layer3.8",
+        "layer3.10",
+        "layer3.12",
+        "layer3.13",
+        "layer4.0",
+        "layer4.2"
+      ]
+    },
+    "provenance": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "source_sha256": "5e2b6e237475150e7767a8362bbae43a648d8a9bca0420020ec12db97f223657",
+      "stage_scales": [
+        0.18910870945027528,
+        0.2562613211684217,
+        0.0635606155203955,
+        0.8646066237383694
+      ],
+      "boundaries": [
+        "layer1.0",
+        "layer1.2",
+        "layer2.1",
+        "layer2.3",
+        "layer3.0",
+        "layer3.2",
+        "layer3.4",
+        "layer3.6",
+        "layer3.8",
+        "layer3.10",
+        "layer3.12",
+        "layer3.13",
+        "layer4.0",
+        "layer4.2"
+      ],
+      "boundary_semantics": "residual block output; zero-based block index",
+      "eval_only": true,
+      "calibration_dataset": "MS1MV3",
+      "calibration_images": 1000,
+      "seed": 42,
+      "sampling": "random without replacement, sorted for IO, original orientation only",
+      "image_manifest_sha256": "88a3ab30f3a9d520741f9227efeec0f76bc732e25433f4ba743017e20b88a12d",
+      "recordio_index_sha256": "59c7808ec53c7307d9f1a2d4ce7dcd9858229b805ba88bb3fe3fbd3102471e5b"
+    },
+    "before": {
+      "layer1.0": {
+        "min": -2.2623963356018066,
+        "max": 2.3927063941955566
+      },
+      "layer1.2": {
+        "min": -4.230370998382568,
+        "max": 3.8039870262145996
+      },
+      "layer2.1": {
+        "min": -2.600651979446411,
+        "max": 2.3347644805908203
+      },
+      "layer2.3": {
+        "min": -3.1218132972717285,
+        "max": 2.2842748165130615
+      },
+      "layer3.0": {
+        "min": -2.1084089279174805,
+        "max": 2.0929110050201416
+      },
+      "layer3.2": {
+        "min": -1.9789012670516968,
+        "max": 2.052992820739746
+      },
+      "layer3.4": {
+        "min": -2.8622965812683105,
+        "max": 3.725841522216797
+      },
+      "layer3.6": {
+        "min": -2.844675064086914,
+        "max": 4.907966613769531
+      },
+      "layer3.8": {
+        "min": -2.852128267288208,
+        "max": 6.524141788482666
+      },
+      "layer3.10": {
+        "min": -2.8122167587280273,
+        "max": 10.131795883178711
+      },
+      "layer3.12": {
+        "min": -2.87359881401062,
+        "max": 11.566025733947754
+      },
+      "layer3.13": {
+        "min": -3.136812210083008,
+        "max": 12.586410522460938
+      },
+      "layer4.0": {
+        "min": -0.7599567770957947,
+        "max": 0.7016792297363281
+      },
+      "layer4.2": {
+        "min": -0.9252762794494629,
+        "max": 0.8062311410903931
+      }
+    },
+    "after": {
+      "layer1.0": {
+        "min": -0.4278389811515808,
+        "max": 0.4524819254875183
+      },
+      "layer1.2": {
+        "min": -0.8000003099441528,
+        "max": 0.7193671464920044
+      },
+      "layer2.1": {
+        "min": -0.6664465069770813,
+        "max": 0.5983099937438965
+      },
+      "layer2.3": {
+        "min": -0.7999997138977051,
+        "max": 0.5853714942932129
+      },
+      "layer3.0": {
+        "min": -0.13401177525520325,
+        "max": 0.13302668929100037
+      },
+      "layer3.2": {
+        "min": -0.12578018009662628,
+        "max": 0.13048946857452393
+      },
+      "layer3.4": {
+        "min": -0.18192921578884125,
+        "max": 0.23681680858135223
+      },
+      "layer3.6": {
+        "min": -0.1808091700077057,
+        "max": 0.3119533658027649
+      },
+      "layer3.8": {
+        "min": -0.18128256499767303,
+        "max": 0.41467905044555664
+      },
+      "layer3.10": {
+        "min": -0.17874576151371002,
+        "max": 0.6439840197563171
+      },
+      "layer3.12": {
+        "min": -0.18264728784561157,
+        "max": 0.7351447939872742
+      },
+      "layer3.13": {
+        "min": -0.19937793910503387,
+        "max": 0.8000011444091797
+      },
+      "layer4.0": {
+        "min": -0.6570643186569214,
+        "max": 0.6066784262657166
+      },
+      "layer4.2": {
+        "min": -0.8000028133392334,
+        "max": 0.6970725655555725
+      }
+    },
+    "equivalence": {
+      "images": 1000,
+      "embedding_max_abs_error": 4.76837158203125e-05,
+      "embedding_relative_l2_max": 1.1417448149586562e-05,
+      "embedding_cosine_min": 0.9999999999361338
+    },
+    "equivalence_passed": true,
+    "approximation_target": "per-channel PReLU; q_new(s*x)=s*q_old(x)",
+    "approximation_interval": "per-channel [-s*lam_fit, s*lam_fit]",
+    "degree": 2,
+    "activation_multiplicative_depth": 1,
+    "checkpoint_sha256": "50b324630838a8b9f896791ffea21e83aaef4cd9a6b9bddc332be2778f56731e"
+  },
+  "bts9": {
+    "settings": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "output_dir": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts9",
+      "dataset_root": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+      "images": 1000,
+      "seed": 42,
+      "batch_size": 64,
+      "target_absmax": 0.8,
+      "device": "cuda",
+      "boundaries": [
+        "layer1.1",
+        "layer2.1",
+        "layer2.3",
+        "layer3.1",
+        "layer3.4",
+        "layer3.7",
+        "layer3.10",
+        "layer3.13",
+        "layer4.1"
+      ]
+    },
+    "provenance": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "source_sha256": "5e2b6e237475150e7767a8362bbae43a648d8a9bca0420020ec12db97f223657",
+      "stage_scales": [
+        0.16534093725630217,
+        0.2562613211684217,
+        0.0635606155203955,
+        0.44996994450276745
+      ],
+      "boundaries": [
+        "layer1.1",
+        "layer2.1",
+        "layer2.3",
+        "layer3.1",
+        "layer3.4",
+        "layer3.7",
+        "layer3.10",
+        "layer3.13",
+        "layer4.1"
+      ],
+      "boundary_semantics": "residual block output; zero-based block index",
+      "eval_only": true,
+      "calibration_dataset": "MS1MV3",
+      "calibration_images": 1000,
+      "seed": 42,
+      "sampling": "random without replacement, sorted for IO, original orientation only",
+      "image_manifest_sha256": "88a3ab30f3a9d520741f9227efeec0f76bc732e25433f4ba743017e20b88a12d",
+      "recordio_index_sha256": "59c7808ec53c7307d9f1a2d4ce7dcd9858229b805ba88bb3fe3fbd3102471e5b"
+    },
+    "before": {
+      "layer1.1": {
+        "min": -4.737794876098633,
+        "max": 4.838487148284912
+      },
+      "layer2.1": {
+        "min": -2.600651979446411,
+        "max": 2.3347644805908203
+      },
+      "layer2.3": {
+        "min": -3.1218132972717285,
+        "max": 2.2842748165130615
+      },
+      "layer3.1": {
+        "min": -2.0496256351470947,
+        "max": 2.0529017448425293
+      },
+      "layer3.4": {
+        "min": -2.8622965812683105,
+        "max": 3.725841522216797
+      },
+      "layer3.7": {
+        "min": -2.844391107559204,
+        "max": 5.46001672744751
+      },
+      "layer3.10": {
+        "min": -2.8122167587280273,
+        "max": 10.131795883178711
+      },
+      "layer3.13": {
+        "min": -3.136812210083008,
+        "max": 12.586410522460938
+      },
+      "layer4.1": {
+        "min": -1.1897976398468018,
+        "max": 1.777896523475647
+      }
+    },
+    "after": {
+      "layer1.1": {
+        "min": -0.7833510637283325,
+        "max": 0.8000000715255737
+      },
+      "layer2.1": {
+        "min": -0.6664460301399231,
+        "max": 0.5983099341392517
+      },
+      "layer2.3": {
+        "min": -0.8000006079673767,
+        "max": 0.5853714346885681
+      },
+      "layer3.1": {
+        "min": -0.13027551770210266,
+        "max": 0.13048367202281952
+      },
+      "layer3.4": {
+        "min": -0.18192927539348602,
+        "max": 0.23681700229644775
+      },
+      "layer3.7": {
+        "min": -0.18079118430614471,
+        "max": 0.34704169631004333
+      },
+      "layer3.10": {
+        "min": -0.1787460446357727,
+        "max": 0.6439835429191589
+      },
+      "layer3.13": {
+        "min": -0.19937771558761597,
+        "max": 0.8000001907348633
+      },
+      "layer4.1": {
+        "min": -0.5353734493255615,
+        "max": 0.800000011920929
+      }
+    },
+    "equivalence": {
+      "images": 1000,
+      "embedding_max_abs_error": 4.214048385620117e-05,
+      "embedding_relative_l2_max": 1.1141270078951493e-05,
+      "embedding_cosine_min": 0.999999999941246
+    },
+    "equivalence_passed": true,
+    "approximation_target": "per-channel PReLU; q_new(s*x)=s*q_old(x)",
+    "approximation_interval": "per-channel [-s*lam_fit, s*lam_fit]",
+    "degree": 2,
+    "activation_multiplicative_depth": 1,
+    "checkpoint_sha256": "31e6217f487d0a086c376cb9184fc2a0d460fe3e4f6764fa82c9760aa6d923e2"
+  },
+  "bts7": {
+    "settings": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "output_dir": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts7",
+      "dataset_root": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+      "images": 1000,
+      "seed": 42,
+      "batch_size": 64,
+      "target_absmax": 0.8,
+      "device": "cuda",
+      "boundaries": [
+        "layer1.2",
+        "layer2.3",
+        "layer3.2",
+        "layer3.6",
+        "layer3.10",
+        "layer3.13",
+        "layer4.2"
+      ]
+    },
+    "provenance": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "source_sha256": "5e2b6e237475150e7767a8362bbae43a648d8a9bca0420020ec12db97f223657",
+      "stage_scales": [
+        0.18910870945027528,
+        0.2562613211684217,
+        0.0635606155203955,
+        0.8646066237383694
+      ],
+      "boundaries": [
+        "layer1.2",
+        "layer2.3",
+        "layer3.2",
+        "layer3.6",
+        "layer3.10",
+        "layer3.13",
+        "layer4.2"
+      ],
+      "boundary_semantics": "residual block output; zero-based block index",
+      "eval_only": true,
+      "calibration_dataset": "MS1MV3",
+      "calibration_images": 1000,
+      "seed": 42,
+      "sampling": "random without replacement, sorted for IO, original orientation only",
+      "image_manifest_sha256": "88a3ab30f3a9d520741f9227efeec0f76bc732e25433f4ba743017e20b88a12d",
+      "recordio_index_sha256": "59c7808ec53c7307d9f1a2d4ce7dcd9858229b805ba88bb3fe3fbd3102471e5b"
+    },
+    "before": {
+      "layer1.2": {
+        "min": -4.230370998382568,
+        "max": 3.8039870262145996
+      },
+      "layer2.3": {
+        "min": -3.1218132972717285,
+        "max": 2.2842748165130615
+      },
+      "layer3.2": {
+        "min": -1.9789012670516968,
+        "max": 2.052992820739746
+      },
+      "layer3.6": {
+        "min": -2.844675064086914,
+        "max": 4.907966613769531
+      },
+      "layer3.10": {
+        "min": -2.8122167587280273,
+        "max": 10.131795883178711
+      },
+      "layer3.13": {
+        "min": -3.136812210083008,
+        "max": 12.586410522460938
+      },
+      "layer4.2": {
+        "min": -0.9252762794494629,
+        "max": 0.8062311410903931
+      }
+    },
+    "after": {
+      "layer1.2": {
+        "min": -0.8000003099441528,
+        "max": 0.7193671464920044
+      },
+      "layer2.3": {
+        "min": -0.7999997138977051,
+        "max": 0.5853714942932129
+      },
+      "layer3.2": {
+        "min": -0.12578018009662628,
+        "max": 0.13048946857452393
+      },
+      "layer3.6": {
+        "min": -0.1808091700077057,
+        "max": 0.3119533658027649
+      },
+      "layer3.10": {
+        "min": -0.17874576151371002,
+        "max": 0.6439840197563171
+      },
+      "layer3.13": {
+        "min": -0.19937793910503387,
+        "max": 0.8000011444091797
+      },
+      "layer4.2": {
+        "min": -0.8000028133392334,
+        "max": 0.6970725655555725
+      }
+    },
+    "equivalence": {
+      "images": 1000,
+      "embedding_max_abs_error": 4.76837158203125e-05,
+      "embedding_relative_l2_max": 1.1417448149586562e-05,
+      "embedding_cosine_min": 0.9999999999361338
+    },
+    "equivalence_passed": true,
+    "approximation_target": "per-channel PReLU; q_new(s*x)=s*q_old(x)",
+    "approximation_interval": "per-channel [-s*lam_fit, s*lam_fit]",
+    "degree": 2,
+    "activation_multiplicative_depth": 1,
+    "checkpoint_sha256": "ee6d0157c33c29e45cae0a0d95e48480c7c1b4d1c307a77bc3cc6421deb820d5"
+  },
+  "bts5": {
+    "settings": {
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "output_dir": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts5",
+      "dataset_root": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+      "images": 1000,
+      "seed": 42,
+      "batch_size": 64,
+      "target_absmax": 0.8,
+      "device": "cuda",
+      "boundaries": [
+        "layer2.0",
+        "layer3.0",
+        "layer3.5",
+        "layer3.10",
+        "layer4.0"
+      ]
+    },
+    "provenance": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+      "source_sha256": "5e2b6e237475150e7767a8362bbae43a648d8a9bca0420020ec12db97f223657",
+      "stage_scales": [
+        1.0,
+        0.32464740015484267,
+        0.07895934829561638,
+        1.0
+      ],
+      "boundaries": [
+        "layer2.0",
+        "layer3.0",
+        "layer3.5",
+        "layer3.10",
+        "layer4.0"
+      ],
+      "boundary_semantics": "residual block output; zero-based block index",
+      "eval_only": true,
+      "calibration_dataset": "MS1MV3",
+      "calibration_images": 1000,
+      "seed": 42,
+      "sampling": "random without replacement, sorted for IO, original orientation only",
+      "image_manifest_sha256": "88a3ab30f3a9d520741f9227efeec0f76bc732e25433f4ba743017e20b88a12d",
+      "recordio_index_sha256": "59c7808ec53c7307d9f1a2d4ce7dcd9858229b805ba88bb3fe3fbd3102471e5b"
+    },
+    "before": {
+      "layer2.0": {
+        "min": -2.464211940765381,
+        "max": 2.3573760986328125
+      },
+      "layer3.0": {
+        "min": -2.1084089279174805,
+        "max": 2.0929110050201416
+      },
+      "layer3.5": {
+        "min": -2.8465001583099365,
+        "max": 4.3880767822265625
+      },
+      "layer3.10": {
+        "min": -2.8122167587280273,
+        "max": 10.131795883178711
+      },
+      "layer4.0": {
+        "min": -0.7599567770957947,
+        "max": 0.7016792297363281
+      }
+    },
+    "after": {
+      "layer2.0": {
+        "min": -0.7999998331069946,
+        "max": 0.7653162479400635
+      },
+      "layer3.0": {
+        "min": -0.16647869348526,
+        "max": 0.1652548909187317
+      },
+      "layer3.5": {
+        "min": -0.2247578501701355,
+        "max": 0.34647926688194275
+      },
+      "layer3.10": {
+        "min": -0.22205063700675964,
+        "max": 0.799999475479126
+      },
+      "layer4.0": {
+        "min": -0.7599575519561768,
+        "max": 0.7016780972480774
+      }
+    },
+    "equivalence": {
+      "images": 1000,
+      "embedding_max_abs_error": 3.463029861450195e-05,
+      "embedding_relative_l2_max": 9.472772035223898e-06,
+      "embedding_cosine_min": 0.9999999999555365
+    },
+    "equivalence_passed": true,
+    "approximation_target": "per-channel PReLU; q_new(s*x)=s*q_old(x)",
+    "approximation_interval": "per-channel [-s*lam_fit, s*lam_fit]",
+    "degree": 2,
+    "activation_multiplicative_depth": 1,
+    "checkpoint_sha256": "ed50daf233406763da427b78723baf68f041db8b35d834a1207b35b2a1248ed5"
+  }
+}

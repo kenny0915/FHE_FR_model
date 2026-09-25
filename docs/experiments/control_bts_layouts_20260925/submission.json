@@ -1,0 +1,23 @@
+{
+  "job_id": "438201",
+  "code_commit": "6857a5a7072b8c1ff952c8ec9dafd37794586683",
+  "environment": {
+    "BTS_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/source",
+    "CHECKPOINT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_ijbc_20260925/inputs/control.pt",
+    "DATASET_ROOT": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+    "BTS_OUTPUT_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports",
+    "ACCURACY_PYTHON": "/home/u8798807/.conda/envs/face_recog/bin/python"
+  },
+  "command": [
+    "sbatch",
+    "--parsable",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/convert-%j.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/convert-%j.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/source/controlled_degree2/control_bts_layouts.slurm"
+  ],
+  "submission_stderr": "",
+  "tests_passed": 32,
+  "state": "COMPLETED",
+  "exit_code": "0:0",
+  "elapsed": "00:01:05"
+}
