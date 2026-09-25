@@ -6,6 +6,14 @@ import torch
 from torch.nn import functional as F
 
 
+def active_weighted_loss(terms):
+    """Exclude disabled losses from autograd, including nonfinite diagnostics."""
+    active = [weight * value for weight, value in terms if weight != 0]
+    if not active:
+        raise ValueError("at least one loss weight must be nonzero")
+    return sum(active)
+
+
 def _piecewise(progress, values):
     if progress >= 1.0:
         return values[-1]

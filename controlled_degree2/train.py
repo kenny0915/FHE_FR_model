@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import math
 import os
 import random
 import time
@@ -60,6 +61,11 @@ def parse_args():
 
     parser.add_argument("--lr-at-512", type=float, default=5e-4)
     parser.add_argument("--weight-decay", type=float, default=5e-4)
+    parser.add_argument("--train-coefficients", action="store_true",
+                        help="fine-tune quadratic coefficients without changing degree")
+    parser.add_argument("--coefficient-lr-multiplier", type=float, default=0.1)
+    parser.add_argument("--save-every-epoch", action="store_true",
+                        help="save diagnostic epoch checkpoints regardless of canary gate")
     parser.add_argument("--lr-warmup-epochs", type=float, default=0.5)
     parser.add_argument("--grad-clip", type=float, default=5.0)
 
@@ -585,6 +591,24 @@ def evaluate_canaries(model, canaries, batch_size):
     return scores
 
 
+def accuracy_parameter_groups(student, frozen_names, learning_rate, multiplier):
+    """Opt-in coefficient learning; respect frozen prefixes and omit coefficient decay."""
+    if not math.isfinite(multiplier) or multiplier <= 0:
+        raise ValueError("coefficient LR multiplier must be finite and positive")
+    coefficients = []
+    for name, module in student.named_modules():
+        if isinstance(module, DirectQuadratic) and not belongs_to_frozen_module(name, frozen_names):
+            module.coeffs.requires_grad_(True)
+            coefficients.append(module.coeffs)
+    coefficient_ids = {id(p) for p in coefficients}
+    backbone = [p for p in student.parameters() if p.requires_grad and id(p) not in coefficient_ids]
+    groups = [{"params": backbone, "lr": learning_rate}]
+    if coefficients:
+        groups.append({"params": coefficients, "lr": learning_rate * multiplier,
+                       "lr_multiplier": multiplier, "weight_decay": 0.0})
+    return groups
+
+
 def main():
     args = parse_args()
     if args.epochs <= 0 or args.batch_size <= 0 or args.global_batch <= 0:
@@ -864,6 +888,11 @@ def main():
     causal_names = causal_tail_names(student, frozen_names)
     student_hints, student_handles = attach_hints(student, names)
     teacher_hints, teacher_handles = attach_hints(teacher, names)
+    parameter_groups = None
+    if args.train_coefficients:
+        parameter_groups = accuracy_parameter_groups(
+            student, frozen_names, learning_rate, args.coefficient_lr_multiplier
+        )
     if world_size > 1:
         distributed_student = DistributedDataParallel(
             student, device_ids=[local_rank], output_device=local_rank
@@ -872,7 +901,7 @@ def main():
         distributed_student = student
     trainable = [parameter for parameter in student.parameters() if parameter.requires_grad]
     optimizer = torch.optim.SGD(
-        trainable,
+        parameter_groups if parameter_groups is not None else trainable,
         lr=learning_rate,
         momentum=0.9,
         weight_decay=args.weight_decay,
@@ -1086,14 +1115,12 @@ def main():
                     ]
                     if tail_ratios:
                         main_tail_scores = torch.stack(tail_ratios, dim=1).amax(dim=1)
-                    loss = (
-                        args.w_embedding * embedding
-                        + hint_weight * hint
-                        + beta * range_penalty
-                        + args.causal_tail_beta * causal_penalty
-                        + args.operator_bound_weight * bound_penalty
-                        + args.adversarial_tail_beta * adversarial_penalty
-                    )
+                    loss = losses.active_weighted_loss([
+                        (args.w_embedding, embedding), (hint_weight, hint),
+                        (beta, range_penalty), (args.causal_tail_beta, causal_penalty),
+                        (args.operator_bound_weight, bound_penalty),
+                        (args.adversarial_tail_beta, adversarial_penalty),
+                    ])
 
                 deployment_penalty = student_embedding.new_zeros(())
                 deployment_nonfinite = 0
@@ -1180,7 +1207,7 @@ def main():
             )
             lr_scale = losses.lr_factor(step, lr_warmup, total_steps)
             for group in optimizer.param_groups:
-                group["lr"] = learning_rate * lr_scale
+                group["lr"] = learning_rate * lr_scale * group.get("lr_multiplier", 1.0)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
             nonfinite_gradient_streak = 0
@@ -1226,6 +1253,13 @@ def main():
                 teacher_weights=teacher_path,
                 extra=extra,
             )
+            if args.save_every_epoch:
+                save_checkpoint(
+                    os.path.join(args.output_dir, f"epoch{epoch + 1}.pt"),
+                    student, calibration, teacher_weights=teacher_path,
+                    extra=checkpoint_extra(optimizer, epoch, step, best_score, config)
+                    | {"diagnostic_only": True},
+                )
             canary_scores = (
                 evaluate_canaries(student, canaries, args.canary_batch_size)
                 if canaries
