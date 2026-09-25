@@ -51,11 +51,12 @@ def test_invalid_coefficient_learning_rate(multiplier):
 @pytest.mark.parametrize('arm', ['control', 'fixed', 'coefficients'])
 def test_recipe_parses_with_real_trainer(monkeypatch, arm):
     args = Namespace(arm=arm, gpus=4, checkpoint='original.pt', teacher='teacher.pt',
-                     dataset_root='ms1m', output_root='output')
+                     dataset_root='ms1m', output_root='output', canary_root='canaries', smoke=False)
     command = training_command(args)
-    monkeypatch.setattr('sys.argv', ['train'] + command[5:])
+    monkeypatch.setattr('sys.argv', ['train'] + command[7:])
     parsed = parse_args()
     assert parsed.student_init == 'original.pt'
+    assert parsed.canary_root == 'canaries'
     assert parsed.save_every_epoch
     assert parsed.swap_epochs == 0
     assert parsed.train_coefficients == (arm == 'coefficients')
