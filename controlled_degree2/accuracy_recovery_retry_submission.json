@@ -1,0 +1,94 @@
+{
+  "root": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925",
+  "code_commit": "bf9e0dc4f77b3137cfdc9afa29e6c71a090a8701",
+  "previous_failed_job": "435836",
+  "failure": "Production launcher could not import numpy; failed before training. Smoke previously used a different environment setup.",
+  "environment": {
+    "ACCURACY_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/source",
+    "CHECKPOINT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/inputs/student.pt",
+    "TEACHER": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/inputs/teacher.pt",
+    "DATASET_ROOT": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+    "CANARY_ROOT": "/work/u8798807/FHE_FR_model/faces_webface_112x112",
+    "SMOKE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/smoke",
+    "OUTPUT_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/smoke",
+    "ACCURACY_PYTHON": "/home/u8798807/.conda/envs/face_recog/bin/python",
+    "ACCURACY_MODE": "smoke"
+  },
+  "hashes": {
+    "student.pt": "3b3298217fcc54a368b045f50d85e8e0d9c845f305e7f1212640838c160f6b39",
+    "teacher.pt": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a"
+  },
+  "smoke_job": "435877",
+  "smoke_command": [
+    "sbatch",
+    "--parsable",
+    "--job-name=d2-recovery-smoke",
+    "--time=00:30:00",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/smoke-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/smoke-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/source/controlled_degree2/accuracy_recovery.slurm"
+  ],
+  "smoke_submission_stderr": "",
+  "cpu_tests_passed": 11,
+  "smoke_states": [
+    "435877_0|COMPLETED|0:0|00:01:06",
+    "435877_1|COMPLETED|0:0|00:01:00",
+    "435877_2|COMPLETED|0:0|00:01:05"
+  ],
+  "smoke_results": {
+    "control": {
+      "steps": 2,
+      "finite_checkpoint": true,
+      "coefficient_updates": 0,
+      "bn_buffer_updates": 237,
+      "canaries": {
+        "lfw": 0.9964999999999999,
+        "cplfw": 0.9075000000000001
+      },
+      "runtime": "runtime: /home/u8798807/.conda/envs/face_recog/bin/python numpy 1.23.5 torch 2.1.2+cu118 mxnet 1.9.1"
+    },
+    "fixed": {
+      "steps": 2,
+      "finite_checkpoint": true,
+      "coefficient_updates": 0,
+      "bn_buffer_updates": 0,
+      "canaries": {
+        "lfw": 0.998,
+        "cplfw": 0.9116666666666665
+      },
+      "runtime": "runtime: /home/u8798807/.conda/envs/face_recog/bin/python numpy 1.23.5 torch 2.1.2+cu118 mxnet 1.9.1"
+    },
+    "coefficients": {
+      "steps": 2,
+      "finite_checkpoint": true,
+      "coefficient_updates": 25,
+      "bn_buffer_updates": 0,
+      "canaries": {
+        "lfw": 0.9966666666666667,
+        "cplfw": 0.9138333333333334
+      },
+      "runtime": "runtime: /home/u8798807/.conda/envs/face_recog/bin/python numpy 1.23.5 torch 2.1.2+cu118 mxnet 1.9.1"
+    }
+  },
+  "training_job": "435891",
+  "training_command": [
+    "sbatch",
+    "--parsable",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/train-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/train-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/source/controlled_degree2/accuracy_recovery.slurm"
+  ],
+  "training_environment": {
+    "ACCURACY_MODE": "train",
+    "OUTPUT_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_retry_20260925/train"
+  },
+  "training_submission_stderr": "",
+  "epochs": 3,
+  "gpus_per_arm": 4,
+  "training_array": {
+    "0": "control",
+    "1": "fixed",
+    "2": "coefficients"
+  },
+  "monitoring": false
+}

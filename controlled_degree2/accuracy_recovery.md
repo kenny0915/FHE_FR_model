@@ -85,6 +85,22 @@ two accumulated updates each, with full canaries. Its `completed.json` verifies
 finite checkpoint tensors, coefficient updates only in the trainable arm,
 and unchanged BN running buffers in both accuracy-oriented arms.
 
+### Launcher correction after initial submission
+
+All tasks of array `435836` failed before training, with
+`ModuleNotFoundError: No module named 'numpy'`. The initial smoke used the
+inherited interpreter, while production loaded a module and activated Conda;
+these different startup paths invalidated the runtime check.
+
+Both scripts now source `accuracy_runtime.sh` and invoke the explicit
+`ACCURACY_PYTHON` executable (default `$HOME/.conda/envs/face_recog/bin/python`).
+The runtime logs its executable and NumPy/PyTorch/MXNet versions, checks
+NumPy compatibility and four visible GPUs. There is no module/Conda activation.
+Use `ACCURACY_MODE=smoke` with **the production array script** to exercise the
+same startup and all three arms for two updates plus full canaries; use a
+separate fresh `OUTPUT_ROOT`. Production uses `ACCURACY_MODE=train` (default).
+The retry retains the original input checkpoint hashes and training settings.
+
 ## Evaluation and decision rule
 
 Every epoch is saved as `epochN.pt` before canary evaluation, even if a canary
