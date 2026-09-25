@@ -61,7 +61,8 @@ experiment, so activation range logs and unclipped evaluation are mandatory.
 Only lightweight tests run in this checkout. Preview a command without training:
 
 ```bash
-python -m controlled_degree2.accuracy_recovery --arm coefficients
+python -m controlled_degree2.accuracy_recovery --arm coefficients \
+  --canary-root faces_webface_112x112
 ```
 
 From the repository root on the GPU server:
@@ -71,11 +72,18 @@ sha256sum work_dirs/controlled_degree2_tail_ms1mv3_20260907/progressive/student_
 sbatch controlled_degree2/accuracy_recovery.slurm
 ```
 
-Override `CHECKPOINT`, `TEACHER`, `DATASET_ROOT`, and `OUTPUT_ROOT` through
+Override `CHECKPOINT`, `TEACHER`, `DATASET_ROOT`, `CANARY_ROOT`, and `OUTPUT_ROOT` through
 the submission environment if needed. The launcher rejects existing arm
 directories to avoid overwriting a run. Save the server git revision and
 checkpoint hashes with the run records. The 4-hour cap is a resource limit,
 not a prediction that training will finish within it.
+
+The server's MS1MV3 directory lacks CPLFW. The Slurm launcher therefore uses
+`faces_webface_112x112` for LFW/CPLFW only; training remains MS1MV3. The
+`accuracy_recovery_smoke.slurm` preflight runs all three arms on four H200s,
+two accumulated updates each, with full canaries. Its `completed.json` verifies
+finite checkpoint tensors, coefficient updates only in the trainable arm,
+and unchanged BN running buffers in both accuracy-oriented arms.
 
 ## Evaluation and decision rule
 

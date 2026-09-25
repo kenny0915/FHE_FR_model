@@ -1,0 +1,84 @@
+{
+  "root": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925",
+  "code_commit": "8b8f58c68fd4821adef402c6bb718feaea250615",
+  "hashes": {
+    "student.pt": "3b3298217fcc54a368b045f50d85e8e0d9c845f305e7f1212640838c160f6b39",
+    "teacher.pt": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a"
+  },
+  "environment": {
+    "ACCURACY_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/source",
+    "CHECKPOINT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/inputs/student.pt",
+    "TEACHER": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/inputs/teacher.pt",
+    "DATASET_ROOT": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+    "CANARY_ROOT": "/work/u8798807/FHE_FR_model/faces_webface_112x112",
+    "SMOKE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/smoke",
+    "OUTPUT_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/train"
+  },
+  "smoke_job": "435828",
+  "submission_stderr": "",
+  "training_job": "435836",
+  "training_array": {
+    "0": "control",
+    "1": "fixed",
+    "2": "coefficients"
+  },
+  "training_command": [
+    "sbatch",
+    "--parsable",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/train-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/train-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/source/controlled_degree2/accuracy_recovery.slurm"
+  ],
+  "training_submission_stderr": "",
+  "smoke_state": "COMPLETED|0:0|00:03:20",
+  "smoke": {
+    "job_id": "435828",
+    "arms": {
+      "control": {
+        "steps": 2,
+        "finite_checkpoint": true,
+        "changed_tensors": 449,
+        "changed_coefficients": 0,
+        "changed_bn_buffers": 237,
+        "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/smoke/control/epoch1.pt",
+        "canaries": {
+          "lfw": 0.9964999999999999,
+          "cplfw": 0.9085000000000001
+        }
+      },
+      "fixed": {
+        "steps": 2,
+        "finite_checkpoint": true,
+        "changed_tensors": 212,
+        "changed_coefficients": 0,
+        "changed_bn_buffers": 0,
+        "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/smoke/fixed/epoch1.pt",
+        "canaries": {
+          "lfw": 0.998,
+          "cplfw": 0.9116666666666665
+        }
+      },
+      "coefficients": {
+        "steps": 2,
+        "finite_checkpoint": true,
+        "changed_tensors": 237,
+        "changed_coefficients": 25,
+        "changed_bn_buffers": 0,
+        "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/smoke/coefficients/epoch1.pt",
+        "canaries": {
+          "lfw": 0.9966666666666667,
+          "cplfw": 0.9138333333333334
+        }
+      }
+    },
+    "microbatch": 128,
+    "global_batch": 2048,
+    "gpus": 4,
+    "scope": "Two-update execution and full LFW/CPLFW evaluation; not convergence or zero-failure certification."
+  },
+  "epochs": 3,
+  "gpus_per_arm": 4,
+  "max_training_gpus": 12,
+  "monitoring": false,
+  "cpu_tests_passed": 9
+}
