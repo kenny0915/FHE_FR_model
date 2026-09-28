@@ -63,6 +63,30 @@ def embedding_loss(student, teacher, mask=None):
     return (loss * weights).sum() / weights.sum().clamp_min(1.0)
 
 
+def relational_loss(student, teacher, mask=None, temperature=0.05):
+    """Teacher-to-student KL over off-diagonal cosine neighbours per local batch.
+
+    Training only. No labels, cross-rank bank, or T**2 rescaling. Both endpoints
+    of student similarities receive gradients; teacher endpoints are detached.
+    Mask before normalization so excluded pathological rows cannot poison KL.
+    """
+    if not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError('relational temperature must be finite and positive')
+    if student.ndim != 2 or student.shape != teacher.shape:
+        raise ValueError('matching [batch, embedding] tensors required')
+    if mask is not None:
+        student, teacher = student[mask], teacher[mask]
+    if len(student) < 2:
+        return student[:0].sum()
+    s = F.normalize(student.float(), dim=1)
+    t = F.normalize(teacher.detach().float(), dim=1)
+    off_diagonal = ~torch.eye(len(s), dtype=torch.bool, device=s.device)
+    student_logits = (s @ s.t())[off_diagonal].reshape(len(s), -1) / temperature
+    teacher_logits = (t @ t.t())[off_diagonal].reshape(len(t), -1) / temperature
+    return F.kl_div(F.log_softmax(student_logits, dim=1),
+                    F.softmax(teacher_logits, dim=1), reduction='batchmean')
+
+
 def hint_loss(student_store, teacher_store, names, mask=None):
     terms = []
     for name in names:

@@ -70,6 +70,8 @@ def parse_args():
     parser.add_argument("--grad-clip", type=float, default=5.0)
 
     parser.add_argument("--w-embedding", type=float, default=1.0)
+    parser.add_argument("--w-relational", type=float, default=0.0)
+    parser.add_argument("--relational-temperature", type=float, default=0.05)
     parser.add_argument("--hint-start", type=float, default=1.0)
     parser.add_argument("--hint-end", type=float, default=0.3)
     parser.add_argument("--beta", type=float, default=1.0)
@@ -611,6 +613,10 @@ def accuracy_parameter_groups(student, frozen_names, learning_rate, multiplier):
 
 def main():
     args = parse_args()
+    if not math.isfinite(args.w_relational) or args.w_relational < 0:
+        raise ValueError('relational weight must be finite and nonnegative')
+    if not math.isfinite(args.relational_temperature) or args.relational_temperature <= 0:
+        raise ValueError('relational temperature must be finite and positive')
     if args.epochs <= 0 or args.batch_size <= 0 or args.global_batch <= 0:
         raise ValueError("epochs and batch sizes must be positive")
     for name in (
@@ -1076,6 +1082,9 @@ def main():
                     embedding = losses.embedding_loss(
                         student_embedding, teacher_embedding, mask
                     )
+                    relational = (losses.relational_loss(
+                        student_embedding, teacher_embedding, mask, args.relational_temperature
+                    ) if args.w_relational > 0 else student_embedding.new_zeros(()))
                     hint = (
                         losses.hint_loss(student_hints, teacher_hints, names, mask)
                         if names else student_embedding.new_zeros(())
@@ -1117,6 +1126,7 @@ def main():
                         main_tail_scores = torch.stack(tail_ratios, dim=1).amax(dim=1)
                     loss = losses.active_weighted_loss([
                         (args.w_embedding, embedding), (hint_weight, hint),
+                        (args.w_relational, relational),
                         (beta, range_penalty), (args.causal_tail_beta, causal_penalty),
                         (args.operator_bound_weight, bound_penalty),
                         (args.adversarial_tail_beta, adversarial_penalty),
@@ -1228,7 +1238,7 @@ def main():
                 throughput = step * args.global_batch / elapsed
                 print(
                     f"step {step:>6} loss={float(loss):.4f} "
-                    f"emb={float(embedding):.4f} hint={float(hint):.4f} "
+                    f"emb={float(embedding):.4f} relation={float(relational):.4f} hint={float(hint):.4f} "
                     f"pen={float(range_penalty):.3g} oor={np.mean(list(oor.values())):.2e} "
                             f"tail={float(causal_penalty):.3g} bound={float(bound_penalty):.3g} "
                             f"adv={float(adversarial_penalty):.3g}@{adversarial_target or '-'} "
