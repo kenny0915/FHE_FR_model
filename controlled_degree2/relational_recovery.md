@@ -70,7 +70,7 @@ needed to quantify the remaining teacher-to-quadratic accuracy gap.
 
 ## Execution
 
-`relational_recovery.slurm` runs the array on 12 H200s total. It uses the
+`relational_recovery.slurm` can run up to three four-H200 tasks. It uses the
 explicit verified Python interpreter through `accuracy_runtime.sh`.
 Set `ACCURACY_CODE_ROOT`, `CHECKPOINT`, `TEACHER`, `DATASET_ROOT`, `CANARY_ROOT`,
 and a fresh `OUTPUT_ROOT`. `ACCURACY_MODE=smoke` runs two accumulated updates
@@ -78,3 +78,26 @@ and full canaries through the identical production launcher. Submit full
 training only after all smoke tasks complete and checkpoint invariants pass.
 Production has a six-hour cap; no automatic extension or retry is configured.
 No full training runs on the checkout host.
+
+### Execution validation
+
+61 CPU tests passed. Initial concurrent smoke arrays 450892 and 450896 each
+failed at DDP/NCCL initialization for the two co-located tasks, on nodes
+25a-hgpn165 and 25a-hgpn167 respectively, before the first training forward.
+The pointwise task on a different node succeeded both times. This identifies
+an execution problem but does not establish a hardware or NCCL root cause.
+
+Serial smoke array 450899 completed all three tasks with exit 0 on nodes
+25a-hgpn121 and 25a-hgpn012. Each used the production microbatch/global batch,
+completed two optimizer updates and full LFW/CPLFW diagnostics. The relational
+terms were active and gradients finite. Reloaded epoch checkpoints were
+checked for finite tensors, changed trainable weights, and unchanged
+polynomial coefficients, intervals, slopes and BN running buffers.
+
+The actual production submission overrides concurrency to `--array=0-2%1`
+and excludes both previously failing nodes. Thus the three arms run in
+sequence on four H200s at a time. Training policy and loss settings are
+unchanged. This workaround passed smoke; it is not a guarantee against
+later infrastructure or optimization failure. All attempts, code/input
+hashes, smoke metrics and the production ID are retained in
+`relational_recovery_submission.json`. No IJB-C job is submitted with training.

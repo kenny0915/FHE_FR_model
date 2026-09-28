@@ -1,0 +1,140 @@
+{
+  "root": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929",
+  "code_commit": "1070339f3d4ab986b5fde9d735c4eac093b2d6c9",
+  "input_hashes": {
+    "student": "3b3298217fcc54a368b045f50d85e8e0d9c845f305e7f1212640838c160f6b39",
+    "teacher": "ac658cc7cdbce5de90b8cd36de19b29f22ee283e016884f85252aa0a50a1841a"
+  },
+  "environment": {
+    "ACCURACY_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/source",
+    "CHECKPOINT": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/inputs/student.pt",
+    "TEACHER": "/work/u8798807/FHE_FR_model/work_dirs/accuracy_recovery_submission_20260925/inputs/teacher.pt",
+    "DATASET_ROOT": "/work/u8798807/FHE_FR_model/ms1m-retinaface-t1",
+    "CANARY_ROOT": "/work/u8798807/FHE_FR_model/faces_webface_112x112",
+    "OUTPUT_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke",
+    "ACCURACY_MODE": "smoke",
+    "ACCURACY_PYTHON": "/home/u8798807/.conda/envs/face_recog/bin/python"
+  },
+  "smoke_job": "450892",
+  "smoke_command": [
+    "sbatch",
+    "--parsable",
+    "--time=00:30:00",
+    "--job-name=relation-smoke",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/source/controlled_degree2/relational_recovery.slurm"
+  ],
+  "submission_stderr": "",
+  "tests_passed": 61,
+  "primary_checkpoint": "epoch6.pt for every arm; fixed before training",
+  "ijbc_training": false,
+  "ijbc_selection": false,
+  "automatic_ijbc_evaluation": false,
+  "smoke_retry": {
+    "job_id": "450896",
+    "output_root": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke_retry",
+    "command": [
+      "sbatch",
+      "--parsable",
+      "--time=00:30:00",
+      "--exclude=25a-hgpn165",
+      "--job-name=relation-smoke-retry",
+      "--output=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke-retry-%A_%a.out",
+      "--error=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke-retry-%A_%a.err",
+      "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/source/controlled_degree2/relational_recovery.slurm"
+    ],
+    "reason": "Tasks 1 and 2 both failed before the first training forward at NCCL DDP initialization on 25a-hgpn165; task 0 on another node reached finite updates. Exclude that node for retry and production."
+  },
+  "smoke_serial": {
+    "job_id": "450899",
+    "output_root": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke_serial",
+    "command": [
+      "sbatch",
+      "--parsable",
+      "--array=0-2%1",
+      "--time=00:30:00",
+      "--job-name=relation-smoke-serial",
+      "--output=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke-serial-%A_%a.out",
+      "--error=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/smoke-serial-%A_%a.err",
+      "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/source/controlled_degree2/relational_recovery.slurm"
+    ],
+    "reason": "Repeated NCCL initialization failure in co-located tasks on a second node. Serial array with NCCL INFO to isolate startup behavior.",
+    "additional_environment": {
+      "NCCL_DEBUG": "INFO"
+    }
+  },
+  "smoke_passed_states": [
+    "450899_0|COMPLETED|0:0|00:01:04|25a-hgpn121",
+    "450899_1|COMPLETED|0:0|00:01:04|25a-hgpn121",
+    "450899_2|COMPLETED|0:0|00:01:11|25a-hgpn012"
+  ],
+  "smoke_results": {
+    "pointwise": {
+      "steps": 2,
+      "changed_tensors": 212,
+      "finite_checkpoint": true,
+      "frozen_polynomials_intervals_bn_verified": true,
+      "canaries": {
+        "lfw": 0.9974999999999999,
+        "cplfw": 0.9111666666666667
+      },
+      "step_logs": [
+        "step      1 loss=0.1223 emb=0.1025 relation=0.0000 hint=0.1972 pen=0.00668 oor=3.27e-05 tail=0 bound=0 adv=0@- deploy=0/0nf/0x grad=3.09 max/lam=0.89@layer4.2.prelu poly=25/25 341 img/s",
+        "step      2 loss=0.1205 emb=0.1073 relation=0.0000 hint=0.2029 pen=0.00989 oor=4.10e-05 tail=0 bound=0 adv=0@- deploy=0/0nf/0x grad=10.1 max/lam=1.16@layer4.2.prelu poly=25/25 609 img/s"
+      ]
+    },
+    "relation01": {
+      "steps": 2,
+      "changed_tensors": 212,
+      "finite_checkpoint": true,
+      "frozen_polynomials_intervals_bn_verified": true,
+      "canaries": {
+        "lfw": 0.9970000000000001,
+        "cplfw": 0.9115
+      },
+      "step_logs": [
+        "step      1 loss=0.1418 emb=0.1025 relation=0.1954 hint=0.1972 pen=0.00668 oor=3.27e-05 tail=0 bound=0 adv=0@- deploy=0/0nf/0x grad=3.68 max/lam=0.89@layer4.2.prelu poly=25/25 352 img/s",
+        "step      2 loss=0.1451 emb=0.1110 relation=0.2041 hint=0.2080 pen=0.0111 oor=4.38e-05 tail=0 bound=0 adv=0@- deploy=0/0nf/0x grad=14.5 max/lam=1.16@layer4.2.prelu poly=25/25 628 img/s"
+      ]
+    },
+    "relation1": {
+      "steps": 2,
+      "changed_tensors": 212,
+      "finite_checkpoint": true,
+      "frozen_polynomials_intervals_bn_verified": true,
+      "canaries": {
+        "lfw": 0.9969999999999999,
+        "cplfw": 0.9146666666666666
+      },
+      "step_logs": [
+        "step      1 loss=0.3177 emb=0.1025 relation=0.1954 hint=0.1972 pen=0.00668 oor=3.27e-05 tail=0 bound=0 adv=0@- deploy=0/0nf/0x grad=9.44 max/lam=0.89@layer4.2.prelu poly=25/25 301 img/s",
+        "step      2 loss=0.3655 emb=0.1238 relation=0.2265 hint=0.2285 pen=0.0327 oor=7.44e-05 tail=0 bound=0 adv=0@- deploy=0/0nf/0x grad=52.4 max/lam=1.16@layer4.2.prelu poly=25/25 543 img/s"
+      ]
+    }
+  },
+  "training_job": "450905",
+  "training_command": [
+    "sbatch",
+    "--parsable",
+    "--array=0-2%1",
+    "--exclude=25a-hgpn165,25a-hgpn167",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/train-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/train-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/source/controlled_degree2/relational_recovery.slurm"
+  ],
+  "training_environment": {
+    "ACCURACY_MODE": "train",
+    "OUTPUT_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/train",
+    "NCCL_DEBUG": "WARN"
+  },
+  "array": {
+    "0": "pointwise",
+    "1": "relation01",
+    "2": "relation1"
+  },
+  "epochs": 6,
+  "gpus_per_arm": 4,
+  "max_concurrent_arms": 1,
+  "monitoring": false
+}
