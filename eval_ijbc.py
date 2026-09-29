@@ -66,6 +66,8 @@ parser.add_argument(
         "'{\"arch_config\":\"nl13\"}'"
     ),
 )
+parser.add_argument('--similarity', choices=('cosine', 'dot', 'both'), default='cosine',
+                    help='template scoring: L2-normalized cosine, raw inner product, or paired comparison from one extraction')
 parser.add_argument('--job', default='insightface', type=str, help='job name')
 parser.add_argument('--target', default='IJBC', type=str, help='target, set to IJBC or IJBB')
 parser.add_argument(
@@ -499,7 +501,7 @@ def get_image_feature(img_path, files_list, model_path, epoch, gpu_id):
 # In[ ]:
 
 
-def image2template_feature(img_feats=None, templates=None, medias=None):
+def image2template_feature(img_feats=None, templates=None, medias=None, normalize=True):
     # ==========================================================
     # 1. face image feature l2 normalization. img_feats:[number_image x feats_dim]
     # 2. compute media feature.
@@ -534,7 +536,8 @@ def image2template_feature(img_feats=None, templates=None, medias=None):
                 count_template))
     # template_norm_feats = template_feats / np.sqrt(np.sum(template_feats ** 2, -1, keepdims=True))
     template_feats = replace_nonfinite('template_feats', template_feats)
-    template_norm_feats = sklearn.preprocessing.normalize(template_feats)
+    template_norm_feats = (sklearn.preprocessing.normalize(template_feats)
+                           if normalize else template_feats)
     # print(template_norm_feats.shape)
     return template_norm_feats, unique_templates
 
@@ -709,7 +712,7 @@ img_input_feats = replace_nonfinite('img_input_feats before template aggregation
                                     img_input_feats)
 
 template_norm_feats, unique_templates = image2template_feature(
-    img_input_feats, templates, medias)
+    img_input_feats, templates, medias, normalize=args.similarity == 'cosine')
 stop = timeit.default_timer()
 print('Time: %.2f s. ' % (stop - start))
 
@@ -720,34 +723,28 @@ print('Time: %.2f s. ' % (stop - start))
 # =============================================================
 # compute verification scores between template pairs.
 # =============================================================
-start = timeit.default_timer()
-score = verification(template_norm_feats, unique_templates, p1, p2)
-stop = timeit.default_timer()
-print('Time: %.2f s. ' % (stop - start))
-
-# In[ ]:
 save_path = os.path.join(result_dir, args.job)
-# save_path = result_dir + '/%s_result' % target
+os.makedirs(save_path, exist_ok=True)
+# In paired mode both methods use the exact same unnormalized templates.
+scoring_modes = ('cosine', 'dot') if args.similarity == 'both' else (args.similarity,)
+files = []
+for scoring_mode in scoring_modes:
+    start = timeit.default_timer()
+    scoring_feats = template_norm_feats
+    if args.similarity == 'both' and scoring_mode == 'cosine':
+        scoring_feats = sklearn.preprocessing.normalize(template_norm_feats)
+    score = verification(scoring_feats, unique_templates, p1, p2)
+    if not np.isfinite(score).all():
+        raise ValueError('Nonfinite {} pair scores'.format(scoring_mode))
+    print('{} scoring time: {:.2f} s.'.format(scoring_mode, timeit.default_timer() - start))
+    # Preserve the default cosine filename for existing consumers.
+    suffix = '' if args.similarity == 'cosine' else '_' + scoring_mode
+    score_save_file = os.path.join(save_path, target.lower() + suffix + '.npy')
+    np.save(score_save_file, score)
+    files.append(score_save_file)
 
-if not os.path.exists(save_path):
-    os.makedirs(save_path)
-
-score_save_file = os.path.join(save_path, "%s.npy" % target.lower())
-np.save(score_save_file, score)
-
-# # Step 5: Get ROC Curves and TPR@FPR Table
-
-# In[ ]:
-
-files = [score_save_file]
-methods = []
-scores = []
-for file in files:
-    methods.append(Path(file).stem)
-    scores.append(np.load(file))
-
-methods = np.array(methods)
-scores = dict(zip(methods, scores))
+methods = np.array([Path(file).stem for file in files])
+scores = {Path(file).stem: np.load(file, mmap_mode='r') for file in files}
 colormap = plt.get_cmap('Set2')
 colours = dict(zip(methods, [colormap(i) for i in range(methods.shape[0])]))
 x_labels = [10 ** -6, 10 ** -5, 10 ** -4, 10 ** -3, 10 ** -2, 10 ** -1]
@@ -800,3 +797,19 @@ with open(os.path.join(save_path, '%s_tar_at_far_raw.json' % target.lower()), 'w
     json.dump(raw_tpr_fpr_rows, stream, indent=2)
 print(tpr_fpr_table)
 print('TAR@FAR results saved to {}'.format(tpr_fpr_save_file))
+
+if args.similarity == 'both':
+    from eval.ijb_similarity import compare_tar_rows
+    comparison = compare_tar_rows(raw_tpr_fpr_rows[0], raw_tpr_fpr_rows[1])
+    comparison_path = os.path.join(save_path, target.lower() + '_similarity_comparison.json')
+    with open(comparison_path, 'w') as stream:
+        json.dump(dict(
+            checkpoint=os.path.abspath(model_path),
+            bts_failure_report=args.bts_failure_report,
+            ignore_bts_range=args.ignore_bts_range,
+            source_images=len(files_list), templates=len(unique_templates), pairs=len(label),
+            protocol='same flip sum, detector weighting, media means and template sums; only final template L2 normalization differs',
+            points=comparison,
+        ), stream, indent=2)
+    print('Cosine minus dot TAR (percentage points; empirical FAR <= requested FAR):')
+    print(json.dumps(comparison, indent=2))
