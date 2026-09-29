@@ -1,0 +1,108 @@
+[
+  {
+    "method": "ijbc_cosine-IJBC",
+    "points": {
+      "1e-06": {
+        "tar_percent": 83.80119650253106,
+        "actual_far": 1.0230877658397645e-06,
+        "at_or_below_requested_far": {
+          "tar_percent": 83.57109986194202,
+          "actual_far": 9.591447804747792e-07
+        }
+      },
+      "1e-05": {
+        "tar_percent": 92.268752876208,
+        "actual_far": 9.975105716937703e-06,
+        "at_or_below_requested_far": {
+          "tar_percent": 92.268752876208,
+          "actual_far": 9.975105716937703e-06
+        }
+      },
+      "0.0001": {
+        "tar_percent": 95.24466942782635,
+        "actual_far": 9.994288612547199e-05,
+        "at_or_below_requested_far": {
+          "tar_percent": 95.24466942782635,
+          "actual_far": 9.994288612547199e-05
+        }
+      },
+      "0.001": {
+        "tar_percent": 96.89625198138773,
+        "actual_far": 0.0010002601200644647,
+        "at_or_below_requested_far": {
+          "tar_percent": 96.89113872270798,
+          "actual_far": 0.0009920754179377467
+        }
+      },
+      "0.01": {
+        "tar_percent": 98.22058597944469,
+        "actual_far": 0.010008228183356766,
+        "at_or_below_requested_far": {
+          "tar_percent": 98.21547272076494,
+          "actual_far": 0.009804761603925382
+        }
+      },
+      "0.1": {
+        "tar_percent": 98.99268804008796,
+        "actual_far": 0.09997012583723748,
+        "at_or_below_requested_far": {
+          "tar_percent": 98.99268804008796,
+          "actual_far": 0.09997012583723748
+        }
+      }
+    }
+  },
+  {
+    "method": "ijbc_dot-IJBC",
+    "points": {
+      "1e-06": {
+        "tar_percent": 1.0124252185918086,
+        "actual_far": 1.0230877658397645e-06,
+        "at_or_below_requested_far": {
+          "tar_percent": 1.0021987012322953,
+          "actual_far": 8.95201795109794e-07
+        }
+      },
+      "1e-05": {
+        "tar_percent": 3.323618141841796,
+        "actual_far": 9.975105716937703e-06,
+        "at_or_below_requested_far": {
+          "tar_percent": 3.323618141841796,
+          "actual_far": 9.975105716937703e-06
+        }
+      },
+      "0.0001": {
+        "tar_percent": 11.566191133609449,
+        "actual_far": 9.994288612547199e-05,
+        "at_or_below_requested_far": {
+          "tar_percent": 11.566191133609449,
+          "actual_far": 9.994288612547199e-05
+        }
+      },
+      "0.001": {
+        "tar_percent": 33.81909290791021,
+        "actual_far": 0.0009999404051376397,
+        "at_or_below_requested_far": {
+          "tar_percent": 33.81909290791021,
+          "actual_far": 0.0009999404051376397
+        }
+      },
+      "0.01": {
+        "tar_percent": 67.32116377767551,
+        "actual_far": 0.010001705998849537,
+        "at_or_below_requested_far": {
+          "tar_percent": 67.31605051899575,
+          "actual_far": 0.009993841011649645
+        }
+      },
+      "0.1": {
+        "tar_percent": 93.36810349235569,
+        "actual_far": 0.09999320925495424,
+        "at_or_below_requested_far": {
+          "tar_percent": 93.36810349235569,
+          "actual_far": 0.09999320925495424
+        }
+      }
+    }
+  }
+]

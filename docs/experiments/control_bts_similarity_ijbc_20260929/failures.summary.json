@@ -1,0 +1,64 @@
+{
+  "source_images": 469375,
+  "augmented_rows": 938750,
+  "failed_source_images": 5,
+  "failed_augmented_rows": 6,
+  "range_failed_source_images": 5,
+  "nonfinite_source_images": 4,
+  "embedding_nonfinite_source_images": 4,
+  "range_failed_augmented_rows": 6,
+  "nonfinite_augmented_rows": 4,
+  "embedding_nonfinite_augmented_rows": 4,
+  "zeroed_augmented_rows": 10,
+  "boundaries": {
+    "layer1.2": {
+      "out_of_range_augmented_rows": 2,
+      "nonfinite_augmented_rows": 0,
+      "failed_source_images": 1,
+      "finite_row_min": -0.9854693412780762,
+      "finite_row_max": 1.0658032894134521
+    },
+    "layer2.3": {
+      "out_of_range_augmented_rows": 4,
+      "nonfinite_augmented_rows": 0,
+      "failed_source_images": 4,
+      "finite_row_min": -498.5670166015625,
+      "finite_row_max": 465.6380920410156
+    },
+    "layer3.3": {
+      "out_of_range_augmented_rows": 4,
+      "nonfinite_augmented_rows": 4,
+      "failed_source_images": 4,
+      "finite_row_min": -0.26274484395980835,
+      "finite_row_max": 0.23375597596168518
+    },
+    "layer3.7": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 4,
+      "failed_source_images": 4,
+      "finite_row_min": -0.6902333498001099,
+      "finite_row_max": 0.41852933168411255
+    },
+    "layer3.11": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 4,
+      "failed_source_images": 4,
+      "finite_row_min": -0.6976099610328674,
+      "finite_row_max": 0.8313554525375366
+    },
+    "layer4.1": {
+      "out_of_range_augmented_rows": 0,
+      "nonfinite_augmented_rows": 4,
+      "failed_source_images": 4,
+      "finite_row_min": -0.6113143563270569,
+      "finite_row_max": 0.9152990579605103
+    }
+  },
+  "interval": [
+    -1,
+    1
+  ],
+  "range_check_enabled": true,
+  "failure_policy": "any boundary outside [-1,1] or nonfinite boundary/embedding; either view fails => zero both views before flip fusion/template aggregation",
+  "failed_source_fraction": 1.0652463382157124e-05
+}

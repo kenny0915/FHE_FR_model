@@ -1,0 +1,21 @@
+{
+  "job_id": "454235",
+  "code_commit": "ce4bc9671337aa7e9e6fcf6af32a35fc46479aee",
+  "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts6/student_scaled.pt",
+  "checkpoint_sha256": "ec1eada0fc33a81f75cb9c3bec5fc56296c350948e2b57eecc94cceae2dba4fd",
+  "command": [
+    "sbatch",
+    "--parsable",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/control_bts_similarity_ijbc_20260929/eval-%j.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/control_bts_similarity_ijbc_20260929/eval-%j.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/control_bts_similarity_ijbc_20260929/source/controlled_degree2/control_bts_similarity_ijbc.slurm"
+  ],
+  "environment": {
+    "BTS_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_similarity_ijbc_20260929/source",
+    "CHECKPOINT": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts6/student_scaled.pt",
+    "IJBC_ROOT": "/work/u8798807/FHE_FR_model/ijb/IJBC",
+    "SIMILARITY_OUTPUT": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_similarity_ijbc_20260929/results"
+  },
+  "tests_passed": 19,
+  "failure_policy": "either view outside inclusive [-1,1] at BTS boundary or nonfinite => zero both source views"
+}

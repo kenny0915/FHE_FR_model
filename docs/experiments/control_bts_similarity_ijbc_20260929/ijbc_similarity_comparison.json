@@ -1,0 +1,53 @@
+{
+  "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_layouts_20260925/exports/bts6/student_scaled.pt",
+  "bts_failure_report": "/work/u8798807/FHE_FR_model/work_dirs/control_bts_similarity_ijbc_20260929/results/failures",
+  "ignore_bts_range": false,
+  "source_images": 469375,
+  "templates": 23124,
+  "pairs": 15658489,
+  "protocol": "same flip sum, detector weighting, media means and template sums; only final template L2 normalization differs",
+  "points": {
+    "1e-06": {
+      "cosine_tar_percent": 83.57109986194202,
+      "dot_tar_percent": 1.0021987012322953,
+      "drop_percentage_points": 82.56890116070971,
+      "cosine_actual_far": 9.591447804747792e-07,
+      "dot_actual_far": 8.95201795109794e-07
+    },
+    "1e-05": {
+      "cosine_tar_percent": 92.268752876208,
+      "dot_tar_percent": 3.323618141841796,
+      "drop_percentage_points": 88.9451347343662,
+      "cosine_actual_far": 9.975105716937703e-06,
+      "dot_actual_far": 9.975105716937703e-06
+    },
+    "0.0001": {
+      "cosine_tar_percent": 95.24466942782635,
+      "dot_tar_percent": 11.566191133609449,
+      "drop_percentage_points": 83.6784782942169,
+      "cosine_actual_far": 9.994288612547199e-05,
+      "dot_actual_far": 9.994288612547199e-05
+    },
+    "0.001": {
+      "cosine_tar_percent": 96.89113872270798,
+      "dot_tar_percent": 33.81909290791021,
+      "drop_percentage_points": 63.07204581479777,
+      "cosine_actual_far": 0.0009920754179377467,
+      "dot_actual_far": 0.0009999404051376397
+    },
+    "0.01": {
+      "cosine_tar_percent": 98.21547272076494,
+      "dot_tar_percent": 67.31605051899575,
+      "drop_percentage_points": 30.899422201769184,
+      "cosine_actual_far": 0.009804761603925382,
+      "dot_actual_far": 0.009993841011649645
+    },
+    "0.1": {
+      "cosine_tar_percent": 98.99268804008796,
+      "dot_tar_percent": 93.36810349235569,
+      "drop_percentage_points": 5.624584547732269,
+      "cosine_actual_far": 0.09997012583723748,
+      "dot_actual_far": 0.09999320925495424
+    }
+  }
+}
