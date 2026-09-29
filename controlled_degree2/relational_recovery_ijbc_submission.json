@@ -1,0 +1,67 @@
+{
+  "root": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929",
+  "checkpoints": {
+    "pointwise": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/train/pointwise/epoch6.pt",
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/inputs/pointwise.pt",
+      "sha256": "a72daa5ef9750d2f63a5d5a9f4ffcab718fc73e1bfb2a911589635b8c0adcf37",
+      "epoch": 6,
+      "optimizer_steps": 15174,
+      "relational_weight": 0.0,
+      "finite_parameters": true,
+      "quadratics": 25
+    },
+    "relation01": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/train/relation01/epoch6.pt",
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/inputs/relation01.pt",
+      "sha256": "8b1aa3be26c63105c8fa26b7c03dda750eb42faea61a02836f41a9b37a12dc24",
+      "epoch": 6,
+      "optimizer_steps": 15174,
+      "relational_weight": 0.1,
+      "finite_parameters": true,
+      "quadratics": 25
+    },
+    "relation1": {
+      "source": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_20260929/train/relation1/epoch6.pt",
+      "checkpoint": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/inputs/relation1.pt",
+      "sha256": "3278957ba5abc1edbe7b82abc20124f9315a8407657ea10485a298b4909d790f",
+      "epoch": 6,
+      "optimizer_steps": 15174,
+      "relational_weight": 1.0,
+      "finite_parameters": true,
+      "quadratics": 25
+    }
+  },
+  "training_job": "450905",
+  "ijbc_root": "/work/u8798807/FHE_FR_model/ijb/IJBC",
+  "checkpoint_selection": "Predeclared epoch6 for every arm; no IJB-C checkpoint selection",
+  "policy": "Nonfinite boundary/embedding in either view zeros both full view embeddings; keep all source images and pairs; no BTS range threshold",
+  "target": "strict TAR at FAR <= 1e-4 >= 96 percent",
+  "monitoring": false,
+  "job_id": "453978",
+  "code_commit": "b5e98c6ff2a353172b4ed1b0045bb539b836caed",
+  "environment": {
+    "ACCURACY_CODE_ROOT": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/source",
+    "ACCURACY_PYTHON": "/home/u8798807/.conda/envs/face_recog/bin/python",
+    "ACCURACY_EVAL_INPUTS": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/inputs",
+    "ACCURACY_EVAL_OUTPUT": "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/results",
+    "IJBC_ROOT": "/work/u8798807/FHE_FR_model/ijb/IJBC"
+  },
+  "command": [
+    "sbatch",
+    "--parsable",
+    "--exclude=25a-hgpn165,25a-hgpn167",
+    "--output=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/eval-%A_%a.out",
+    "--error=/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/eval-%A_%a.err",
+    "/work/u8798807/FHE_FR_model/work_dirs/relational_recovery_ijbc_20260929/source/controlled_degree2/relational_recovery_ijbc.slurm"
+  ],
+  "submission_stderr": "",
+  "array": {
+    "0": "pointwise",
+    "1": "relation01",
+    "2": "relation1"
+  },
+  "gpus_per_task": 1,
+  "batch_size": 256,
+  "image_workers": 8
+}
